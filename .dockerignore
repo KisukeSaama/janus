@@ -1,0 +1,10 @@
+.git
+.gitignore
+.env
+.env.*
+.secrets
+deploy/certs
+**/target
+**/node_modules
+frontend/dist
+*.log

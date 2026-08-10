@@ -1,0 +1,13 @@
+spring:
+  datasource:
+    password: ${postgres_password}
+  jpa.properties.hibernate.generate_statistics: false
+janus:
+  admin.password: ${admin_password}
+  openbao.token: ${openbao_token}
+server:
+  shutdown: graceful
+  servlet.session.cookie:
+    secure: true
+    http-only: true
+    same-site: strict

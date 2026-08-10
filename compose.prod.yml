@@ -1,0 +1,61 @@
+name: janus
+services:
+  reverse-proxy:
+    build:
+      context: .
+      dockerfile: deploy/nginx/Dockerfile
+    ports: ["80:80", "443:443"]
+    volumes: ["./deploy/certs:/etc/nginx/certs:ro"]
+    networks: [public, private]
+    depends_on: [backend]
+    restart: unless-stopped
+  backend:
+    build: .
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      JANUS_DATABASE_URL: jdbc:postgresql://postgres:5432/janus
+      JANUS_DATABASE_USERNAME: janus
+      OPENBAO_ADDR: http://openbao:8200
+      JANUS_CORS_ORIGINS: https://${JANUS_PUBLIC_HOST:?Set JANUS_PUBLIC_HOST}
+    secrets: [postgres_password, openbao_token, admin_password]
+    networks: [private, egress]
+    depends_on:
+      postgres: {condition: service_healthy}
+      openbao: {condition: service_healthy}
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: janus
+      POSTGRES_USER: janus
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes: ["postgres_prod:/var/lib/postgresql/data"]
+    networks: [private]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U janus -d janus"], interval: 10s, timeout: 5s, retries: 10}
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+  openbao:
+    image: openbao/openbao:2.3
+    command: server -config=/openbao/config/openbao.hcl
+    cap_add: ["IPC_LOCK"]
+    volumes: ["./deploy/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro", "openbao_prod:/openbao/data"]
+    networks: [private]
+    healthcheck: {test: ["CMD-SHELL", "bao status >/dev/null 2>&1 || [ $$? -eq 2 ]"], interval: 10s, timeout: 5s, retries: 30}
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+networks:
+  public:
+  private:
+    internal: true
+  egress:
+volumes:
+  postgres_prod:
+  openbao_prod:
+secrets:
+  postgres_password: {file: ./.secrets/postgres_password}
+  openbao_token: {file: ./.secrets/openbao_token}
+  admin_password: {file: ./.secrets/admin_password}

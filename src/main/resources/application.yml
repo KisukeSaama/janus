@@ -1,0 +1,29 @@
+spring:
+  application.name: janus
+  datasource:
+    url: ${JANUS_DATABASE_URL:jdbc:postgresql://localhost:5432/janus}
+    username: ${JANUS_DATABASE_USERNAME:janus}
+    password: ${JANUS_DATABASE_PASSWORD:janus}
+  jpa:
+    open-in-view: false
+    hibernate.ddl-auto: validate
+    properties.hibernate.jdbc.time_zone: UTC
+  flyway.enabled: true
+  config.import: optional:configtree:/run/secrets/
+server:
+  forward-headers-strategy: framework
+  error.include-message: never
+management.endpoints.web.exposure.include: health,info
+management.endpoint.health.probes.enabled: true
+janus:
+  admin:
+    username: ${JANUS_ADMIN_USERNAME:admin}
+    password: ${JANUS_ADMIN_PASSWORD:change-me-in-production}
+  cors-origins: ${JANUS_CORS_ORIGINS:http://localhost:5173}
+  openbao:
+    address: ${OPENBAO_ADDR:http://localhost:8200}
+    token: ${OPENBAO_TOKEN:${openbao_token:}}
+    kv-mount: ${OPENBAO_KV_MOUNT:secret}
+  gateway:
+    allow-private-destinations: ${JANUS_ALLOW_PRIVATE_DESTINATIONS:false}
+    max-response-bytes: ${JANUS_MAX_RESPONSE_BYTES:10485760}
