@@ -30,11 +30,6 @@ build:
     - docker build --pull -t "$WEB_IMAGE" ./frontend
     - docker push "$BACKEND_IMAGE"
     - docker push "$WEB_IMAGE"
-    - printf 'BACKEND_IMAGE=%s\nWEB_IMAGE=%s\nIMAGE_TAG=%s\n' "$BACKEND_IMAGE" "$WEB_IMAGE" "$IMAGE_TAG" > build.env
-  artifacts:
-    reports:
-      dotenv: build.env
-    expire_in: 1 week
   rules:
     - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
@@ -46,6 +41,9 @@ build:
     - test -n "$JANUS_ADMIN_PASSWORD"
     - test -n "$JANUS_OPENBAO_TOKEN"
     - test -n "$DEPLOY_ENV"
+    - IMAGE_TAG="${CI_COMMIT_TAG:-dev-${CI_COMMIT_SHORT_SHA}}"
+    - BACKEND_IMAGE="${CI_REGISTRY_IMAGE}/backend:${IMAGE_TAG}"
+    - WEB_IMAGE="${CI_REGISTRY_IMAGE}/web:${IMAGE_TAG}"
     - case "$DEPLOY_DIR" in /home/kisuke/*) case "$DEPLOY_DIR" in *..*) exit 1;; esac ;; *) echo "DEPLOY_DIR must stay under /home/kisuke/" >&2; exit 1 ;; esac
     - case "$DATA_DIR" in /home/kisuke/*) case "$DATA_DIR" in *..*) exit 1;; esac ;; *) echo "DATA_DIR must stay under /home/kisuke/" >&2; exit 1 ;; esac
     - TARGET_DIR="${DEPLOY_DIR}/${DEPLOY_ENV}"
@@ -72,7 +70,7 @@ deploy_dev:
   stage: deploy_dev
   needs:
     - job: build
-      artifacts: true
+      artifacts: false
   variables:
     DEPLOY_ENV: dev
     JANUS_PUBLIC_HOST: janus-d.kisukesaama.com
@@ -111,7 +109,7 @@ deploy_prod:
   stage: deploy_prod
   needs:
     - job: build
-      artifacts: true
+      artifacts: false
   variables:
     DEPLOY_ENV: prod
     JANUS_PUBLIC_HOST: janus.kisukesaama.com
