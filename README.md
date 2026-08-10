@@ -88,21 +88,24 @@ Credential strategies:
 
 Route patterns use Spring's Ant syntax, such as `GET /v1/customers/*` or `POST /v1/jobs/**`. Avoid `/**` unless full provider access is intentional.
 
-## Production deployment
+## CI/CD deployment
 
-Production Compose publishes only Nginx on ports 80/443. PostgreSQL and OpenBao live on an internal Docker network with persistent named volumes. The backend additionally joins an egress-only bridge so it can call public providers without publishing a port.
+GitLab builds immutable backend and web images in its registry. A push to `develop` automatically deploys DEV; a `v*` tag automatically deploys PROD. Traefik is the only public reverse proxy and terminates HTTPS.
 
-1. Create untracked secret files. Do not add a newline unless it is part of the value.
+- DEV: `https://janus-d.kisukesaama.com`
+- PROD: `https://janus.kisukesaama.com`
+- Manual DEV shutdown: `stop_dev`
 
-   ```text
-   .secrets/postgres_password
-   .secrets/admin_password
-   .secrets/openbao_token
-   ```
+Configure these GitLab CI/CD variables (names only; never commit their values):
 
-2. Place a certificate and private key at `deploy/certs/tls.crt` and `deploy/certs/tls.key`. This directory is excluded from both Git and Docker build contexts.
-3. Set `JANUS_PUBLIC_HOST` in the deployment environment.
-4. Start OpenBao and PostgreSQL first, initialize and unseal OpenBao, enable a KV v2 mount named `secret`, and create a narrowly scoped token for Janus.
+- `JANUS_POSTGRES_PASSWORD`
+- `JANUS_ADMIN_PASSWORD`
+- `JANUS_OPENBAO_TOKEN`
+- `JANUS_ADMIN_USERNAME` (optional, defaults to `admin`)
+
+Use environment-scoped values for `dev` and `production`, protect the production values, and protect the `v*` tag pattern so those values are available to release pipelines. The runner must have the `devops` tag, Docker socket access, and an existing external `traefik` network. Deployment files live in `/home/kisuke/deploy-janus/{dev,prod}` and persistent data in `/home/kisuke/janus/{dev,prod}`.
+
+DEV uses an ephemeral OpenBao dev server. PROD keeps OpenBao file storage persistent and still requires its normal one-time initialization and an unseal operation after a host or container restart. Enable a KV v2 mount named `secret` and create a narrowly scoped Janus token:
 
    ```hcl
    path "secret/data/janus/*" {
@@ -113,13 +116,14 @@ Production Compose publishes only Nginx on ports 80/443. PostgreSQL and OpenBao 
    }
    ```
 
-5. Store that token in `.secrets/openbao_token`, then start the full stack.
+Store that token as the environment-scoped `JANUS_OPENBAO_TOKEN` variable and retry `deploy_prod`. OpenBao's file storage is deliberately not auto-unsealed by this repository. Do not place unseal keys in Compose, GitLab variables, or source control; use a supported seal mechanism for unattended recovery.
+
+Create a production release with:
 
 ```bash
-docker compose -f compose.prod.yml up -d --build
+git tag v1.2.3
+git push origin v1.2.3
 ```
-
-OpenBao's file storage is deliberately not auto-unsealed by this repository. For a serious deployment, integrate your platform's supported seal mechanism and token rotation process; do not place unseal keys in Compose or source control. Terminate TLS at the included Nginx proxy or replace it with your existing ingress while keeping the internal services unpublished.
 
 ## Verification
 

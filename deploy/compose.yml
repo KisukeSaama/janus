@@ -1,0 +1,138 @@
+services:
+  web:
+    image: ${WEB_IMAGE:?WEB_IMAGE is required}
+    networks:
+      - application
+      - traefik
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_NETWORK}
+      - traefik.http.routers.${APP_SUBDOMAIN}-${DEPLOY_ENV}.rule=Host(`${JANUS_PUBLIC_HOST}`)
+      - traefik.http.routers.${APP_SUBDOMAIN}-${DEPLOY_ENV}.entrypoints=websecure
+      - traefik.http.routers.${APP_SUBDOMAIN}-${DEPLOY_ENV}.tls=true
+      - traefik.http.routers.${APP_SUBDOMAIN}-${DEPLOY_ENV}.tls.certresolver=letsencrypt
+      - traefik.http.services.${APP_SUBDOMAIN}-${DEPLOY_ENV}.loadbalancer.server.port=8080
+
+  backend:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      JANUS_DATABASE_URL: jdbc:postgresql://postgres:5432/janus
+      JANUS_DATABASE_USERNAME: janus
+      OPENBAO_ADDR: http://openbao:8200
+      JANUS_ADMIN_USERNAME: ${JANUS_ADMIN_USERNAME:-admin}
+      JANUS_CORS_ORIGINS: https://${JANUS_PUBLIC_HOST}
+    secrets:
+      - postgres_password
+      - openbao_token
+      - admin_password
+    networks:
+      - application
+      - egress
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: janus
+      POSTGRES_USER: janus
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - ${DATA_DIR}/${DEPLOY_ENV}/postgres:/var/lib/postgresql/data
+    networks:
+      - application
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U janus -d janus"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  openbao-dev:
+    image: openbao/openbao:2.3
+    profiles: [dev]
+    entrypoint: ["/usr/bin/dumb-init", "--", "/bin/sh", "-ec"]
+    command:
+      - export BAO_DEV_ROOT_TOKEN_ID="$$(cat /run/secrets/openbao_token)"; exec su-exec openbao bao server -dev -dev-no-store-token -dev-listen-address=0.0.0.0:8200
+    environment:
+      BAO_ADDR: http://127.0.0.1:8200
+    cap_add:
+      - IPC_LOCK
+    secrets:
+      - openbao_token
+    networks:
+      application:
+        aliases:
+          - openbao
+    healthcheck:
+      test: ["CMD-SHELL", "bao status >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  openbao-prod:
+    image: openbao/openbao:2.3
+    profiles: [prod]
+    command: server
+    environment:
+      BAO_ADDR: http://127.0.0.1:8200
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - ./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
+      - ${DATA_DIR}/${DEPLOY_ENV}/openbao:/openbao/file
+    networks:
+      application:
+        aliases:
+          - openbao
+    healthcheck:
+      test: ["CMD-SHELL", "bao status >/dev/null 2>&1 || [ $$? -eq 2 ]"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  application:
+    internal: true
+  egress: {}
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK}
+
+secrets:
+  postgres_password:
+    file: ./.secrets/postgres_password
+  openbao_token:
+    file: ./.secrets/openbao_token
+  admin_password:
+    file: ./.secrets/admin_password
