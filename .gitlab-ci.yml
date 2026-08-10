@@ -57,8 +57,27 @@ build:
     - printf '%s' "$JANUS_POSTGRES_PASSWORD" > "$TARGET_DIR/.secrets/postgres_password"
     - printf '%s' "$JANUS_ADMIN_PASSWORD" > "$TARGET_DIR/.secrets/admin_password"
     - printf '%s' "$JANUS_OPENBAO_TOKEN" > "$TARGET_DIR/.secrets/openbao_token"
-    - chmod 600 "$TARGET_DIR/.secrets/"*
+    - chmod 644 "$TARGET_DIR/.secrets/"*
     - printf 'DEPLOY_ENV=%s\nBACKEND_IMAGE=%s\nWEB_IMAGE=%s\nJANUS_PUBLIC_HOST=%s\nJANUS_ADMIN_USERNAME=%s\n' "$DEPLOY_ENV" "$BACKEND_IMAGE" "$WEB_IMAGE" "$JANUS_PUBLIC_HOST" "${JANUS_ADMIN_USERNAME:-admin}" > "$TARGET_DIR/app.env"
+    - TARGET_REL="${TARGET_DIR#/home/kisuke/}"
+    - DATA_REL="${DATA_DIR#/home/kisuke/}"
+    - |
+      tar -C "$TARGET_DIR" -cf - . | docker run --rm -i \
+        -e TARGET_REL="$TARGET_REL" \
+        -e DATA_REL="$DATA_REL" \
+        -e DEPLOY_ENV="$DEPLOY_ENV" \
+        -v /home/kisuke:/host-home \
+        alpine:3.21 sh -ec '
+          case "$TARGET_REL" in ""|/*|*..*) exit 1 ;; esac
+          case "$DATA_REL" in ""|/*|*..*) exit 1 ;; esac
+          host_target="/host-home/$TARGET_REL"
+          host_data="/host-home/$DATA_REL/$DEPLOY_ENV"
+          mkdir -p "$host_target" "$host_data/postgres" "$host_data/openbao"
+          tar -C "$host_target" -xf -
+          chmod 750 "$host_target" "$host_target/.secrets" "$host_target/openbao" "$host_data" "$host_data/postgres" "$host_data/openbao"
+          chmod 640 "$host_target/compose.yml" "$host_target/paths.env" "$host_target/app.env"
+          chmod 644 "$host_target/openbao/openbao.hcl" "$host_target/.secrets/"*
+        '
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   script:
     - cd "${DEPLOY_DIR}/${DEPLOY_ENV}"
@@ -83,17 +102,12 @@ deploy_dev:
     - if: '$CI_COMMIT_BRANCH == "develop"'
 
 stop_dev:
+  extends: .deploy
   stage: deploy_dev
   needs: []
   variables:
     DEPLOY_ENV: dev
-  before_script:
-    - set -a; . deploy/paths.env; set +a
-    - case "$DEPLOY_DIR" in /home/kisuke/*) ;; *) echo "DEPLOY_DIR must stay under /home/kisuke/" >&2; exit 1 ;; esac
-    - TARGET_DIR="${DEPLOY_DIR}/${DEPLOY_ENV}"
-    - test -f "$TARGET_DIR/compose.yml"
-    - test -f "$TARGET_DIR/paths.env"
-    - test -f "$TARGET_DIR/app.env"
+    JANUS_PUBLIC_HOST: janus-d.kisukesaama.com
   script:
     - cd "${DEPLOY_DIR}/${DEPLOY_ENV}"
     - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "$DEPLOY_ENV" --env-file paths.env --env-file app.env -f compose.yml down
