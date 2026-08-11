@@ -4,8 +4,7 @@ import { Menu, RefreshCw } from 'lucide-react';
 
 import { useApplications, useCredentials, useGrants, useSignOut, type Identity } from '../api';
 import { SkeletonRows, Wordmark } from '../components';
-import { ConnectFlow, type NewConnection } from '../features/connections/ConnectFlow';
-import { ConnectionReady } from '../features/connections/ReadyScreen';
+import { ConnectFlow } from '../features/connections/ConnectFlow';
 import { NotificationsMenu } from '../features/notifications/NotificationsMenu';
 import { useMediaQuery, WIDE } from '../hooks/useMediaQuery';
 import { useI18n } from '../i18n';
@@ -53,7 +52,6 @@ export function Console({ identity }: { identity: Identity }) {
 
   const [menu, setMenu] = useState(false);
   const [connecting, setConnecting] = useState(false);
-  const [created, setCreated] = useState<NewConnection | null>(null);
 
   // Counts for the rail. These are the same queries the pages read, so the rail costs no request of
   // its own and stays in step with whatever is on screen.
@@ -170,22 +168,12 @@ export function Console({ identity }: { identity: Identity }) {
           <ConnectFlow
             username={identity.username}
             onClose={() => setConnecting(false)}
-            onDone={(connection) => {
+            onDone={() => {
               setConnecting(false);
-              setCreated(connection);
+              navigate({ page: 'credentials' });
             }}
           />
         </Suspense>
-      )}
-      {created && (
-        <ConnectionReady
-          connection={created}
-          onDismiss={() => {
-            const id = created.connectionId;
-            setCreated(null);
-            navigate({ page: 'connections', id });
-          }}
-        />
       )}
     </div>
   );

@@ -233,15 +233,15 @@ export function CredentialsPage() {
               placeholder="payments-live"
               defaultValue={editing?.name}
             />
-            <SelectField
-              label={t('credentials.colProvider')}
-              name="providerId"
-              defaultValue={editing?.providerId}
-              disabled={!!editing}
-              options={destinations.map((p) => ({ value: p.id, label: p.name }))}
-            />
-            {/* A disabled select submits nothing, so the value still has to reach the request. */}
-            {editing && <input type="hidden" name="providerId" value={editing.providerId} />}
+            {editing ? (
+              <input type="hidden" name="providerId" value={editing.providerId} />
+            ) : (
+              <SelectField
+                label={t('credentials.colProvider')}
+                name="providerId"
+                options={destinations.map((p) => ({ value: p.id, label: p.name }))}
+              />
+            )}
             <SelectField
               label={t('credentials.fieldStrategy')}
               name="authType"

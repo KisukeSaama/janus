@@ -10,7 +10,6 @@ import io.janus.accounts.AccessScope;
 import io.janus.accounts.AccountRepository;
 import io.janus.audit.AuditAction;
 import io.janus.audit.AuditService;
-import io.janus.grants.GrantRepository;
 import io.janus.oauth.AccessTokenStore;
 import io.janus.oauth.RefreshTokenRepository;
 import io.janus.security.ApiKeyCache;
@@ -31,7 +30,6 @@ public class ApplicationService {
     private final ApiKeyCache keyCache;
     private final AccessTokenStore accessTokens;
     private final RefreshTokenRepository refreshTokens;
-    private final GrantRepository grants;
     private final AccountRepository accounts;
     private final AccessScope scope;
     private final AuditService audit;
@@ -42,7 +40,6 @@ public class ApplicationService {
             ApiKeyCache keyCache,
             AccessTokenStore accessTokens,
             RefreshTokenRepository refreshTokens,
-            GrantRepository grants,
             AccountRepository accounts,
             AccessScope scope,
             AuditService audit) {
@@ -51,7 +48,6 @@ public class ApplicationService {
         this.keyCache = keyCache;
         this.accessTokens = accessTokens;
         this.refreshTokens = refreshTokens;
-        this.grants = grants;
         this.accounts = accounts;
         this.scope = scope;
         this.audit = audit;
@@ -108,17 +104,6 @@ public class ApplicationService {
         repository.delete(require(id));
         forget(id);
         audit.recordAdmin(AuditAction.APPLICATION_DELETED, null, id.toString());
-    }
-
-    /** Removes a caller made orphan by deleting its last API, while preserving shared callers. */
-    @Transactional
-    public void deleteIfUnconnected(UUID id) {
-        if (grants.existsByApplicationId(id)) return;
-        repository.findOwnedBy(id, scope.ownerFilter()).ifPresent(application -> {
-            repository.delete(application);
-            forget(id);
-            audit.recordAdmin(AuditAction.APPLICATION_DELETED, null, id.toString());
-        });
     }
 
     /**

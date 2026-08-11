@@ -159,13 +159,18 @@
     background: var(--c-canvas);
     /* The platform scrollbar is drawn light by default and punches a hole in a dark console. */
     scrollbar-color: var(--c-line-strong) transparent;
-    /*
-     * The gutter is reserved whether or not the page scrolls. Without it, moving from a page that
-     * overflows to one that does not takes the scrollbar away, widens the viewport by its width, and
-     * slides every centred thing on the page sideways. That shift is read as the interface being
-     * loose, and it is the one layout bug no component can fix on its own.
-     */
-    scrollbar-gutter: stable;
+  }
+
+  /*
+   * On the wide shell, reserve the gutter so centred content does not shift between destinations.
+   * Below the rail breakpoint that reservation leaves an empty native strip beside the full-width
+   * top bar on short pages. Compact layouts therefore use the whole viewport and let the platform
+   * scrollbar occupy space only when there is something to scroll.
+   */
+  @media (min-width: 60rem) {
+    html {
+      scrollbar-gutter: stable;
+    }
   }
 
   body {

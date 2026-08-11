@@ -45,8 +45,8 @@ const GROUPS: { label: MessageKey; items: Item[] }[] = [
   {
     label: 'nav.registry',
     items: [
-      { id: 'applications', label: 'applications.title', icon: Boxes },
       { id: 'credentials', label: 'credentials.title', icon: KeyRound },
+      { id: 'applications', label: 'applications.title', icon: Boxes },
     ],
   },
   {

@@ -16,8 +16,6 @@ import io.janus.accounts.AccessScope;
 import io.janus.accounts.Account;
 import io.janus.accounts.AccountRepository;
 import io.janus.accounts.TestAccount;
-import io.janus.applications.Application;
-import io.janus.applications.ApplicationService;
 import io.janus.audit.AuditAction;
 import io.janus.audit.AuditService;
 import io.janus.credentials.CredentialRepository;
@@ -37,7 +35,6 @@ class ProviderAdminControllerTest {
     private final CredentialRepository credentials = Mockito.mock(CredentialRepository.class);
     private final GrantRepository grants = Mockito.mock(GrantRepository.class);
     private final OpenBaoClient openBao = Mockito.mock(OpenBaoClient.class);
-    private final ApplicationService applications = Mockito.mock(ApplicationService.class);
     private final TrafficPolicyRegistry traffic = Mockito.mock(TrafficPolicyRegistry.class);
     private final AccountRepository accounts = Mockito.mock(AccountRepository.class);
     private final AccessScope scope = Mockito.mock(AccessScope.class);
@@ -60,7 +57,7 @@ class ProviderAdminControllerTest {
 
     private MockMvc mvcValidatingWith(DestinationValidator destinations) {
         var service = new ProviderService(
-                repository, credentials, grants, openBao, applications, destinations, traffic, accounts, scope, audit);
+                repository, credentials, grants, openBao, destinations, traffic, accounts, scope, audit);
         return MockMvcBuilders.standaloneSetup(new ProviderAdminController(service))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
@@ -214,11 +211,8 @@ class ProviderAdminControllerTest {
     void removesConnectionsAndCredentialMetadataWithTheDestination() throws Exception {
         var provider = existing();
         var grant = Mockito.mock(io.janus.grants.Grant.class);
-        var application = Mockito.mock(Application.class);
         var credential = Mockito.mock(io.janus.credentials.Credential.class);
         when(grant.getId()).thenReturn(UUID.randomUUID());
-        when(grant.getApplication()).thenReturn(application);
-        when(application.getId()).thenReturn(UUID.randomUUID());
         when(credential.getId()).thenReturn(UUID.randomUUID());
         when(credential.getAuthType()).thenReturn(io.janus.credentials.AuthType.NONE);
         when(grants.findAllByProviderId(provider.getId())).thenReturn(List.of(grant));
@@ -227,7 +221,6 @@ class ProviderAdminControllerTest {
         mvc.perform(delete("/api/admin/providers/" + provider.getId())).andExpect(status().isOk());
 
         verify(grants).deleteAllInBatch(List.of(grant));
-        verify(applications).deleteIfUnconnected(application.getId());
         verify(credentials).deleteAllInBatch(List.of(credential));
         verify(repository).delete(provider);
     }

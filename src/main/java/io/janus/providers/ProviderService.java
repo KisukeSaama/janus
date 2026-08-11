@@ -10,7 +10,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import io.janus.accounts.AccessScope;
 import io.janus.accounts.AccountRepository;
-import io.janus.applications.ApplicationService;
 import io.janus.audit.AuditAction;
 import io.janus.audit.AuditService;
 import io.janus.credentials.CredentialRepository;
@@ -32,7 +31,6 @@ public class ProviderService {
     private final CredentialRepository credentials;
     private final GrantRepository grants;
     private final OpenBaoClient openBao;
-    private final ApplicationService applications;
     private final DestinationValidator destinations;
     private final TrafficPolicyRegistry traffic;
     private final AccountRepository accounts;
@@ -44,7 +42,6 @@ public class ProviderService {
             CredentialRepository credentials,
             GrantRepository grants,
             OpenBaoClient openBao,
-            ApplicationService applications,
             DestinationValidator destinations,
             TrafficPolicyRegistry traffic,
             AccountRepository accounts,
@@ -54,7 +51,6 @@ public class ProviderService {
         this.credentials = credentials;
         this.grants = grants;
         this.openBao = openBao;
-        this.applications = applications;
         this.destinations = destinations;
         this.traffic = traffic;
         this.accounts = accounts;
@@ -108,13 +104,8 @@ public class ProviderService {
         // credential and any number of grants. Remove that aggregate in dependency order so a
         // failed delete cannot leave the slug occupied by an invisible provider.
         var connectedGrants = grants.findAllByProviderId(id);
-        var connectedApplications = connectedGrants.stream()
-                .map(grant -> grant.getApplication().getId())
-                .distinct()
-                .toList();
         for (var grant : connectedGrants) traffic.forgetGrant(grant.getId());
         grants.deleteAllInBatch(connectedGrants);
-        for (UUID applicationId : connectedApplications) applications.deleteIfUnconnected(applicationId);
 
         var heldCredentials = credentials.findAllByProviderId(id);
         var storedPaths = heldCredentials.stream()

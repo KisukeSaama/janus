@@ -122,9 +122,9 @@ export const fr: Translated<Dictionary> = {
   },
   /* ── La mise en place d’une connexion ────────────────────────────────── */
   connect: {
-    action: 'Connecter une API',
-    title: 'Connecter une API',
-    lead: 'Deux étapes. Vous repartez avec une clé et une requête qui fonctionne.',
+    action: 'Enregistrer une API',
+    title: 'Enregistrer une API',
+    lead: 'Deux étapes. Les applications pourront ensuite s’y abonner.',
     stepOf: 'Étape {step} sur {total}',
     abandon: 'Quitter',
 
@@ -184,7 +184,7 @@ export const fr: Translated<Dictionary> = {
     reviewAuth: 'Accès',
     reviewCaller: 'Appelant',
     reviewReach: 'Atteint',
-    submit: 'Créer la connexion',
+    submit: 'Enregistrer l’API',
     creating: 'Création',
     partial: 'Arrêt à « {step} », tout a été annulé. {reason}',
     stepApi: 'l’API',
@@ -322,8 +322,11 @@ export const fr: Translated<Dictionary> = {
     fieldOrigins: 'Origines navigateur',
     originsHint:
       'Une par ligne. Laissez vide pour accepter toute origine, ce qui est le cas courant : c’est le jeton qui autorise un appel.',
+    fieldApis: 'APIs abonnées',
+    fieldApisHint: 'L’application peut appeler tous les chemins exposés par les APIs sélectionnées.',
+    fieldApisEmpty: 'Enregistrez d’abord une API, puis revenez ici pour y abonner cette application.',
     submit: 'Enregistrer et émettre une clé',
-    deleteConsequence: 'Ses connexions cessent immédiatement.',
+    deleteConsequence: 'Ses abonnements aux APIs sont retirés. Les APIs restent enregistrées.',
     editTitle: 'Modifier le service',
     editIntro: 'Décocher Actif fait refuser ses appels sans supprimer l’enregistrement.',
     editLabel: 'Modifier {name}',
@@ -424,9 +427,9 @@ export const fr: Translated<Dictionary> = {
 
     submit: 'Déposer dans OpenBao',
     submitOpen: 'Enregistrer',
-    deleteConsequence: 'Ses connexions cessent, la valeur stockée est détruite et les applications sans autre API sont supprimées.',
+    deleteConsequence: 'Ses abonnements cessent et la valeur stockée est détruite. Les applications restent enregistrées.',
     editTitle: 'Modifier le secret',
-    editIntro: 'L’API et l’environnement sont figés. Vide conserve la valeur actuelle.',
+    editIntro: 'Une valeur vide conserve le secret actuellement stocké.',
     editLabel: 'Modifier {name}',
     replacementSecret: 'Nouvelle valeur',
     replacementPlaceholder: 'Laisser vide pour conserver la valeur actuelle',
