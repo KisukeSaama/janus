@@ -54,8 +54,8 @@ Every item below was fixed in this milestone. Severity is stated in terms of thi
 - **Nothing limited credential guessing** on either the console or the gateway. Both are now
   throttled per client, and every rejection is audited.
 - **A placeholder administrator password was accepted in production.** A production profile now
-  refuses to start on a known placeholder, a value under 16 characters, or a password equal to the
-  username.
+  refuses to start on a known placeholder, a value under 8 characters, one that does not span upper
+  case, lower case, digits and special characters, or a password equal to the username.
 
 ### High
 

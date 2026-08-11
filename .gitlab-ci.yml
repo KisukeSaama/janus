@@ -86,6 +86,21 @@ variables:
         : "${JANUS_ADMIN_PASSWORD:?Set JANUS_ADMIN_PASSWORD for ${CI_ENVIRONMENT_NAME:-this environment}}"
         : "${JANUS_OPENBAO_TOKEN:?Set JANUS_OPENBAO_TOKEN for ${CI_ENVIRONMENT_NAME:-this environment}}"
 
+        # Deployed instances run the production profile, whose PasswordPolicy refuses a weak
+        # bootstrap password. Restating the shape here is duplication, and worth it: caught at
+        # startup instead, it is a container restarting behind a health check that can only say
+        # "unhealthy", with the reason buried in a log the runner never reads.
+        needs=""
+        [ "${#JANUS_ADMIN_PASSWORD}" -ge 8 ] || needs="${needs}, 8 characters"
+        case "$JANUS_ADMIN_PASSWORD" in *[a-z]*) ;; *) needs="${needs}, a lower-case letter" ;; esac
+        case "$JANUS_ADMIN_PASSWORD" in *[A-Z]*) ;; *) needs="${needs}, an upper-case letter" ;; esac
+        case "$JANUS_ADMIN_PASSWORD" in *[0-9]*) ;; *) needs="${needs}, a digit" ;; esac
+        case "$JANUS_ADMIN_PASSWORD" in *[!a-zA-Z0-9]*) ;; *) needs="${needs}, a special character" ;; esac
+        if [ -n "$needs" ]; then
+          echo "JANUS_ADMIN_PASSWORD for ${CI_ENVIRONMENT_NAME:-this environment} still needs:${needs#,}" >&2
+          exit 1
+        fi
+
         mkdir -p "${target}/.secrets" "${target}/openbao"
         cp deploy/compose.yml "${target}/compose.yml"
         cp deploy/paths.env "${target}/paths.env"
@@ -139,6 +154,24 @@ variables:
       write_runtime_files "${TARGET_DIR}"
       stage_on_host "${TARGET_DIR}"
     - echo "${CI_REGISTRY_PASSWORD:-${CI_JOB_TOKEN}}" | docker login --username "${CI_REGISTRY_USER:-gitlab-ci-token}" --password-stdin "${CI_REGISTRY}"
+    - |
+      compose() {
+        docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" \
+          --env-file paths.env --env-file app.env -f compose.yml "$@"
+      }
+
+      # A rollout that fails on a health condition says only "dependency failed to
+      # start": why it failed is in the container's own log, on a host the runner
+      # cannot open a shell on. Print it here, or every failure costs a trip to the
+      # server before anyone even knows which service refused to come up.
+      deploy() {
+        compose pull
+        compose up -d --remove-orphans && return 0
+        echo "Deployment failed. Container state and recent logs follow." >&2
+        compose ps -a >&2 || true
+        compose logs --no-color --tail 200 >&2 || true
+        return 1
+      }
 
 # ---- test -----------------------------------------------------------------
 test_backend:
@@ -225,13 +258,7 @@ deploy_dev:
       when: manual
   script:
     - cd "${TARGET_DIR}"
-    - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml pull
-    - |
-      if ! docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml up -d --remove-orphans; then
-        docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml ps -a || true
-        docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml logs --no-color --tail 200 backend postgres "openbao-${DEPLOY_ENV}" || true
-        exit 1
-      fi
+    - deploy
 
 stop_dev:
   stage: deploy
@@ -245,7 +272,7 @@ stop_dev:
       when: manual
   script:
     - cd "${TARGET_DIR}"
-    - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml down
+    - compose down
 
 # ---- deploy PROD (automatic from v* tags) ---------------------------------
 deploy_prod:
@@ -261,13 +288,7 @@ deploy_prod:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
   script:
     - cd "${TARGET_DIR}"
-    - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml pull
-    - |
-      if ! docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml up -d --remove-orphans; then
-        docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml ps -a || true
-        docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml logs --no-color --tail 200 backend postgres "openbao-${DEPLOY_ENV}" || true
-        exit 1
-      fi
+    - deploy
 
 stop_prod:
   stage: deploy
@@ -281,4 +302,4 @@ stop_prod:
       when: manual
   script:
     - cd "${TARGET_DIR}"
-    - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml down
+    - compose down

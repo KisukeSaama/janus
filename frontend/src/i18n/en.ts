@@ -643,7 +643,7 @@ export const en = {
     fieldPassword: 'Password',
     replacementPassword: 'New password',
     replacementPlaceholder: 'Leave blank to keep the current one',
-    passwordHint: 'At least 16 characters. Stored as a one-way hash.',
+    passwordHint: 'At least 8 characters, with upper case, lower case, a digit and a special character. Stored as a one-way hash.',
     activeLabel: 'Active',
     activeHint: 'A disabled account cannot sign in. Its records keep working.',
     submit: 'Create the account',

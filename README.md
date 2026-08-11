@@ -80,7 +80,7 @@ Everything below has a working default for development; the ones without a safe 
 | Variable | Default | Purpose |
 |---|---|---|
 | `JANUS_DATABASE_URL` / `_USERNAME` / `_PASSWORD` | local PostgreSQL | datastore connection |
-| `JANUS_ADMIN_USERNAME` / `JANUS_ADMIN_PASSWORD` | `admin` / placeholder | bootstrap console credentials. **A production profile refuses to start on a placeholder, a value under 16 characters, or a password equal to the username.** Read once, on the first start; afterwards the account is managed from the console. |
+| `JANUS_ADMIN_USERNAME` / `JANUS_ADMIN_PASSWORD` | `admin` / placeholder | bootstrap console credentials. **A production profile refuses to start on a placeholder, a value under 8 characters, one missing an upper-case letter, a lower-case letter, a digit or a special character, or a password equal to the username.** Read once, on the first start; afterwards the account is managed from the console. |
 | `JANUS_ADMIN_EMAIL` | `admin@localhost` | where the bootstrap account's own expiry notices go. Applied while that account still carries the address the migration wrote; once a real one is set, here or from the console, that one stands. |
 | `JANUS_CORS_ORIGINS` | `http://localhost:5173` | comma-separated console origins. `*` is refused. |
 | `OPENBAO_ADDR` / `OPENBAO_TOKEN` / `OPENBAO_KV_MOUNT` | local dev server | KV v2 integration |
@@ -273,7 +273,7 @@ GitLab runs the backend and frontend test suites, then builds backend and web im
 Configure these GitLab CI/CD variables (names only; never commit their values):
 
 - `JANUS_POSTGRES_PASSWORD`
-- `JANUS_ADMIN_PASSWORD`
+- `JANUS_ADMIN_PASSWORD` (at least 8 characters with an upper-case letter, a lower-case letter, a digit and a special character, and not a placeholder; the deployment job rejects anything weaker before it reaches the server)
 - `JANUS_OPENBAO_TOKEN`
 - `JANUS_ADMIN_USERNAME` (optional, defaults to `admin`)
 - `JANUS_ADMIN_EMAIL` (optional, defaults to `admin@localhost`; set it, or the first account's expiry notices go nowhere)
