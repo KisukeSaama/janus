@@ -86,6 +86,10 @@ services:
   openbao:
     image: openbao/openbao:2.6
     profiles: [dev, prod]
+    # OpenBao 2.6 defaults to its unprivileged user. Start its entrypoint as root so it can repair
+    # ownership on a fresh host bind mount; the official entrypoint drops back to `openbao` before
+    # launching the server.
+    user: "0:0"
     command: server
     environment:
       BAO_ADDR: http://127.0.0.1:8200
