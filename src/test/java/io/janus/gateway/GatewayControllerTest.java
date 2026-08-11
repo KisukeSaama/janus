@@ -52,8 +52,8 @@ class GatewayControllerTest {
     private final io.janus.applications.Application application = Fixtures.application(owner);
     private final io.janus.grants.Grant grant = Fixtures.grant(application, provider, credential);
 
-    private final GatewayPrincipal principal =
-            new GatewayPrincipal(application.getId(), application.getName(), owner.getId(), owner.getUsername(), Set.of());
+    private final GatewayPrincipal principal = new GatewayPrincipal(
+            application.getId(), application.getName(), owner.getId(), owner.getUsername(), Set.of());
 
     private MockMvc mvc;
     private GatewayController controller;

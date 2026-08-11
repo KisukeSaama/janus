@@ -17,11 +17,7 @@ import java.util.UUID;
  *     to drop what is cached — the verified key and any issued access token.
  */
 public record GatewayPrincipal(
-        UUID applicationId,
-        String applicationName,
-        UUID ownerId,
-        String ownerUsername,
-        Set<String> allowedOrigins) {
+        UUID applicationId, String applicationName, UUID ownerId, String ownerUsername, Set<String> allowedOrigins) {
 
     public GatewayPrincipal {
         allowedOrigins = allowedOrigins == null ? Set.of() : Set.copyOf(allowedOrigins);
