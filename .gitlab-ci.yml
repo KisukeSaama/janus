@@ -86,6 +86,17 @@ variables:
         : "${JANUS_ADMIN_PASSWORD:?Set JANUS_ADMIN_PASSWORD for ${CI_ENVIRONMENT_NAME:-this environment}}"
         : "${JANUS_OPENBAO_TOKEN:?Set JANUS_OPENBAO_TOKEN for ${CI_ENVIRONMENT_NAME:-this environment}}"
 
+        # DEV throws its vault away on every restart. PROD keeps file storage, which starts
+        # sealed and would need someone on the server to unseal it by hand after every
+        # restart; this key is what lets it come back on its own.
+        if [ "${DEPLOY_ENV}" = prod ]; then
+          : "${JANUS_OPENBAO_SEAL_KEY:?Set JANUS_OPENBAO_SEAL_KEY for ${CI_ENVIRONMENT_NAME:-this environment}: openssl rand -base64 32}"
+          if [ "$(printf '%s' "${JANUS_OPENBAO_SEAL_KEY}" | base64 -d 2>/dev/null | wc -c)" -ne 32 ]; then
+            echo "JANUS_OPENBAO_SEAL_KEY must be 32 random bytes in base64: openssl rand -base64 32" >&2
+            exit 1
+          fi
+        fi
+
         # Deployed instances run the production profile, whose PasswordPolicy refuses a weak
         # bootstrap password. Restating the shape here is duplication, and worth it: caught at
         # startup instead, it is a container restarting behind a health check that can only say
@@ -104,6 +115,7 @@ variables:
         cp deploy/compose.yml "${target}/compose.yml"
         cp deploy/paths.env "${target}/paths.env"
         cp deploy/openbao/openbao.hcl "${target}/openbao/openbao.hcl"
+        cp deploy/openbao/bootstrap.sh "${target}/openbao/bootstrap.sh"
         printf '%s\n' \
           "DEPLOY_ENV=${DEPLOY_ENV}" \
           "APP_HOST=${APP_HOST}" \
@@ -116,6 +128,9 @@ variables:
         (umask 077; printf '%s' "${JANUS_POSTGRES_PASSWORD}" > "${target}/.secrets/postgres_password")
         (umask 077; printf '%s' "${JANUS_ADMIN_PASSWORD}" > "${target}/.secrets/admin_password")
         (umask 077; printf '%s' "${JANUS_OPENBAO_TOKEN}" > "${target}/.secrets/openbao_token")
+        # Empty under DEV, whose OpenBao runs in -dev mode and never reads it. Written
+        # anyway so the path a top-level secret points at exists under either profile.
+        (umask 077; printf '%s' "${JANUS_OPENBAO_SEAL_KEY:-}" > "${target}/.secrets/openbao_seal_key")
       }
 
       stage_on_host() {
@@ -135,12 +150,15 @@ variables:
             case "$DATA_REL" in ""|/*|*..*) exit 1 ;; esac
             host_target="/host-home/$TARGET_REL"
             host_data="/host-home/$DATA_REL/$DEPLOY_ENV"
-            mkdir -p "$host_target" "$host_data/postgres" "$host_data/openbao"
+            mkdir -p "$host_target" "$host_data/postgres" "$host_data/openbao" "$host_data/openbao-bootstrap"
             tar -C "$host_target" -xf -
             chmod 750 "$host_target" "$host_target/openbao" "$host_data" "$host_data/postgres" "$host_data/openbao"
+            # Holds the vault root token and its recovery share. Only the bootstrap
+            # container, which runs as root, ever needs to reach it.
+            chmod 700 "$host_data/openbao-bootstrap"
             chmod 700 "$host_target/.secrets"
             chmod 640 "$host_target/compose.yml" "$host_target/paths.env" "$host_target/app.env"
-            chmod 644 "$host_target/openbao/openbao.hcl"
+            chmod 644 "$host_target/openbao/"*
             # Compose file-backed secrets are bind mounts, so the non-root
             # application user must be able to read the host files. The 700
             # parent directory still prevents other host users from reaching them.
@@ -149,7 +167,7 @@ variables:
       }
 
       validate_paths
-      mkdir -p "${TARGET_DIR}" "${ENV_DATA_DIR}/postgres" "${ENV_DATA_DIR}/openbao"
+      mkdir -p "${TARGET_DIR}" "${ENV_DATA_DIR}/postgres" "${ENV_DATA_DIR}/openbao" "${ENV_DATA_DIR}/openbao-bootstrap"
       write_runtime_files "${TARGET_DIR}"
       stage_on_host "${TARGET_DIR}"
     - echo "${CI_REGISTRY_PASSWORD:-${CI_JOB_TOKEN}}" | docker login --username "${CI_REGISTRY_USER:-gitlab-ci-token}" --password-stdin "${CI_REGISTRY}"
@@ -163,9 +181,17 @@ variables:
       # start": why it failed is in the container's own log, on a host the runner
       # cannot open a shell on. Print it here, or every failure costs a trip to the
       # server before anyone even knows which service refused to come up.
+      # PROD's vault is persistent and starts knowing nothing: no KV mount, no policy, and
+      # no idea about the token the backend was handed. Reconciling on every deploy is what
+      # makes a fresh server work on the first pipeline; it is a no-op once it matches.
+      bootstrap_openbao() {
+        [ "${DEPLOY_ENV}" = prod ] || return 0
+        compose --profile bootstrap run --rm openbao-init
+      }
+
       deploy() {
         compose pull
-        compose up -d --remove-orphans && return 0
+        compose up -d --remove-orphans && bootstrap_openbao && return 0
         echo "Deployment failed. Container state and recent logs follow." >&2
         compose ps -a >&2 || true
         compose logs --no-color --tail 200 >&2 || true

@@ -1,1 +1,4 @@
 *.java text eol=lf
+# Shipped to Linux and executed by /bin/sh: a CRLF here fails as `\r: not found`.
+*.sh text eol=lf
+*.hcl text eol=lf

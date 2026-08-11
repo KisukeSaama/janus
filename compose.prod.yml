@@ -41,16 +41,31 @@ services:
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U janus -d janus"], interval: 10s, timeout: 5s, retries: 10}
     restart: unless-stopped
     security_opt: ["no-new-privileges:true"]
+  # Static seal auto-unseal needs OpenBao 2.4.0 or newer; older images reject the stanza.
   openbao:
-    image: openbao/openbao:2.3
+    image: openbao/openbao:2.6
     command: server
     cap_add: ["IPC_LOCK"]
     environment:
       BAO_ADDR: http://127.0.0.1:8200
     volumes: ["./deploy/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro", "openbao_prod:/openbao/file"]
+    secrets: [openbao_seal_key]
     networks: [private]
     healthcheck: {test: ["CMD-SHELL", "bao status >/dev/null 2>&1 || [ $$? -eq 2 ]"], interval: 10s, timeout: 5s, retries: 30}
     restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+  # Run once after `up`: docker compose -f compose.prod.yml --profile bootstrap run --rm openbao-init
+  openbao-init:
+    image: openbao/openbao:2.6
+    profiles: [bootstrap]
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/etc/openbao/bootstrap.sh"]
+    environment:
+      BAO_ADDR: http://openbao:8200
+    volumes: ["./deploy/openbao/bootstrap.sh:/etc/openbao/bootstrap.sh:ro", "openbao_bootstrap:/bootstrap"]
+    secrets: [openbao_token]
+    networks: [private]
+    restart: "no"
     security_opt: ["no-new-privileges:true"]
 networks:
   public:
@@ -60,7 +75,9 @@ networks:
 volumes:
   postgres_prod:
   openbao_prod:
+  openbao_bootstrap:
 secrets:
   postgres_password: {file: ./.secrets/postgres_password}
   openbao_token: {file: ./.secrets/openbao_token}
+  openbao_seal_key: {file: ./.secrets/openbao_seal_key}
   admin_password: {file: ./.secrets/admin_password}
