@@ -35,7 +35,9 @@ test_backend:
     # Docker to start a container with, so this job stays green on a runner without one.
     - mvn -B -ntp verify
     # The one number worth reading in the job log, and what GitLab picks up as the coverage figure.
-    - awk -F, 'NR>1 {m+=$4; c+=$5} END {printf "Coverage: %.1f%%\n", 100*c/(m+c)}' target/site/jacoco/jacoco.csv
+    - >-
+      awk -F, 'NR>1 {m+=$4; c+=$5} END {printf "Coverage: %.1f%%\n", 100*c/(m+c)}'
+      target/site/jacoco/jacoco.csv
   coverage: '/Coverage: (\d+\.\d+)%/'
   artifacts:
     when: always
