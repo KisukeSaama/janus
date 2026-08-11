@@ -226,7 +226,12 @@ deploy_dev:
   script:
     - cd "${TARGET_DIR}"
     - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml pull
-    - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml up -d --remove-orphans
+    - |
+      if ! docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml up -d --remove-orphans; then
+        docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml ps -a || true
+        docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml logs --no-color --tail 200 backend postgres "openbao-${DEPLOY_ENV}" || true
+        exit 1
+      fi
 
 stop_dev:
   stage: deploy
@@ -257,7 +262,12 @@ deploy_prod:
   script:
     - cd "${TARGET_DIR}"
     - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml pull
-    - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml up -d --remove-orphans
+    - |
+      if ! docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml up -d --remove-orphans; then
+        docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml ps -a || true
+        docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml logs --no-color --tail 200 backend postgres "openbao-${DEPLOY_ENV}" || true
+        exit 1
+      fi
 
 stop_prod:
   stage: deploy
