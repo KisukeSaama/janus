@@ -491,14 +491,17 @@ function Review({
         <Line label={t('connect.reviewApi')}>
           <span className="font-medium">{apiName}</span>
           <span className="data ml-2 break-all text-xs text-text-2">{baseUrl}</span>
-          <span className="data mt-0.5 block break-all text-xs text-text-3">/gateway/{slug}/</span>
         </Line>
         <Line label={authType === 'NONE' ? t('connect.reviewAuth') : t('connect.reviewSecret')}>
           {tEnum('authType', authType)}
         </Line>
         <Line label={t('connect.reviewCaller')}>{caller}</Line>
+        {/* The caller's own URL, not the upstream's: shown whole, or it reads as a path onto the line above. */}
         <Line label={t('connect.reviewReach')}>
-          <span className="data text-xs text-text-2">/gateway/{slug}/**</span>
+          <span className="data break-all text-xs text-text-2">
+            <span className="text-text-3">{window.location.origin}</span>
+            /gateway/{slug}/**
+          </span>
         </Line>
       </dl>
     </section>
