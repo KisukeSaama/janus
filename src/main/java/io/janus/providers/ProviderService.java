@@ -5,13 +5,18 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import io.janus.accounts.AccessScope;
 import io.janus.accounts.AccountRepository;
+import io.janus.applications.ApplicationService;
 import io.janus.audit.AuditAction;
 import io.janus.audit.AuditService;
 import io.janus.credentials.CredentialRepository;
 import io.janus.gateway.TrafficPolicyRegistry;
+import io.janus.grants.GrantRepository;
+import io.janus.openbao.OpenBaoClient;
 import io.janus.shared.NotFoundException;
 
 /**
@@ -25,6 +30,9 @@ import io.janus.shared.NotFoundException;
 public class ProviderService {
     private final ProviderRepository repository;
     private final CredentialRepository credentials;
+    private final GrantRepository grants;
+    private final OpenBaoClient openBao;
+    private final ApplicationService applications;
     private final DestinationValidator destinations;
     private final TrafficPolicyRegistry traffic;
     private final AccountRepository accounts;
@@ -34,6 +42,9 @@ public class ProviderService {
     public ProviderService(
             ProviderRepository repository,
             CredentialRepository credentials,
+            GrantRepository grants,
+            OpenBaoClient openBao,
+            ApplicationService applications,
             DestinationValidator destinations,
             TrafficPolicyRegistry traffic,
             AccountRepository accounts,
@@ -41,6 +52,9 @@ public class ProviderService {
             AuditService audit) {
         this.repository = repository;
         this.credentials = credentials;
+        this.grants = grants;
+        this.openBao = openBao;
+        this.applications = applications;
         this.destinations = destinations;
         this.traffic = traffic;
         this.accounts = accounts;
@@ -89,11 +103,42 @@ public class ProviderService {
     @Transactional
     public void delete(UUID id) {
         var provider = require(id);
-        if (credentials.existsByProviderId(id))
-            throw new IllegalStateException("Provider still has credentials; delete them first");
+
+        // An API is one operator-facing record even though the gateway stores it as a provider,
+        // credential and any number of grants. Remove that aggregate in dependency order so a
+        // failed delete cannot leave the slug occupied by an invisible provider.
+        var connectedGrants = grants.findAllByProviderId(id);
+        var connectedApplications = connectedGrants.stream()
+                .map(grant -> grant.getApplication().getId())
+                .distinct()
+                .toList();
+        for (var grant : connectedGrants) traffic.forgetGrant(grant.getId());
+        grants.deleteAllInBatch(connectedGrants);
+        for (UUID applicationId : connectedApplications) applications.deleteIfUnconnected(applicationId);
+
+        var heldCredentials = credentials.findAllByProviderId(id);
+        var storedPaths = heldCredentials.stream()
+                .filter(credential -> !credential.getAuthType().anonymous())
+                .map(credential -> credential.getSecretPath())
+                .toList();
+        for (var credential : heldCredentials) traffic.forgetCredential(credential.getId());
+        credentials.deleteAllInBatch(heldCredentials);
+
         repository.delete(provider);
         traffic.forgetProvider(id);
+        destroyAfterCommit(storedPaths);
         audit.recordAdmin(AuditAction.PROVIDER_DELETED, id, provider.getSlug());
+    }
+
+    /** OpenBao changes only after PostgreSQL accepted the whole aggregate deletion. */
+    private void destroyAfterCommit(List<String> secretPaths) {
+        if (secretPaths.isEmpty()) return;
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                for (String path : secretPaths) openBao.delete(path);
+            }
+        });
     }
 
     /** Drops every response Janus is holding for this destination, without changing its policy. */

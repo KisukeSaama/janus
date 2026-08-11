@@ -423,7 +423,7 @@ export const en = {
 
     submit: 'Store in OpenBao',
     submitOpen: 'Save',
-    deleteConsequence: 'The stored value is destroyed.',
+    deleteConsequence: 'Its connections stop, the stored value is destroyed, and callers left with no other API are deleted.',
     editTitle: 'Edit secret',
     editIntro: 'API and environment are fixed. Blank keeps the current value.',
     editLabel: 'Edit {name}',

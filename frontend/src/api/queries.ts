@@ -279,13 +279,12 @@ export function useSignOut() {
     // Everything fetched under the previous session goes with it: the next person to sign in at this
     // browser must not read what the last one had loaded.
     //
-    // Order matters. Anything still in flight is cancelled first, and the session is answered again
-    // straight after the cache is emptied — a console left on screen over an empty cache refetches
-    // every page it was showing, against a session that has just ended.
+    // Order matters. Anything still in flight is cancelled first, then the active session observer
+    // receives the signed-out state before private record caches are discarded.
     onSuccess: async () => {
       await client.cancelQueries();
-      client.clear();
       client.setQueryData(keys.session, null);
+      client.removeQueries({ predicate: (query) => query.queryKey[0] !== keys.session[0] });
     },
   });
 }

@@ -16,10 +16,14 @@ import io.janus.accounts.AccessScope;
 import io.janus.accounts.Account;
 import io.janus.accounts.AccountRepository;
 import io.janus.accounts.TestAccount;
+import io.janus.applications.Application;
+import io.janus.applications.ApplicationService;
 import io.janus.audit.AuditAction;
 import io.janus.audit.AuditService;
 import io.janus.credentials.CredentialRepository;
 import io.janus.gateway.TrafficPolicyRegistry;
+import io.janus.grants.GrantRepository;
+import io.janus.openbao.OpenBaoClient;
 import io.janus.shared.ApiExceptionHandler;
 
 /**
@@ -31,6 +35,9 @@ import io.janus.shared.ApiExceptionHandler;
 class ProviderAdminControllerTest {
     private final ProviderRepository repository = Mockito.mock(ProviderRepository.class);
     private final CredentialRepository credentials = Mockito.mock(CredentialRepository.class);
+    private final GrantRepository grants = Mockito.mock(GrantRepository.class);
+    private final OpenBaoClient openBao = Mockito.mock(OpenBaoClient.class);
+    private final ApplicationService applications = Mockito.mock(ApplicationService.class);
     private final TrafficPolicyRegistry traffic = Mockito.mock(TrafficPolicyRegistry.class);
     private final AccountRepository accounts = Mockito.mock(AccountRepository.class);
     private final AccessScope scope = Mockito.mock(AccessScope.class);
@@ -52,7 +59,8 @@ class ProviderAdminControllerTest {
     }
 
     private MockMvc mvcValidatingWith(DestinationValidator destinations) {
-        var service = new ProviderService(repository, credentials, destinations, traffic, accounts, scope, audit);
+        var service = new ProviderService(
+                repository, credentials, grants, openBao, applications, destinations, traffic, accounts, scope, audit);
         return MockMvcBuilders.standaloneSetup(new ProviderAdminController(service))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
@@ -201,16 +209,27 @@ class ProviderAdminControllerTest {
         verify(traffic).forgetProvider(provider.getId());
     }
 
-    /** Removing it while secrets still point at it would orphan them in OpenBao. */
+    /** Removing an API removes its dependent records instead of leaving its slug occupied. */
     @Test
-    void refusesToRemoveADestinationThatStillHoldsSecrets() throws Exception {
+    void removesConnectionsAndCredentialMetadataWithTheDestination() throws Exception {
         var provider = existing();
-        when(credentials.existsByProviderId(provider.getId())).thenReturn(true);
+        var grant = Mockito.mock(io.janus.grants.Grant.class);
+        var application = Mockito.mock(Application.class);
+        var credential = Mockito.mock(io.janus.credentials.Credential.class);
+        when(grant.getId()).thenReturn(UUID.randomUUID());
+        when(grant.getApplication()).thenReturn(application);
+        when(application.getId()).thenReturn(UUID.randomUUID());
+        when(credential.getId()).thenReturn(UUID.randomUUID());
+        when(credential.getAuthType()).thenReturn(io.janus.credentials.AuthType.NONE);
+        when(grants.findAllByProviderId(provider.getId())).thenReturn(List.of(grant));
+        when(credentials.findAllByProviderId(provider.getId())).thenReturn(List.of(credential));
 
-        mvc.perform(delete("/api/admin/providers/" + provider.getId()))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.detail").value("Provider still has credentials; delete them first"));
-        verify(repository, never()).delete(any());
+        mvc.perform(delete("/api/admin/providers/" + provider.getId())).andExpect(status().isOk());
+
+        verify(grants).deleteAllInBatch(List.of(grant));
+        verify(applications).deleteIfUnconnected(application.getId());
+        verify(credentials).deleteAllInBatch(List.of(credential));
+        verify(repository).delete(provider);
     }
 
     @Test
