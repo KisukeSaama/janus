@@ -263,11 +263,12 @@ Gateway audit events are written off the request path by a bounded single-thread
 
 ## CI/CD deployment
 
-GitLab runs the backend and frontend test suites, then builds immutable backend and web images in its registry. A push to `develop` automatically deploys DEV; a `v*` tag automatically deploys PROD. Traefik is the only public reverse proxy and terminates HTTPS.
+GitLab runs the backend and frontend test suites, then builds backend and web images in its registry. A push to `develop` builds the `develop` images and exposes a manual DEV deployment; a `v*` tag builds immutable release images and automatically deploys PROD. Traefik is the only public reverse proxy and terminates HTTPS.
 
 - DEV: `https://janus-d.kisukesaama.com`
 - PROD: `https://janus.kisukesaama.com`
-- Manual DEV shutdown: `stop_dev`
+- Manual DEV deployment/shutdown: `deploy_dev`, `stop_dev`
+- Manual PROD shutdown: `stop_prod` (available only in a release-tag pipeline)
 
 Configure these GitLab CI/CD variables (names only; never commit their values):
 
@@ -277,7 +278,7 @@ Configure these GitLab CI/CD variables (names only; never commit their values):
 - `JANUS_ADMIN_USERNAME` (optional, defaults to `admin`)
 - `JANUS_ADMIN_EMAIL` (optional, defaults to `admin@localhost`; set it, or the first account's expiry notices go nowhere)
 
-Use environment-scoped values for `dev` and `production`, protect the production values, and protect the `v*` tag pattern so those values are available to release pipelines. The runner must have the `devops` tag, Docker socket access, and an existing external `traefik` network. Deployment files live in `/home/kisuke/deploy-janus/{dev,prod}` and persistent data in `/home/kisuke/janus/{dev,prod}`. Secret files are written under a `077` umask and land on the host as `600`.
+Use environment-scoped values for `dev` and `production`, protect the production values, and protect the `v*` tag pattern so those values are available to release pipelines. The runner must have the `devops` tag and Docker socket access; the server must already provide the external `traefik` network. Deployment files live in `/home/kisuke/deploy-janus/{dev,prod}` and persistent data in `/home/kisuke/janus/{dev,prod}`. Because the runner exposes the host Docker socket but does not mount `/home/kisuke`, the pipeline stages those files onto the host through a short-lived container. Secret files are written under a `077` umask and land on the host as `600`.
 
 DEV uses an ephemeral OpenBao dev server. PROD keeps OpenBao file storage persistent and still requires its normal one-time initialization and an unseal operation after a host or container restart. Enable a KV v2 mount named `secret` and create a narrowly scoped Janus token:
 

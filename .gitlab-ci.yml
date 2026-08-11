@@ -1,40 +1,155 @@
-stages:
-  - verify
-  - build
-  - deploy_dev
-  - deploy_prod
+image: docker:27
 
-default:
-  image: docker:27-cli
-  tags:
-    - devops
+# Janus CI/CD follows the server's DraftGG golden path:
+# - verify and build automatically on `develop` and on tags `v*`;
+# - deploy DEV manually from `develop`;
+# - deploy PROD automatically from a `v*` tag.
+#
+# Required GitLab CI/CD variables (use environment-scoped values):
+#   JANUS_POSTGRES_PASSWORD
+#   JANUS_ADMIN_PASSWORD
+#   JANUS_OPENBAO_TOKEN
+# Optional variables:
+#   JANUS_ADMIN_USERNAME (defaults to admin)
+#   JANUS_ADMIN_EMAIL    (defaults to admin@localhost)
+
+stages:
+  - test
+  - build
+  - deploy
 
 variables:
   APP_SUBDOMAIN: janus
   DOCKER_BUILDKIT: "1"
+  DOCKER_HOST: unix:///var/run/docker.sock
+  DOCKER_TLS_CERTDIR: ""
 
-workflow:
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "develop"'
-    - if: '$CI_COMMIT_TAG =~ /^v.*/'
-    - when: never
+.docker_defaults: &docker_defaults
+  image: docker:27
+  tags:
+    - devops
+  before_script:
+    - set -euo pipefail
+    - docker info
+    - |
+      if [[ -z "${CI_REGISTRY:-}" ]]; then
+        echo "CI_REGISTRY is not set." >&2
+        exit 1
+      fi
+    - export CI_REGISTRY_IMAGE="${CI_REGISTRY_IMAGE:-${CI_REGISTRY}/${CI_PROJECT_PATH}}"
+    - export IMAGE_TAG="${CI_COMMIT_TAG:-${CI_COMMIT_REF_SLUG}}"
+    - echo "${CI_REGISTRY_PASSWORD:-${CI_JOB_TOKEN}}" | docker login --username "${CI_REGISTRY_USER:-gitlab-ci-token}" --password-stdin "${CI_REGISTRY}"
 
-# The images are built with -DskipTests for speed, so this stage is the only thing
-# standing between a failing test and a deployment.
+.deploy_defaults: &deploy_defaults
+  image: docker:27
+  tags:
+    - devops
+  before_script:
+    - set -euo pipefail
+    - docker info
+    - |
+      if [[ -z "${CI_REGISTRY:-}" ]]; then
+        echo "CI_REGISTRY is not set." >&2
+        exit 1
+      fi
+    - export CI_REGISTRY_IMAGE="${CI_REGISTRY_IMAGE:-${CI_REGISTRY}/${CI_PROJECT_PATH}}"
+    - export IMAGE_TAG="${CI_COMMIT_TAG:-${CI_COMMIT_REF_SLUG}}"
+    - set -a; source deploy/paths.env; set +a
+    - |
+      if [[ -n "${CI_COMMIT_TAG:-}" ]]; then
+        export DEPLOY_ENV=prod
+        export APP_HOST="${APP_SUBDOMAIN}.kisukesaama.com"
+      else
+        export DEPLOY_ENV=dev
+        export APP_HOST="${APP_SUBDOMAIN}-d.kisukesaama.com"
+      fi
+    - export TARGET_DIR="${DEPLOY_DIR}/${DEPLOY_ENV}"
+    - export ENV_DATA_DIR="${DATA_DIR}/${DEPLOY_ENV}"
+    - |
+      validate_paths() {
+        case "${DEPLOY_DIR:-}" in
+          /home/kisuke/*) ;;
+          *) echo "DEPLOY_DIR must stay under /home/kisuke/." >&2; exit 1 ;;
+        esac
+        case "${DATA_DIR:-}" in
+          /home/kisuke/*) ;;
+          *) echo "DATA_DIR must stay under /home/kisuke/." >&2; exit 1 ;;
+        esac
+        case "${DEPLOY_DIR}${DATA_DIR}" in
+          *..*) echo "Deployment paths cannot contain '..'." >&2; exit 1 ;;
+        esac
+      }
+
+      write_runtime_files() {
+        local target="$1"
+        : "${JANUS_POSTGRES_PASSWORD:?Set JANUS_POSTGRES_PASSWORD for ${CI_ENVIRONMENT_NAME:-this environment}}"
+        : "${JANUS_ADMIN_PASSWORD:?Set JANUS_ADMIN_PASSWORD for ${CI_ENVIRONMENT_NAME:-this environment}}"
+        : "${JANUS_OPENBAO_TOKEN:?Set JANUS_OPENBAO_TOKEN for ${CI_ENVIRONMENT_NAME:-this environment}}"
+
+        mkdir -p "${target}/.secrets" "${target}/openbao"
+        cp deploy/compose.yml "${target}/compose.yml"
+        cp deploy/paths.env "${target}/paths.env"
+        cp deploy/openbao/openbao.hcl "${target}/openbao/openbao.hcl"
+        printf '%s\n' \
+          "DEPLOY_ENV=${DEPLOY_ENV}" \
+          "APP_HOST=${APP_HOST}" \
+          "CI_REGISTRY_IMAGE=${CI_REGISTRY_IMAGE}" \
+          "IMAGE_TAG=${IMAGE_TAG}" \
+          "JANUS_ADMIN_USERNAME=${JANUS_ADMIN_USERNAME:-admin}" \
+          "JANUS_ADMIN_EMAIL=${JANUS_ADMIN_EMAIL:-admin@localhost}" \
+          > "${target}/app.env"
+
+        (umask 077; printf '%s' "${JANUS_POSTGRES_PASSWORD}" > "${target}/.secrets/postgres_password")
+        (umask 077; printf '%s' "${JANUS_ADMIN_PASSWORD}" > "${target}/.secrets/admin_password")
+        (umask 077; printf '%s' "${JANUS_OPENBAO_TOKEN}" > "${target}/.secrets/openbao_token")
+      }
+
+      stage_on_host() {
+        local source_dir="$1"
+        local target_rel="${TARGET_DIR#/home/kisuke/}"
+        local data_rel="${DATA_DIR#/home/kisuke/}"
+
+        # The Docker runner mounts the host socket, but not /home/kisuke. Copy
+        # through a short-lived container so Compose bind paths exist on the host.
+        tar -C "${source_dir}" -cf - . | docker run --rm -i \
+          -e TARGET_REL="${target_rel}" \
+          -e DATA_REL="${data_rel}" \
+          -e DEPLOY_ENV="${DEPLOY_ENV}" \
+          -v /home/kisuke:/host-home \
+          alpine:3.21 sh -euc '
+            case "$TARGET_REL" in ""|/*|*..*) exit 1 ;; esac
+            case "$DATA_REL" in ""|/*|*..*) exit 1 ;; esac
+            host_target="/host-home/$TARGET_REL"
+            host_data="/host-home/$DATA_REL/$DEPLOY_ENV"
+            mkdir -p "$host_target" "$host_data/postgres" "$host_data/openbao"
+            tar -C "$host_target" -xf -
+            chmod 750 "$host_target" "$host_target/openbao" "$host_data" "$host_data/postgres" "$host_data/openbao"
+            chmod 700 "$host_target/.secrets"
+            chmod 640 "$host_target/compose.yml" "$host_target/paths.env" "$host_target/app.env"
+            chmod 644 "$host_target/openbao/openbao.hcl"
+            chmod 600 "$host_target/.secrets/"*
+          '
+      }
+
+      validate_paths
+      mkdir -p "${TARGET_DIR}" "${ENV_DATA_DIR}/postgres" "${ENV_DATA_DIR}/openbao"
+      write_runtime_files "${TARGET_DIR}"
+      stage_on_host "${TARGET_DIR}"
+    - echo "${CI_REGISTRY_PASSWORD:-${CI_JOB_TOKEN}}" | docker login --username "${CI_REGISTRY_USER:-gitlab-ci-token}" --password-stdin "${CI_REGISTRY}"
+
+# ---- test -----------------------------------------------------------------
 test_backend:
-  stage: verify
+  stage: test
+  tags: [devops]
   image: maven:3.9.9-eclipse-temurin-21
   variables:
     MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
   cache:
     key: janus-maven
-    paths: [.m2/repository]
+    paths:
+      - .m2/repository
   script:
-    # verify runs the unit suite, then the integration suite against a real PostgreSQL, then holds
-    # coverage to the floor in the POM. The integration tests skip themselves where there is no
-    # Docker to start a container with, so this job stays green on a runner without one.
     - mvn -B -ntp verify
-    # The one number worth reading in the job log, and what GitLab picks up as the coverage figure.
     - >-
       awk -F, 'NR>1 {m+=$4; c+=$5} END {printf "Coverage: %.1f%%\n", 100*c/(m+c)}'
       target/site/jacoco/jacoco.csv
@@ -51,108 +166,52 @@ test_backend:
   rules:
     - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
 test_frontend:
-  stage: verify
+  stage: test
+  tags: [devops]
   image: node:22-alpine
   cache:
     key: janus-npm
-    paths: [frontend/node_modules]
+    paths:
+      - frontend/.npm
+  before_script:
+    - npm config set cache "$CI_PROJECT_DIR/frontend/.npm"
   script:
     - cd frontend
-    - npm ci
+    - npm ci --no-audit --no-fund
     - npm run lint
     - npm test
     - npm run build
   rules:
     - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
+# ---- build ----------------------------------------------------------------
 build:
   stage: build
+  <<: *docker_defaults
   needs:
     - job: test_backend
       artifacts: false
     - job: test_frontend
       artifacts: false
-  before_script:
-    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   script:
-    - IMAGE_TAG="${CI_COMMIT_TAG:-dev-${CI_COMMIT_SHORT_SHA}}"
-    - BACKEND_IMAGE="${CI_REGISTRY_IMAGE}/backend:${IMAGE_TAG}"
-    - WEB_IMAGE="${CI_REGISTRY_IMAGE}/web:${IMAGE_TAG}"
-    - docker build --pull -t "$BACKEND_IMAGE" .
-    - docker build --pull -t "$WEB_IMAGE" ./frontend
-    - docker push "$BACKEND_IMAGE"
-    - docker push "$WEB_IMAGE"
+    - docker build --pull -t "${CI_REGISTRY_IMAGE}/backend:${IMAGE_TAG}" -f Dockerfile .
+    - docker build --pull -t "${CI_REGISTRY_IMAGE}/web:${IMAGE_TAG}" -f frontend/Dockerfile frontend
+    - docker push "${CI_REGISTRY_IMAGE}/backend:${IMAGE_TAG}"
+    - docker push "${CI_REGISTRY_IMAGE}/web:${IMAGE_TAG}"
   rules:
     - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
 
-.deploy:
-  before_script:
-    - set -a; . deploy/paths.env; set +a
-    - test -n "$JANUS_POSTGRES_PASSWORD"
-    - test -n "$JANUS_ADMIN_PASSWORD"
-    - test -n "$JANUS_OPENBAO_TOKEN"
-    - test -n "$DEPLOY_ENV"
-    - IMAGE_TAG="${CI_COMMIT_TAG:-dev-${CI_COMMIT_SHORT_SHA}}"
-    - BACKEND_IMAGE="${CI_REGISTRY_IMAGE}/backend:${IMAGE_TAG}"
-    - WEB_IMAGE="${CI_REGISTRY_IMAGE}/web:${IMAGE_TAG}"
-    - case "$DEPLOY_DIR" in /home/kisuke/*) case "$DEPLOY_DIR" in *..*) exit 1;; esac ;; *) echo "DEPLOY_DIR must stay under /home/kisuke/" >&2; exit 1 ;; esac
-    - case "$DATA_DIR" in /home/kisuke/*) case "$DATA_DIR" in *..*) exit 1;; esac ;; *) echo "DATA_DIR must stay under /home/kisuke/" >&2; exit 1 ;; esac
-    - TARGET_DIR="${DEPLOY_DIR}/${DEPLOY_ENV}"
-    - mkdir -p "$TARGET_DIR/.secrets" "$TARGET_DIR/openbao" "${DATA_DIR}/${DEPLOY_ENV}/postgres" "${DATA_DIR}/${DEPLOY_ENV}/openbao"
-    - chmod 750 "$TARGET_DIR" "$TARGET_DIR/.secrets" "$TARGET_DIR/openbao" "${DATA_DIR}/${DEPLOY_ENV}" "${DATA_DIR}/${DEPLOY_ENV}/postgres" "${DATA_DIR}/${DEPLOY_ENV}/openbao"
-    - cp deploy/compose.yml "$TARGET_DIR/compose.yml"
-    - cp deploy/paths.env "$TARGET_DIR/paths.env"
-    - cp deploy/openbao/openbao.hcl "$TARGET_DIR/openbao/openbao.hcl"
-    - chmod 640 "$TARGET_DIR/compose.yml" "$TARGET_DIR/paths.env"
-    - chmod 644 "$TARGET_DIR/openbao/openbao.hcl"
-    # Written under umask 077 so a secret is never briefly world-readable between
-    # creation and chmod. The Docker daemon reads them as root regardless.
-    - (umask 077; printf '%s' "$JANUS_POSTGRES_PASSWORD" > "$TARGET_DIR/.secrets/postgres_password")
-    - (umask 077; printf '%s' "$JANUS_ADMIN_PASSWORD" > "$TARGET_DIR/.secrets/admin_password")
-    - (umask 077; printf '%s' "$JANUS_OPENBAO_TOKEN" > "$TARGET_DIR/.secrets/openbao_token")
-    - chmod 600 "$TARGET_DIR/.secrets/"*
-    - printf 'DEPLOY_ENV=%s\nBACKEND_IMAGE=%s\nWEB_IMAGE=%s\nJANUS_PUBLIC_HOST=%s\nJANUS_ADMIN_USERNAME=%s\nJANUS_ADMIN_EMAIL=%s\n' "$DEPLOY_ENV" "$BACKEND_IMAGE" "$WEB_IMAGE" "$JANUS_PUBLIC_HOST" "${JANUS_ADMIN_USERNAME:-admin}" "${JANUS_ADMIN_EMAIL:-admin@localhost}" > "$TARGET_DIR/app.env"
-    - TARGET_REL="${TARGET_DIR#/home/kisuke/}"
-    - DATA_REL="${DATA_DIR#/home/kisuke/}"
-    - |
-      tar -C "$TARGET_DIR" -cf - . | docker run --rm -i \
-        -e TARGET_REL="$TARGET_REL" \
-        -e DATA_REL="$DATA_REL" \
-        -e DEPLOY_ENV="$DEPLOY_ENV" \
-        -v /home/kisuke:/host-home \
-        alpine:3.21 sh -ec '
-          case "$TARGET_REL" in ""|/*|*..*) exit 1 ;; esac
-          case "$DATA_REL" in ""|/*|*..*) exit 1 ;; esac
-          host_target="/host-home/$TARGET_REL"
-          host_data="/host-home/$DATA_REL/$DEPLOY_ENV"
-          mkdir -p "$host_target" "$host_data/postgres" "$host_data/openbao"
-          tar -C "$host_target" -xf -
-          chmod 750 "$host_target" "$host_data" "$host_data/postgres" "$host_data/openbao"
-          chmod 700 "$host_target/.secrets"
-          chmod 750 "$host_target/openbao"
-          chmod 640 "$host_target/compose.yml" "$host_target/paths.env" "$host_target/app.env"
-          chmod 644 "$host_target/openbao/openbao.hcl"
-          chmod 600 "$host_target/.secrets/"*
-        '
-    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-  script:
-    - cd "${DEPLOY_DIR}/${DEPLOY_ENV}"
-    - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "$DEPLOY_ENV" --env-file paths.env --env-file app.env -f compose.yml pull
-    - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "$DEPLOY_ENV" --env-file paths.env --env-file app.env -f compose.yml up -d --remove-orphans
-
+# ---- deploy DEV (manual from develop) -------------------------------------
 deploy_dev:
-  extends: .deploy
-  stage: deploy_dev
-  needs:
-    - job: build
-      artifacts: false
-  variables:
-    DEPLOY_ENV: dev
-    JANUS_PUBLIC_HOST: janus-d.kisukesaama.com
+  stage: deploy
+  <<: *deploy_defaults
+  needs: ["build"]
   resource_group: janus-dev
   environment:
     name: dev
@@ -160,36 +219,53 @@ deploy_dev:
     on_stop: stop_dev
   rules:
     - if: '$CI_COMMIT_BRANCH == "develop"'
+      when: manual
+  script:
+    - cd "${TARGET_DIR}"
+    - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml pull
+    - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml up -d --remove-orphans
 
 stop_dev:
-  extends: .deploy
-  stage: deploy_dev
-  needs: []
-  variables:
-    DEPLOY_ENV: dev
-    JANUS_PUBLIC_HOST: janus-d.kisukesaama.com
-  script:
-    - cd "${DEPLOY_DIR}/${DEPLOY_ENV}"
-    - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "$DEPLOY_ENV" --env-file paths.env --env-file app.env -f compose.yml down
+  stage: deploy
+  <<: *deploy_defaults
+  resource_group: janus-dev
   environment:
     name: dev
     action: stop
-  when: manual
   rules:
     - if: '$CI_COMMIT_BRANCH == "develop"'
+      when: manual
+  script:
+    - cd "${TARGET_DIR}"
+    - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml down
 
+# ---- deploy PROD (automatic from v* tags) ---------------------------------
 deploy_prod:
-  extends: .deploy
-  stage: deploy_prod
-  needs:
-    - job: build
-      artifacts: false
-  variables:
-    DEPLOY_ENV: prod
-    JANUS_PUBLIC_HOST: janus.kisukesaama.com
+  stage: deploy
+  <<: *deploy_defaults
+  needs: ["build"]
   resource_group: janus-prod
   environment:
     name: production
     url: https://janus.kisukesaama.com
+    on_stop: stop_prod
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  script:
+    - cd "${TARGET_DIR}"
+    - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml pull
+    - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml up -d --remove-orphans
+
+stop_prod:
+  stage: deploy
+  <<: *deploy_defaults
+  resource_group: janus-prod
+  environment:
+    name: production
+    action: stop
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+      when: manual
+  script:
+    - cd "${TARGET_DIR}"
+    - docker compose -p "${APP_SUBDOMAIN}-${DEPLOY_ENV}" --profile "${DEPLOY_ENV}" --env-file paths.env --env-file app.env -f compose.yml down

@@ -1,26 +1,33 @@
 services:
   web:
-    image: ${WEB_IMAGE:?WEB_IMAGE is required}
+    image: ${CI_REGISTRY_IMAGE}/web:${IMAGE_TAG}
     networks:
       - application
       - traefik
     depends_on:
       backend:
         condition: service_healthy
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
     labels:
       - traefik.enable=true
       - traefik.docker.network=${TRAEFIK_NETWORK}
-      - traefik.http.routers.${APP_SUBDOMAIN}-${DEPLOY_ENV}.rule=Host(`${JANUS_PUBLIC_HOST}`)
+      - traefik.http.routers.${APP_SUBDOMAIN}-${DEPLOY_ENV}.rule=Host(`${APP_HOST}`)
       - traefik.http.routers.${APP_SUBDOMAIN}-${DEPLOY_ENV}.entrypoints=websecure
       - traefik.http.routers.${APP_SUBDOMAIN}-${DEPLOY_ENV}.tls=true
-      - traefik.http.routers.${APP_SUBDOMAIN}-${DEPLOY_ENV}.tls.certresolver=letsencrypt
+      - traefik.http.routers.${APP_SUBDOMAIN}-${DEPLOY_ENV}.service=${APP_SUBDOMAIN}-${DEPLOY_ENV}
       - traefik.http.services.${APP_SUBDOMAIN}-${DEPLOY_ENV}.loadbalancer.server.port=8080
 
   backend:
-    image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
+    image: ${CI_REGISTRY_IMAGE}/backend:${IMAGE_TAG}
     environment:
       SPRING_PROFILES_ACTIVE: prod
       JANUS_DATABASE_URL: jdbc:postgresql://postgres:5432/janus
@@ -28,7 +35,7 @@ services:
       OPENBAO_ADDR: http://openbao:8200
       JANUS_ADMIN_USERNAME: ${JANUS_ADMIN_USERNAME:-admin}
       JANUS_ADMIN_EMAIL: ${JANUS_ADMIN_EMAIL:-admin@localhost}
-      JANUS_CORS_ORIGINS: https://${JANUS_PUBLIC_HOST}
+      JANUS_CORS_ORIGINS: https://${APP_HOST}
     secrets:
       - postgres_password
       - openbao_token
