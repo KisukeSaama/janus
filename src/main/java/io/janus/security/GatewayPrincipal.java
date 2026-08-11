@@ -16,14 +16,23 @@ import java.util.UUID;
  *     which is the default. Carried here so the check costs no query, which also means an edit has
  *     to drop what is cached — the verified key and any issued access token.
  */
-public record GatewayPrincipal(UUID applicationId, String applicationName, UUID ownerId, Set<String> allowedOrigins) {
+public record GatewayPrincipal(
+        UUID applicationId,
+        String applicationName,
+        UUID ownerId,
+        String ownerUsername,
+        Set<String> allowedOrigins) {
 
     public GatewayPrincipal {
         allowedOrigins = allowedOrigins == null ? Set.of() : Set.copyOf(allowedOrigins);
     }
 
     public GatewayPrincipal(UUID applicationId, String applicationName, UUID ownerId) {
-        this(applicationId, applicationName, ownerId, Set.of());
+        this(applicationId, applicationName, ownerId, "", Set.of());
+    }
+
+    public GatewayPrincipal(UUID applicationId, String applicationName, UUID ownerId, Set<String> allowedOrigins) {
+        this(applicationId, applicationName, ownerId, "", allowedOrigins);
     }
 
     /**

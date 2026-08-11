@@ -28,7 +28,7 @@ import { Bullet, Note, prose, Steps } from './parts';
 
 type Service = { id: string; name: string; apis: AgentApi[] };
 
-export function AgentsPage() {
+export function AgentsPage({ username }: { username: string }) {
   const { t, tc, formatNumber } = useI18n();
 
   // The same four queries every other page reads, so this one costs no request of its own.
@@ -69,11 +69,12 @@ export function AgentsPage() {
   const target: AgentTarget = service
     ? {
         origin: window.location.origin,
+        username,
         serviceName: service.name,
         applicationId: service.id,
         apis: [...service.apis].sort((a, b) => a.name.localeCompare(b.name)),
       }
-    : AGENT_PLACEHOLDER;
+    : { ...AGENT_PLACEHOLDER, username };
 
   const file = agentFile(target);
   const apiCount = target.apis.length;

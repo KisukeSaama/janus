@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Application, Credential, Grant, Provider } from '../api';
-import { absolutePath, buildConnections, curlFor, sortConnections, toSlug } from './connections';
+import { absolutePath, buildConnections, curlFor, gatewayUrl, sortConnections, toSlug } from './connections';
 
 const app = (over: Partial<Application> = {}): Application =>
   ({ id: 'app-1', name: 'checkout', enabled: true, apiKeyRotatedAt: new Date().toISOString(), ...over }) as Application;
@@ -24,6 +24,14 @@ const grant = (over: Partial<Grant> = {}): Grant =>
   }) as Grant;
 
 const build = (g: Grant, a = app(), p = provider(), c = credential()) => buildConnections([g], [a], [p], [c])[0];
+
+describe('gatewayUrl', () => {
+  it('uses the Janus origin and owner namespace, never the upstream API address', () => {
+    expect(gatewayUrl('kisukesaama', 'tmdb', 'https://janus.kisukesaama.com')).toBe(
+      'https://janus.kisukesaama.com/kisukesaama/gateway/tmdb',
+    );
+  });
+});
 
 describe('buildConnections', () => {
   it('assembles one statement out of the four records behind it', () => {
@@ -129,9 +137,9 @@ describe('absolutePath', () => {
 
 describe('curlFor', () => {
   it('writes a command carrying exactly the two headers the gateway expects', () => {
-    const command = curlFor('spotify', 'v1/tracks', 'app-1', 'jns_secret');
+    const command = curlFor('kisukesaama', 'spotify', 'v1/tracks', 'app-1', 'jns_secret');
 
-    expect(command).toContain('/gateway/spotify/v1/tracks');
+    expect(command).toContain('/kisukesaama/gateway/spotify/v1/tracks');
     expect(command).toContain('X-Janus-Application-Id: app-1');
     expect(command).toContain('X-Janus-Api-Key: jns_secret');
   });

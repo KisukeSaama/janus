@@ -119,6 +119,7 @@ public class OAuthTokenService {
                 application.getId(),
                 application.getName(),
                 application.getOwner().getId(),
+                application.getOwner().getUsername(),
                 application.getAllowedOrigins());
         return grant(principal, stored.getFamilyId());
     }

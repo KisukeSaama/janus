@@ -18,6 +18,7 @@ import type { NewConnection } from './ConnectFlow';
 export function ConnectionReady({ connection, onDismiss }: { connection: NewConnection; onDismiss: () => void }) {
   const { t } = useI18n();
   const curl = curlFor(
+    connection.username,
     connection.slug,
     '/',
     connection.applicationId,
@@ -54,7 +55,12 @@ export function ConnectionReady({ connection, onDismiss }: { connection: NewConn
         </div>
 
         {connection.key && (
-          <Probe slug={connection.slug} applicationId={connection.applicationId} apiKey={connection.key} />
+          <Probe
+            username={connection.username}
+            slug={connection.slug}
+            applicationId={connection.applicationId}
+            apiKey={connection.key}
+          />
         )}
       </div>
     </Sheet>
@@ -66,7 +72,17 @@ export function ConnectionReady({ connection, onDismiss }: { connection: NewConn
 type Verdict = { tone: 'ok' | 'warn' | 'bad'; title: string; hint?: string };
 
 /** A GET, because it is the one method that proves the hop without changing anything upstream. */
-function Probe({ slug, applicationId, apiKey }: { slug: string; applicationId: string; apiKey: string }) {
+function Probe({
+  username,
+  slug,
+  applicationId,
+  apiKey,
+}: {
+  username: string;
+  slug: string;
+  applicationId: string;
+  apiKey: string;
+}) {
   const { t } = useI18n();
   const [path, setPath] = useState('/');
   const [sending, setSending] = useState(false);
@@ -75,7 +91,7 @@ function Probe({ slug, applicationId, apiKey }: { slug: string; applicationId: s
   async function send() {
     setSending(true);
     try {
-      setResult(await probeGateway(slug, absolutePath(path) || '/', applicationId, apiKey, 'GET'));
+      setResult(await probeGateway(username, slug, absolutePath(path) || '/', applicationId, apiKey, 'GET'));
     } finally {
       setSending(false);
     }

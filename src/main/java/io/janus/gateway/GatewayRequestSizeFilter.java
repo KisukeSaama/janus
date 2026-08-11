@@ -36,7 +36,8 @@ public class GatewayRequestSizeFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !request.getRequestURI().startsWith("/gateway/");
+        String uri = request.getRequestURI();
+        return !uri.startsWith("/gateway/") && !uri.matches("^/[^/]+/gateway/.*");
     }
 
     @Override

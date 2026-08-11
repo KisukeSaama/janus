@@ -32,7 +32,14 @@ public record GatewayPath(String rawPath, String decodedPath, String rawQuery) {
     private static final String FORBIDDEN_RAW_LITERALS = " \"<>{}|\\^`";
 
     public static GatewayPath parse(String requestUri, String slug, String queryString) {
-        String prefix = "/gateway/" + slug;
+        return parseWithPrefix(requestUri, "/gateway/" + slug, queryString);
+    }
+
+    public static GatewayPath parse(String requestUri, String username, String slug, String queryString) {
+        return parseWithPrefix(requestUri, "/" + username + "/gateway/" + slug, queryString);
+    }
+
+    private static GatewayPath parseWithPrefix(String requestUri, String prefix, String queryString) {
         if (!requestUri.startsWith(prefix))
             throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, "Unsafe gateway path");
 
@@ -57,7 +64,12 @@ public record GatewayPath(String rawPath, String decodedPath, String rawQuery) {
     public URI toTargetUri(String baseUrl) {
         var builder = UriComponentsBuilder.fromUriString(baseUrl);
         String basePath = builder.build().getPath();
-        builder.replacePath((basePath == null ? "" : basePath) + rawPath);
+        // The console quite naturally accepts both `https://api.example.com/v1` and the same base
+        // address with a trailing slash. Joining the latter verbatim used to produce `/v1//items`,
+        // which changes the resource on strict APIs (and is rejected by some of them outright).
+        // Keep exactly one slash at the boundary; the caller path itself always starts with one.
+        String normalizedBasePath = basePath == null ? "" : basePath.replaceFirst("/+$", "");
+        builder.replacePath(normalizedBasePath + rawPath);
         if (rawQuery != null) builder.query(rawQuery);
         try {
             return builder.build(true).toUri();

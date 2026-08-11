@@ -57,6 +57,7 @@ public class ApplicationAuthenticator {
                 application.getId(),
                 application.getName(),
                 application.getOwner().getId(),
+                application.getOwner().getUsername(),
                 application.getAllowedOrigins());
         keyCache.store(applicationId, presentedKey, storedHash, principal);
         return Optional.of(principal);

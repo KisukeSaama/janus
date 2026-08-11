@@ -15,7 +15,7 @@ Requests run on virtual threads. A proxied call spends nearly all of its life wa
 ## Security boundaries
 
 - `/api/admin/**` authenticates a console account, by session cookie for a browser or HTTP Basic for a script, and is independent from gateway authentication. Everything not explicitly permitted is denied. CSRF protection is on, and skipped only for requests carrying an `Authorization` header — a browser never attaches one on its own, so there is nothing there to forge.
-- `/gateway/{providerSlug}/**` requires `X-Janus-Application-Id` and `X-Janus-Api-Key`, or a bearer token obtained from the exchange below.
+- `/{username}/gateway/{providerSlug}/**` requires `X-Janus-Application-Id` and `X-Janus-Api-Key`, or a bearer token obtained from the exchange below.
 - `/oauth/token` exchanges an application's own identifier and key for a short-lived opaque bearer token, and `/oauth/revoke` drops one. Tokens are held per instance and keyed by digest, so revocation — disabling a service, rotating its key, handing it to another account — takes effect at once rather than when a signed token would have expired. Refresh tokens rotate, and a value presented twice revokes its whole family. The surface is unauthenticated by construction (no token exists yet when it is called), so it authenticates the client itself, throttles failures, and is capped on volume like the console.
 - Application keys are generated with 256 bits of randomness, displayed once, and persisted only as BCrypt hashes. Verified keys are cached in memory for five minutes so a proxied request does not pay a BCrypt verification each time; administrative changes and key rotation invalidate that cache immediately.
 - An unknown application identifier still costs a hash comparison, so response timing does not disclose which identifiers exist.
@@ -128,7 +128,7 @@ curl -u admin:$JANUS_ADMIN_PASSWORD -H 'Content-Type: application/json' \
 # Call any path on that API, once a provider, credential and grant exist.
 curl -H 'X-Janus-Application-Id: <application-uuid>' \
   -H 'X-Janus-Api-Key: <one-time-key>' \
-  http://localhost:8080/gateway/<provider-slug>/<any-path>
+  http://localhost:8080/<username>/gateway/<provider-slug>/<any-path>
 ```
 
 ## Authenticating a client
@@ -153,7 +153,7 @@ curl -X POST http://localhost:8080/oauth/token \
 
 # Call the gateway with it
 curl -H 'Authorization: Bearer jnt_…' \
-  http://localhost:8080/gateway/<provider-slug>/<allowed-path>
+  http://localhost:8080/<username>/gateway/<provider-slug>/<allowed-path>
 
 # Come back without the secret when it expires
 curl -X POST http://localhost:8080/oauth/token \
@@ -214,7 +214,7 @@ curl -u admin:$JANUS_ADMIN_PASSWORD -H 'Content-Type: application/json' -d '{
 
 # then, from the client service, with a grant on this provider
 curl -H 'Authorization: Bearer jnt_…' \
-  'http://localhost:8080/gateway/spotify/v1/search?q=miles+davis&type=artist'
+  'http://localhost:8080/<username>/gateway/spotify/v1/search?q=miles+davis&type=artist'
 ```
 
 `expiresAt` on such a credential dates the **client secret**, not the tokens it produces. Access

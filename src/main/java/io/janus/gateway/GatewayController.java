@@ -34,7 +34,7 @@ import io.janus.shared.CorrelationIdFilter;
  * asking, and none of it can run before authorisation has.
  */
 @RestController
-@RequestMapping("/gateway")
+@RequestMapping({"/{username}/gateway", "/gateway"})
 public class GatewayController {
     private static final Logger log = LoggerFactory.getLogger(GatewayController.class);
 
@@ -68,13 +68,18 @@ public class GatewayController {
 
     @RequestMapping("/{slug}/**")
     public ResponseEntity<byte[]> proxy(
+            @PathVariable(required = false) String username,
             @PathVariable String slug,
             @AuthenticationPrincipal GatewayPrincipal principal,
             HttpServletRequest request,
             @RequestBody(required = false) byte[] body) {
         var call = new Call(request, principal);
         try {
-            var route = GatewayPath.parse(request.getRequestURI(), slug, request.getQueryString());
+            if (username != null && !username.equals(principal.ownerUsername()))
+                throw new Denied(HttpStatus.NOT_FOUND, "Provider is not available");
+            var route = username == null
+                    ? GatewayPath.parse(request.getRequestURI(), slug, request.getQueryString())
+                    : GatewayPath.parse(request.getRequestURI(), username, slug, request.getQueryString());
             call.routed(route.decodedPath());
 
             var method = HttpMethod.valueOf(request.getMethod());

@@ -62,7 +62,7 @@ public class SecurityConfig {
     SecurityFilterChain gateway(
             HttpSecurity http, ApiKeyAuthenticationFilter apiKey, GatewayCorsConfigurationSource gatewayCors)
             throws Exception {
-        return http.securityMatcher("/gateway/**")
+        return http.securityMatcher("/gateway/**", "/*/gateway/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(gatewayCors))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -75,7 +75,7 @@ public class SecurityConfig {
                         // A real preflight never reaches here: CorsFilter sits earlier in the chain
                         // and answers it. What is refused is a bare OPTIONS, which Spring MVC would
                         // otherwise answer with a route's allowed methods without consulting a grant.
-                        .requestMatchers(HttpMethod.OPTIONS, "/gateway/**")
+                        .requestMatchers(HttpMethod.OPTIONS, "/gateway/**", "/*/gateway/**")
                         .denyAll()
                         .anyRequest()
                         .authenticated())

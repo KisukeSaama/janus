@@ -17,10 +17,12 @@ import { AUDIT_PAGE_SIZE } from '../activity/AuditLog';
  * nothing" is one click away from that connection rather than from a full table.
  */
 export function ConnectionsPage({
+  username,
   onOpen,
   onConnect,
   onNavigate,
 }: {
+  username: string;
   onOpen: (id: string) => void;
   onConnect: () => void;
   /** Findings that are not about connections send the reader to the page that is. */
@@ -49,9 +51,10 @@ export function ConnectionsPage({
           applications.data ?? [],
           providers.data ?? [],
           credentials.data ?? [],
+          username,
         ),
       ),
-    [grants.data, applications.data, providers.data, credentials.data],
+    [grants.data, applications.data, providers.data, credentials.data, username],
   );
 
   const apps = applications.data ?? [];

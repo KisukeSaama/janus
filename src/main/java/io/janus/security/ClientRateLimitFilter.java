@@ -76,7 +76,8 @@ public class ClientRateLimitFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        boolean gateway = request.getRequestURI().startsWith("/gateway/");
+        String uri = request.getRequestURI();
+        boolean gateway = uri.startsWith("/gateway/") || uri.matches("^/[^/]+/gateway/.*");
         String surface = gateway ? "gateway" : request.getRequestURI().startsWith("/oauth/") ? "oauth" : "admin";
         int perMinute = gateway ? gatewayPerMinute : adminPerMinute;
         int burst = gateway ? gatewayBurst : adminBurst;
@@ -101,6 +102,7 @@ public class ClientRateLimitFilter extends OncePerRequestFilter {
         // load would restart the instance the flood is aimed at.
         if (uri.startsWith("/actuator/health")) return true;
         return !uri.startsWith("/gateway/")
+                && !uri.matches("^/[^/]+/gateway/.*")
                 && !uri.startsWith("/api/")
                 && !uri.startsWith("/oauth/")
                 && !uri.startsWith("/actuator/");

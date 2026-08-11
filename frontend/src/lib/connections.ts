@@ -37,6 +37,7 @@ export function buildConnections(
   apps: Application[],
   providers: Provider[],
   credentials: Credential[],
+  username?: string,
 ): Connection[] {
   const byId = <T extends { id: string }>(rows: T[]) => new Map(rows.map((row) => [row.id, row]));
   const appById = byId(apps);
@@ -66,7 +67,7 @@ export function buildConnections(
       application,
       provider,
       credential,
-      gatewayPath: provider ? `/gateway/${provider.slug}` : '',
+      gatewayPath: provider ? `${username ? `/${username}` : ''}/gateway/${provider.slug}` : '',
       live: !blockedBy,
       blockedBy,
     };
@@ -107,11 +108,14 @@ export function absolutePath(pattern: string): string {
   return value.startsWith('/') ? value : `/${value}`;
 }
 
-export function curlFor(slug: string, path: string, applicationId: string, key: string): string {
-  const origin = window.location.origin;
+export function gatewayUrl(username: string, slug: string, origin = window.location.origin): string {
+  return `${origin.replace(/\/$/, '')}/${encodeURIComponent(username)}/gateway/${slug}`;
+}
+
+export function curlFor(username: string, slug: string, path: string, applicationId: string, key: string): string {
   const target = path.startsWith('/') ? path : `/${path}`;
   return [
-    `curl ${origin}/gateway/${slug}${target}`,
+    `curl ${gatewayUrl(username, slug)}${target}`,
     `  -H "X-Janus-Application-Id: ${applicationId}"`,
     `  -H "X-Janus-Api-Key: ${key}"`,
   ].join(' \\\n');
@@ -141,6 +145,7 @@ export type ProbeResult = {
  * an upstream API answers whatever it answers.
  */
 export async function probeGateway(
+  username: string,
   slug: string,
   path: string,
   applicationId: string,
@@ -151,7 +156,7 @@ export async function probeGateway(
   const target = path.startsWith('/') ? path : `/${path}`;
   let response: Response;
   try {
-    response = await fetch(`/gateway/${slug}${target}`, {
+    response = await fetch(`/${encodeURIComponent(username)}/gateway/${slug}${target}`, {
       method,
       headers: { 'X-Janus-Application-Id': applicationId, 'X-Janus-Api-Key': key },
       // A test request must never be answered from the browser's own store.

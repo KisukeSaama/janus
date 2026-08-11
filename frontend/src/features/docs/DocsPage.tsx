@@ -34,7 +34,7 @@ import {
 const SECTIONS = ['flow', 'need', 'first', 'code', 'call', 'token', 'handled', 'fail', 'sound'] as const;
 type Section = (typeof SECTIONS)[number];
 
-export function DocsPage() {
+export function DocsPage({ username }: { username: string }) {
   const { t } = useI18n();
 
   // The same four queries every other page reads, so the guide costs no request of its own.
@@ -57,13 +57,14 @@ export function DocsPage() {
   const ctx: SampleContext = connection?.provider
     ? {
         origin: window.location.origin,
+        username,
         slug: connection.provider.slug,
         applicationId: connection.grant.applicationId,
         // Any path reaches the destination, so the examples keep the placeholder rather than pretend
         // to know which one this API answers on.
         path: PLACEHOLDER.path,
       }
-    : PLACEHOLDER;
+    : { ...PLACEHOLDER, username };
 
   const active = useActiveSection();
 
@@ -137,7 +138,7 @@ export function DocsPage() {
                 items={[
                   {
                     term: t('docs.call.pathTerm'),
-                    note: t('docs.call.pathNote', { gateway: `/gateway/${ctx.slug}` }),
+                    note: t('docs.call.pathNote', { gateway: `/${ctx.username}/gateway/${ctx.slug}` }),
                   },
                   { term: t('docs.call.reachTerm'), note: t('docs.call.reachNote') },
                   { term: t('docs.call.methodTerm'), note: t('docs.call.methodNote') },
