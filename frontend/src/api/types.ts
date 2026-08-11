@@ -134,6 +134,13 @@ export type Traffic = {
     outcomes: Record<string, number>;
     hitRatio: number;
   };
+  /** The registry reads behind authorisation, and how often one was answered from memory. */
+  authorization: {
+    enabled: boolean;
+    providers: number;
+    grants: number;
+    hitRatio: number;
+  };
   cooldowns: {
     providerId: string;
     providerName?: string;

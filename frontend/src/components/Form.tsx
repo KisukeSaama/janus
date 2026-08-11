@@ -125,12 +125,6 @@ export type Choice = { value: string; label: string; hint?: string; note?: React
  * those sentences behind a click, and the whole point of the setup flow is that nothing consequential
  * is chosen blind. The radio itself stays visible: selection is a mark and a border, never hue alone.
  */
-
-/**
- * A small set of consequential, unequal options, each of which needs a sentence. A select would hide
- * those sentences behind a click, and the whole point of the setup flow is that nothing consequential
- * is chosen blind. The radio itself stays visible: selection is a mark and a border, never hue alone.
- */
 export function ChoiceField({
   label,
   name,
@@ -156,7 +150,7 @@ export function ChoiceField({
           return (
             <label
               key={option.value}
-              className={`flex cursor-pointer items-start gap-3 rounded-control border px-3 py-2.5 transition-colors duration-150 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent ${
+              className={`flex cursor-pointer items-start gap-3 rounded-control border px-3 py-2.5 transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent-edge ${
                 selected ? 'border-accent bg-accent-wash' : 'border-line hover:bg-sunk'
               }`}
             >

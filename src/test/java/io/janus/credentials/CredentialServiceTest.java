@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-import java.util.Optional;
+import java.util.*;
 
 import org.junit.jupiter.api.*;
 import org.mockito.Mockito;
@@ -134,5 +134,25 @@ class CredentialServiceTest {
 
         verify(repository).delete(credential);
         verify(secretDeletions).enqueue(credential.getSecretPath());
+    }
+
+    /**
+     * The connections go through the session, not in one bulk statement. A batch delete leaves them
+     * managed and still pointing at the credential removed right after, and the flush at commit
+     * refuses that as an HTTP 500 the console can say nothing useful about.
+     */
+    @Test
+    void deletingACredentialRemovesItsConnectionsBeforeItself() {
+        var credential = existing(AuthType.BEARER);
+        var grant = Mockito.mock(io.janus.grants.Grant.class);
+        when(grant.getId()).thenReturn(UUID.randomUUID());
+        when(grants.findAllByCredentialId(credential.getId())).thenReturn(List.of(grant));
+
+        service.delete(credential.getId());
+
+        var order = inOrder(grants, repository);
+        order.verify(grants).deleteAll(List.of(grant));
+        order.verify(repository).delete(credential);
+        verify(grants, never()).deleteAllInBatch(any());
     }
 }

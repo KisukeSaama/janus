@@ -52,7 +52,16 @@ public class GatewayTrafficAdminController {
     public record CooldownReport(
             UUID providerId, String providerName, String providerSlug, Instant until, int status) {}
 
-    public record Report(CacheReport cache, List<CooldownReport> cooldowns) {}
+    /**
+     * The registry reads behind authorisation, and how often one was answered from memory. A low
+     * ratio here with a healthy cache ratio above means the database is still being asked who may
+     * call what on nearly every request.
+     *
+     * @param hitRatio share of authorisation lookups answered without reading the registry
+     */
+    public record AuthorizationReport(boolean enabled, int providers, int grants, double hitRatio) {}
+
+    public record Report(CacheReport cache, AuthorizationReport authorization, List<CooldownReport> cooldowns) {}
 
     /**
      * What the gateway is holding, and which of the caller's own destinations have asked to be left
@@ -86,6 +95,15 @@ public class GatewayTrafficAdminController {
                 stats.evictions(),
                 stats.outcomes(),
                 considered == 0 ? 0 : (double) spared / considered);
+
+        var registry = snapshot.authorizations();
+        long lookups = registry.hits() + registry.misses();
+        var authorization = new AuthorizationReport(
+                registry.enabled(),
+                registry.providers(),
+                registry.grants(),
+                lookups == 0 ? 0 : (double) registry.hits() / lookups);
+
         var cooldowns = snapshot.cooldowns().stream()
                 .filter(pause -> byId.containsKey(pause.providerId()))
                 .map(pause -> {
@@ -94,7 +112,7 @@ public class GatewayTrafficAdminController {
                             pause.providerId(), provider.getName(), provider.getSlug(), pause.until(), pause.status());
                 })
                 .toList();
-        return new Report(cache, cooldowns);
+        return new Report(cache, authorization, cooldowns);
     }
 
     /** Drops every stored response, for every provider. */

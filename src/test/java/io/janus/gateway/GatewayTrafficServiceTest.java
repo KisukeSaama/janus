@@ -42,7 +42,8 @@ class GatewayTrafficServiceTest {
             // Deliberately impatient: a test should not spend two seconds discovering a refusal, and
             // a one-millisecond backoff exercises the same branch a realistic one does.
             new GatewayTrafficProperties.Throttle(1, 300),
-            new GatewayTrafficProperties.Retry(2, 1, 1));
+            new GatewayTrafficProperties.Retry(2, 1, 1),
+            new GatewayTrafficProperties.Authorization(true, 10, 100));
 
     private final ResponseCache cache = new ResponseCache(properties);
     private final RateLimiter limiter = new RateLimiter();
@@ -215,6 +216,41 @@ class GatewayTrafficServiceTest {
         assertThat(sent).hasSize(1);
     }
 
+    /**
+     * The catalogue is shared, so two accounts calling the same API at the same path are the ordinary
+     * case, not the exotic one. What separates them is the credential the call would have been made
+     * with: it is part of the address, so neither account can be answered from what the other fetched
+     * — and the second call is a miss even though every visible part of the request is identical.
+     */
+    @Test
+    void neverAnswersOneAccountFromWhatAnotherAccountFetched() {
+        var otherOwner = Fixtures.owner();
+        var otherApplication = Fixtures.application(otherOwner);
+        var theirCredential =
+                new Credential(otherOwner.getId(), provider, "theirs", Credential.strategyOf(provider), null, true);
+        var theirGrant = Fixtures.grant(otherApplication, provider, theirCredential);
+
+        service.forward(exchange(bearer()));
+        var theirs = service.forward(exchange(HttpMethod.GET, "/v1/tracks", theirGrant, new HttpHeaders()));
+
+        assertThat(theirs.cacheStatus()).isEqualTo(CacheStatus.MISS);
+        assertThat(sent).hasSize(2);
+    }
+
+    /** The other half of the same rule: what one account rotates never empties another's entries. */
+    @Test
+    void droppingOneAccountsEntriesLeavesAnotherAccountsAlone() {
+        var credential = bearer();
+        var otherCredential = Fixtures.credential(provider);
+        service.forward(exchange(credential));
+        service.forward(exchange(otherCredential));
+
+        cache.invalidateCredential(otherCredential.getId());
+        var mine = service.forward(exchange(credential));
+
+        assertThat(mine.cacheStatus()).isEqualTo(CacheStatus.HIT);
+    }
+
     @Test
     void aCallerAskingForAFreshCopyGetsOne() {
         var credential = bearer();
@@ -282,6 +318,172 @@ class GatewayTrafficServiceTest {
         assertThat(revalidated.cacheStatus()).isEqualTo(CacheStatus.REVALIDATED);
         assertThat(new String(revalidated.body())).isEqualTo("original body");
         assertThat(header(sent.get(1), HttpHeaders.IF_NONE_MATCH)).isEqualTo("\"v1\"");
+    }
+
+    // --- what the caller is told it may reuse --------------------------------
+
+    /**
+     * The provider states a default TTL and the upstream states nothing. Janus reuses the answer on
+     * that policy, so it says so: without a {@code Cache-Control} of its own the response carries the
+     * platform's {@code no-store}, and Janus would be the only party in the chain able to act on a
+     * policy the operator set for everyone.
+     */
+    @Test
+    void announcesTheFreshnessAProviderPolicyGrantedWhenTheUpstreamStatedNone() {
+        provider.applyTrafficPolicy(new Provider.TrafficPolicy(true, 120, 0, 0));
+        willAnswer(status(HttpStatus.OK));
+
+        var outcome = service.forward(exchange(bearer()));
+
+        assertThat(outcome.headers().getFirst(HttpHeaders.CACHE_CONTROL)).isEqualTo("private, max-age=120");
+    }
+
+    /**
+     * Always {@code private}: one hop out, nothing knows these answers are addressed by credential,
+     * and a shared cache keyed on the URL alone would hand one account's answer to another's request.
+     */
+    @Test
+    void whatItAnnouncesIsNeverReusableByAnybodyInBetween() {
+        provider.applyTrafficPolicy(new Provider.TrafficPolicy(true, 120, 0, 0));
+        willAnswer(status(HttpStatus.OK));
+
+        var outcome = service.forward(exchange(bearer()));
+
+        assertThat(outcome.headers().getFirst(HttpHeaders.CACHE_CONTROL)).startsWith("private");
+    }
+
+    /** An upstream that stated its own policy is the party that knows; it is not restated. */
+    @Test
+    void leavesAnUpstreamsOwnFreshnessPolicyAlone() {
+        provider.applyTrafficPolicy(new Provider.TrafficPolicy(true, 120, 0, 0));
+
+        var outcome = service.forward(exchange(bearer()));
+
+        assertThat(outcome.headers().getFirst(HttpHeaders.CACHE_CONTROL)).isEqualTo("max-age=60");
+    }
+
+    /**
+     * A hit announces the lifetime the entry was stored with, not what is left of it: the caller
+     * subtracts {@code Age} itself, and announcing the remainder would have it counted twice.
+     */
+    @Test
+    void aHitAnnouncesTheWholeLifetimeAlongsideItsAge() {
+        provider.applyTrafficPolicy(new Provider.TrafficPolicy(true, 120, 0, 0));
+        willAnswer(status(HttpStatus.OK), status(HttpStatus.OK));
+        var credential = bearer();
+
+        service.forward(exchange(credential));
+        var second = service.forward(exchange(credential));
+
+        assertThat(second.cacheStatus()).isEqualTo(CacheStatus.HIT);
+        assertThat(second.headers().getFirst(HttpHeaders.CACHE_CONTROL)).isEqualTo("private, max-age=120");
+        assertThat(second.headers().getFirst(HttpHeaders.AGE)).isNotNull();
+    }
+
+    /** A stale answer is served because the alternative was an error. It is not one to keep. */
+    @Test
+    void announcesNoFreshnessForAnAnswerServedOnlyBecauseTheUpstreamWasFailing() {
+        var credential = bearer();
+        willAnswer(ClientResponse.create(HttpStatus.OK)
+                .header(HttpHeaders.CACHE_CONTROL, "max-age=0")
+                .body("body")
+                .build());
+        service.forward(exchange(credential));
+        // One first attempt plus the two retries an idempotent method is allowed.
+        willFailToConnect();
+        willFailToConnect();
+        willFailToConnect();
+
+        var stale = service.forward(exchange(credential));
+
+        assertThat(stale.cacheStatus()).isEqualTo(CacheStatus.STALE);
+        assertThat(stale.headers().getFirst(HttpHeaders.CACHE_CONTROL)).isEqualTo("max-age=0");
+    }
+
+    // --- a caller running its own condition -----------------------------------
+
+    /** The client that keeps an ETag was the one caller the store never helped. Now it does. */
+    @Test
+    void answersACallersOwnIfNoneMatchFromTheStore() {
+        var credential = bearer();
+        willAnswer(ClientResponse.create(HttpStatus.OK)
+                .header(HttpHeaders.CACHE_CONTROL, "max-age=60")
+                .header(HttpHeaders.ETAG, "\"v1\"")
+                .body("original body")
+                .build());
+        service.forward(exchange(credential));
+
+        var headers = new HttpHeaders();
+        headers.set(HttpHeaders.IF_NONE_MATCH, "\"v1\"");
+        var conditional = service.forward(exchange(HttpMethod.GET, "/v1/tracks", credential, headers));
+
+        assertThat(conditional.status()).isEqualTo(HttpStatus.NOT_MODIFIED);
+        assertThat(conditional.body()).isEmpty();
+        assertThat(sent).hasSize(1);
+    }
+
+    /** The weak comparison function: {@code W/"v1"} and {@code "v1"} name the same representation. */
+    @Test
+    void comparesTagsWeaklyAsTheStandardRequiresForThisCondition() {
+        var credential = bearer();
+        willAnswer(ClientResponse.create(HttpStatus.OK)
+                .header(HttpHeaders.CACHE_CONTROL, "max-age=60")
+                .header(HttpHeaders.ETAG, "\"v1\"")
+                .body("original body")
+                .build());
+        service.forward(exchange(credential));
+
+        var headers = new HttpHeaders();
+        headers.set(HttpHeaders.IF_NONE_MATCH, "W/\"v0\", W/\"v1\"");
+        var conditional = service.forward(exchange(HttpMethod.GET, "/v1/tracks", credential, headers));
+
+        assertThat(conditional.status()).isEqualTo(HttpStatus.NOT_MODIFIED);
+    }
+
+    /** A caller holding an older tag gets the representation Janus holds, not a round trip. */
+    @Test
+    void servesTheStoredRepresentationWhenTheCallersTagIsNoLongerTheCurrentOne() {
+        var credential = bearer();
+        willAnswer(ClientResponse.create(HttpStatus.OK)
+                .header(HttpHeaders.CACHE_CONTROL, "max-age=60")
+                .header(HttpHeaders.ETAG, "\"v2\"")
+                .body("current body")
+                .build());
+        service.forward(exchange(credential));
+
+        var headers = new HttpHeaders();
+        headers.set(HttpHeaders.IF_NONE_MATCH, "\"v1\"");
+        var conditional = service.forward(exchange(HttpMethod.GET, "/v1/tracks", credential, headers));
+
+        assertThat(conditional.status()).isEqualTo(HttpStatus.OK);
+        assertThat(new String(conditional.body())).isEqualTo("current body");
+        assertThat(sent).hasSize(1);
+    }
+
+    /** Nothing fresh to answer with: the caller's exchange goes out as its own, unmixed. */
+    @Test
+    void forwardsAConditionalCallUntouchedWhenNothingFreshCanAnswerIt() {
+        var headers = new HttpHeaders();
+        headers.set(HttpHeaders.IF_NONE_MATCH, "\"v1\"");
+
+        var outcome = service.forward(exchange(HttpMethod.GET, "/v1/tracks", bearer(), headers));
+
+        assertThat(outcome.cacheStatus()).isEqualTo(CacheStatus.BYPASS);
+        assertThat(header(sent.getFirst(), HttpHeaders.IF_NONE_MATCH)).isEqualTo("\"v1\"");
+    }
+
+    /** Every other condition still belongs to the caller alone, hit or no hit. */
+    @Test
+    void neverAnswersARangeOrADateConditionFromTheStore() {
+        var credential = bearer();
+        service.forward(exchange(credential));
+
+        var headers = new HttpHeaders();
+        headers.set(HttpHeaders.RANGE, "bytes=0-99");
+        var ranged = service.forward(exchange(HttpMethod.GET, "/v1/tracks", credential, headers));
+
+        assertThat(ranged.cacheStatus()).isEqualTo(CacheStatus.BYPASS);
+        assertThat(sent).hasSize(2);
     }
 
     // --- allowances ----------------------------------------------------------

@@ -64,7 +64,12 @@ export function DataTable<T>({
                 </th>
               ))}
               {actions && (
-                <th scope="col" className="px-4 py-3">
+                /*
+                 * Zero-width and nowrap: the column takes exactly what its controls measure and no
+                 * more. Left to shrink against a `grow` column it collapsed to one button wide and
+                 * stacked the rest of the row's actions on top of each other, four buttons tall.
+                 */
+                <th scope="col" className="w-0 whitespace-nowrap px-4 py-3">
                   <span className="sr-only">{t('common.actions')}</span>
                 </th>
               )}
@@ -72,7 +77,7 @@ export function DataTable<T>({
           </thead>
           <tbody className="divide-y divide-line">
             {rows.map((row) => (
-              <tr key={rowKey(row)} className="transition-colors duration-150 hover:bg-sunk/50">
+              <tr key={rowKey(row)} className="transition-colors hover:bg-sunk/50">
                 {columns.map((c) => (
                   <td
                     key={c.key}
@@ -88,7 +93,12 @@ export function DataTable<T>({
                     {c.cell(row)}
                   </td>
                 ))}
-                {actions && <td className="px-4 py-3 text-right align-top">{actions(row)}</td>}
+                {actions && (
+                  <td className="w-0 whitespace-nowrap px-4 py-3 align-top">
+                    {/* The row owns the arrangement, so no page can invent its own and wrap. */}
+                    <div className="flex items-center justify-end gap-1">{actions(row)}</div>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -121,7 +131,8 @@ export function DataTable<T>({
             </dl>
           )}
 
-          {actions && <div className="mt-3 flex justify-end">{actions(row)}</div>}
+          {/* Stacked records have the width of the screen for their controls, so here wrapping is fine. */}
+          {actions && <div className="mt-3 flex flex-wrap items-center justify-end gap-1">{actions(row)}</div>}
         </li>
       ))}
     </ul>

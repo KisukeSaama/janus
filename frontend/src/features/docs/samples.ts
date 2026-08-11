@@ -11,7 +11,6 @@
 export type SampleContext = {
   /** Where Janus itself answers, taken from the address the console was opened at. */
   origin: string;
-  username: string;
   slug: string;
   applicationId: string;
   /** A path the connection actually allows, or a plausible one when nothing is registered yet. */
@@ -23,7 +22,6 @@ export type Sample = { id: string; label: string; snippets: Snippet[] };
 
 export const PLACEHOLDER: SampleContext = {
   origin: 'https://janus.example.com',
-  username: 'alice',
   slug: 'payments',
   applicationId: '00000000-0000-0000-0000-000000000000',
   path: '/v1/orders',

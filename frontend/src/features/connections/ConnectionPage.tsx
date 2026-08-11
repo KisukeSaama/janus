@@ -17,9 +17,9 @@ import {
   type Provider,
 } from '../../api';
 import {
-  ArmedAction,
   Block,
   CheckField,
+  ConfirmAction,
   CopyField,
   DeleteAction,
   ExpiryState,
@@ -29,8 +29,8 @@ import {
   LiveState,
   Notice,
   PageHead,
+  PageSkeleton,
   SidePanel,
-  SkeletonRows,
 } from '../../components';
 import { useI18n } from '../../i18n';
 import { buildConnections, curlFor, gatewayUrl, type Connection } from '../../lib/connections';
@@ -53,13 +53,11 @@ const FIX_TARGET: Record<'application' | 'credential', 'applications' | 'credent
 };
 
 export function ConnectionPage({
-  username,
   id,
   onBack,
   onFix,
   identity,
 }: {
-  username: string;
   id: string;
   onBack: () => void;
   onFix: (to: 'applications' | 'credentials') => void;
@@ -91,9 +89,8 @@ export function ConnectionPage({
         applications.data ?? [],
         providers.data ?? [],
         credentials.data ?? [],
-        username,
       ).find((c) => c.id === id),
-    [grants.data, applications.data, providers.data, credentials.data, id, username],
+    [grants.data, applications.data, providers.data, credentials.data, id],
   );
 
   // Deleted from its own page, or opened from a link that no longer resolves. Navigating is an
@@ -102,14 +99,14 @@ export function ConnectionPage({
     if (!loading && !connection) onBack();
   }, [loading, connection, onBack]);
 
-  if (loading || !connection) return <SkeletonRows rows={5} cols={3} />;
+  if (loading || !connection) return <PageSkeleton rows={5} cols={3} />;
 
   const { grant, provider, credential } = connection;
   const application = connection.application;
-  const endpoint = `${gatewayUrl(username, provider?.slug ?? '')}/`;
+  const endpoint = `${gatewayUrl(provider?.slug ?? '')}/`;
   // Any path reaches the destination now, so the sample states the one nobody can get wrong and
   // leaves the reader to replace it with whatever the API actually exposes.
-  const curl = curlFor(username, provider?.slug ?? '', '/', grant.applicationId, '$JANUS_API_KEY');
+  const curl = curlFor(provider?.slug ?? '', '/', grant.applicationId, '$JANUS_API_KEY');
 
   /** Every grant write sends the whole record: the endpoint replaces, it does not patch. */
   const writeGrant = (changes: Partial<{ enabled: boolean; perMinute: number; burst: number }>) =>
@@ -142,7 +139,7 @@ export function ConnectionPage({
        * the title lands on the same pixel it did a click earlier.
        */}
       <PageHead
-        back={{ label: t('connections.title'), onClick: onBack }}
+        back={{ label: t('dashboard.title'), onClick: onBack }}
         title={
           <>
             {grant.applicationName}
@@ -181,7 +178,7 @@ export function ConnectionPage({
             aside={
               <span className="flex items-center gap-1">
                 {identity.role !== 'USER' && provider.cacheEnabled && (
-                  <ArmedAction
+                  <ConfirmAction
                     trigger={t('providers.purge')}
                     confirm={t('providers.purgeConfirm')}
                     pending={t('providers.purging')}
@@ -277,7 +274,7 @@ export function ConnectionPage({
               <p className="text-sm text-text-2" title={formatDate(application.apiKeyRotatedAt)}>
                 {t('detail.keyIssued', { age: formatAge(application.apiKeyRotatedAt) })}
               </p>
-              <ArmedAction
+              <ConfirmAction
                 trigger={t('detail.keyRotate')}
                 confirm={t('detail.keyRotateConfirm')}
                 pending={t('detail.keyRotating')}
@@ -299,7 +296,7 @@ export function ConnectionPage({
               {grant.enabled ? t('detail.pauseDescription') : t('detail.resumeDescription')}
             </p>
             <span className="flex items-center gap-1">
-              <ArmedAction
+              <ConfirmAction
                 trigger={grant.enabled ? t('detail.pause') : t('detail.resume')}
                 confirm={grant.enabled ? t('detail.pauseConfirm') : t('detail.resumeConfirm')}
                 pending={grant.enabled ? t('detail.pausing') : t('detail.resuming')}

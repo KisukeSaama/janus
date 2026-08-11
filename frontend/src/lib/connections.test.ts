@@ -27,7 +27,7 @@ const build = (g: Grant, a = app(), p = provider(), c = credential()) => buildCo
 
 describe('gatewayUrl', () => {
   it('uses the Janus origin and global API slug, never the upstream API address', () => {
-    expect(gatewayUrl('kisukesaama', 'tmdb', 'https://janus.kisukesaama.com')).toBe(
+    expect(gatewayUrl('tmdb', 'https://janus.kisukesaama.com')).toBe(
       'https://janus.kisukesaama.com/gateway/tmdb',
     );
   });
@@ -137,7 +137,7 @@ describe('absolutePath', () => {
 
 describe('curlFor', () => {
   it('writes a command carrying exactly the two headers the gateway expects', () => {
-    const command = curlFor('kisukesaama', 'spotify', 'v1/tracks', 'app-1', 'jns_secret');
+    const command = curlFor('spotify', 'v1/tracks', 'app-1', 'jns_secret');
 
     expect(command).toContain('/gateway/spotify/v1/tracks');
     expect(command).toContain('X-Janus-Application-Id: app-1');

@@ -208,7 +208,12 @@ class ProviderAdminControllerTest {
         verify(traffic).forgetProvider(provider.getId());
     }
 
-    /** Removing an API removes its dependent records instead of leaving its slug occupied. */
+    /**
+     * Removing an API removes its dependent records instead of leaving its slug occupied — and
+     * removes them through the session, in dependency order. A bulk statement would leave the grants
+     * this method just read still managed and still pointing at a removed provider, which Hibernate
+     * refuses at commit rather than at the call, so it reaches the operator as an opaque HTTP 500.
+     */
     @Test
     void removesConnectionsAndCredentialMetadataWithTheDestination() throws Exception {
         var provider = existing();
@@ -222,9 +227,12 @@ class ProviderAdminControllerTest {
 
         mvc.perform(delete("/api/admin/providers/" + provider.getId())).andExpect(status().isOk());
 
+        var order = inOrder(grants, credentials, repository);
+        order.verify(grants).deleteAll(List.of(grant));
+        order.verify(credentials).deleteAll(List.of(credential));
+        order.verify(repository).delete(provider);
         verify(grants, never()).deleteAllInBatch(any());
         verify(credentials, never()).deleteAllInBatch(any());
-        verify(repository).delete(provider);
     }
 
     /** The durable cleanup request is committed with the metadata deletion. */

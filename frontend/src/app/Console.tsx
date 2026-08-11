@@ -2,8 +2,8 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { Menu, RefreshCw } from 'lucide-react';
 
-import { useApplications, useCredentials, useGrants, useSignOut, type Identity } from '../api';
-import { SkeletonRows, Wordmark } from '../components';
+import { useApplications, useCredentials, useSignOut, type Identity } from '../api';
+import { PageSkeleton, Wordmark } from '../components';
 import { ConnectFlow } from '../features/connections/ConnectFlow';
 import { NotificationsMenu } from '../features/notifications/NotificationsMenu';
 import { useMediaQuery, WIDE } from '../hooks/useMediaQuery';
@@ -17,15 +17,15 @@ import { SettingsMenu } from './SettingsMenu';
  * A rail, a bar, and one page under them.
  *
  * The rail names every destination and holds the current one. The bar holds what is true of all of
- * them: what is coming due, a way to refresh, and the settings. Nothing else moves between pages,
- * which is what lets a title, a table, and a panel land on the same pixel throughout.
+ * them: what Janus has announced, a way to refresh, and the settings. Nothing else moves between
+ * pages, which is what lets a title, a table, and a panel land on the same pixel throughout.
  *
  * Pages are code-split. The registry and the setup flow are not what most visits are for, and there
  * is no reason for their code to be in the bundle that draws the first screen.
  */
 
-const ConnectionsPage = lazy(() =>
-  import('../features/connections/ConnectionsPage').then((m) => ({ default: m.ConnectionsPage })),
+const DashboardPage = lazy(() =>
+  import('../features/dashboard/DashboardPage').then((m) => ({ default: m.DashboardPage })),
 );
 const ConnectionPage = lazy(() =>
   import('../features/connections/ConnectionPage').then((m) => ({ default: m.ConnectionPage })),
@@ -57,10 +57,9 @@ export function Console({ identity }: { identity: Identity }) {
   // its own and stays in step with whatever is on screen.
   const applications = useApplications();
   const credentials = useCredentials();
-  const grants = useGrants();
   const fetching = useIsFetching() > 0;
 
-  const openId = location.page === 'connections' ? location.id : undefined;
+  const openId = location.page === 'dashboard' ? location.id : undefined;
 
   useEffect(() => {
     document.title = `${t(PAGE_TITLE[location.page])} · Janus`;
@@ -85,10 +84,10 @@ export function Console({ identity }: { identity: Identity }) {
         .mutateAsync()
         .then(() => window.history.replaceState(null, '', '/'))
         .catch(() => undefined),
-    // Withheld until the first load lands: a rail that counts to zero and then corrects itself reads
-    // as an empty install for as long as the request takes.
+    // What each destination holds, withheld until the first load lands: a rail that counts to zero
+    // and then corrects itself reads as an empty install for as long as the request takes. The
+    // dashboard and the log carry no figure, because neither is a collection.
     counts: {
-      connections: grants.data?.length,
       applications: applications.data?.length,
       credentials: credentials.data?.length,
     },
@@ -96,6 +95,19 @@ export function Console({ identity }: { identity: Identity }) {
 
   return (
     <div>
+      {/*
+       * The rail names seven destinations and the bar three more, all of them before the page in
+       * reading order: without this, reaching the first row of a table from the keyboard costs a
+       * dozen tab stops on every navigation. Rendered rather than conditional, so it is in the tab
+       * order from the first keystroke, and moved off the top of the window until it is focused.
+       */}
+      <a
+        href="#content"
+        className="btn btn-secondary fixed left-4 top-3 z-50 -translate-y-[calc(100%+1rem)] shadow-overlay transition-transform focus-visible:translate-y-0"
+      >
+        {t('nav.skip')}
+      </a>
+
       <Sidebar {...nav} />
       {menu && !wide && <NavDrawer {...nav} onClose={() => setMenu(false)} />}
 
@@ -134,32 +146,30 @@ export function Console({ identity }: { identity: Identity }) {
           <div className="h-0.5 bg-line" />
         </header>
 
-        <main className="mx-auto max-w-[85rem] px-4 py-7 md:px-6 md:py-9">
-          <Suspense fallback={<SkeletonRows rows={6} cols={4} />}>
-            {location.page === 'connections' &&
+        <main id="content" tabIndex={-1} className="mx-auto max-w-[85rem] px-4 py-7 md:px-6 md:py-9">
+          <Suspense fallback={<PageSkeleton />}>
+            {location.page === 'dashboard' &&
               (openId ? (
                 <ConnectionPage
                   identity={identity}
-                  username={identity.username}
                   id={openId}
-                  onBack={() => navigate({ page: 'connections' })}
+                  onBack={() => navigate({ page: 'dashboard' })}
                   onFix={go}
                 />
               ) : (
-                <ConnectionsPage
-                  username={identity.username}
-                  onOpen={(id) => navigate({ page: 'connections', id })}
+                <DashboardPage
+                  onOpen={(id) => navigate({ page: 'dashboard', id })}
                   onConnect={() => (identity.role === 'USER' ? go('credentials') : setConnecting(true))}
                   onNavigate={go}
                 />
               ))}
 
             {location.page === 'activity' && <ActivityPage />}
-            {location.page === 'applications' && <ApplicationsPage username={identity.username} />}
+            {location.page === 'applications' && <ApplicationsPage />}
             {location.page === 'credentials' && <CredentialsPage identity={identity} />}
             {location.page === 'accounts' && <AccountsPage identity={identity} />}
-            {location.page === 'documentation' && <DocsPage username={identity.username} />}
-            {location.page === 'agents' && <AgentsPage username={identity.username} />}
+            {location.page === 'documentation' && <DocsPage />}
+            {location.page === 'agents' && <AgentsPage />}
           </Suspense>
         </main>
       </div>
@@ -167,7 +177,6 @@ export function Console({ identity }: { identity: Identity }) {
       {connecting && identity.role !== 'USER' && (
         <Suspense fallback={null}>
           <ConnectFlow
-            username={identity.username}
             onClose={() => setConnecting(false)}
             onDone={() => {
               setConnecting(false);

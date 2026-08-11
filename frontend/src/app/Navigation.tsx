@@ -5,9 +5,9 @@ import {
   Bot,
   Boxes,
   KeyRound,
+  LayoutDashboard,
   LogOut,
   UsersRound,
-  Workflow,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -22,7 +22,7 @@ import type { Page } from './routes';
 /**
  * One rail, every destination.
  *
- * What an operator does (connections, activity) above what Janus stores, and the guide the developer
+ * What an operator does (the dashboard, activity) above what Janus stores, and the guide the developer
  * of a calling service reads under both. Section tabs could only show the first tier and hid the
  * collections one click deep, behind a control that existed on one page only. Here the second tier
  * is a nav group, so every page starts at the same offset and the current position is readable
@@ -38,7 +38,7 @@ const GROUPS: { label: MessageKey; items: Item[] }[] = [
   {
     label: 'nav.console',
     items: [
-      { id: 'connections', label: 'nav.connections', icon: Workflow },
+      { id: 'dashboard', label: 'nav.dashboard', icon: LayoutDashboard },
       { id: 'activity', label: 'nav.activity', icon: ActivityIcon },
     ],
   },
@@ -199,7 +199,7 @@ export function NavDrawer({ onClose, ...props }: NavProps & { onClose: () => voi
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-[var(--c-scrim)] [animation:fade-in_160ms_var(--ease-out-quint)] lg:hidden"
+      className="fixed inset-0 z-50 bg-scrim [animation:fade-in_160ms_var(--ease-out-quint)] lg:hidden"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

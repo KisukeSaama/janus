@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 
-import { api, del, post, put } from './client';
+import { api, del, download, post, put } from './client';
 import type {
   Account,
   AccountInput,
@@ -31,6 +31,11 @@ import type {
 
 export const keys = {
   applications: ['applications'] as const,
+  /**
+   * The whole catalogue, and one page of it. The page key extends the collection key on purpose:
+   * invalidating `providers` reaches every catalogue page with it, which is what a renamed or
+   * withdrawn API requires — the two are the same records, read two ways.
+   */
   providers: ['providers'] as const,
   providerCatalog: (query: string, page: number, size: number) => ['providers', query, page, size] as const,
   credentials: ['credentials'] as const,
@@ -39,11 +44,34 @@ export const keys = {
   traffic: ['traffic'] as const,
   session: ['session'] as const,
   accounts: ['accounts'] as const,
-  audit: (page: number, size: number, outcome?: string) => ['audit', page, size, outcome ?? ''] as const,
+  audit: (page: number, size: number, filter: AuditFilter) =>
+    ['audit', page, size, filter.outcome ?? '', filter.from ?? '', filter.to ?? ''] as const,
 };
+
+/**
+ * What the reader narrowed the journal to. The instants are ISO-8601; `from` is inclusive and `to` is
+ * exclusive, so two adjacent ranges count every event once.
+ */
+export type AuditFilter = { outcome?: string; from?: string; to?: string };
+
+function auditQuery(filter: AuditFilter): URLSearchParams {
+  const query = new URLSearchParams();
+  if (filter.outcome) query.set('outcome', filter.outcome);
+  if (filter.from) query.set('from', filter.from);
+  if (filter.to) query.set('to', filter.to);
+  return query;
+}
 
 /** Records change when an operator changes them, so a short staleness window is generous already. */
 const RECORD_STALE_MS = 30_000;
+
+/**
+ * The API catalogue is administered, shared by the whole deployment, and read by five screens that
+ * only want it to resolve names. Every mutation that can change it invalidates it by name below, so
+ * the window here is not what keeps it correct — it is what stops a console left open on a second
+ * monitor from re-reading the entire catalogue, a page of a hundred at a time, on every window focus.
+ */
+const CATALOG_STALE_MS = 300_000;
 
 export function useApplications() {
   return useQuery({
@@ -66,7 +94,7 @@ export function useProviders() {
       );
       return [first, ...rest].flatMap((page) => page.content);
     },
-    staleTime: RECORD_STALE_MS,
+    staleTime: CATALOG_STALE_MS,
   });
 }
 
@@ -96,14 +124,28 @@ export function useGrants() {
   });
 }
 
-export function useAudit(page: number, size: number, outcome?: string) {
-  const query = new URLSearchParams({ page: String(page), size: String(size) });
-  if (outcome) query.set('outcome', outcome);
+export function useAudit(page: number, size: number, filter: AuditFilter = {}) {
+  const query = auditQuery(filter);
+  query.set('page', String(page));
+  query.set('size', String(size));
   return useQuery({
-    queryKey: keys.audit(page, size, outcome),
+    queryKey: keys.audit(page, size, filter),
     queryFn: () => api<AuditPage>(`/audit-events?${query}`),
     // The gateway writes to this stream continuously; a page of it is stale as soon as it lands.
     staleTime: 0,
+  });
+}
+
+/**
+ * The same window as a file. It is a mutation rather than a query because it has an effect the cache
+ * has no use for: a download happens once, when asked for, and is never replayed from memory.
+ */
+export function useAuditExport() {
+  return useMutation({
+    mutationFn: (filter: AuditFilter) => {
+      const day = new Date().toISOString().slice(0, 10);
+      return download(`/audit-events/export?${auditQuery(filter)}`, `janus-activity-${day}.csv`);
+    },
   });
 }
 
@@ -161,14 +203,8 @@ export function useDeleteApplication() {
   });
 }
 
-export function useCreateProvider() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (input: ProviderInput) => post<Provider>('/providers', input),
-    onSuccess: () => invalidate(client, keys.providers),
-  });
-}
-
+// An API is registered by the setup flow, which creates the provider and its credential together.
+// Nothing else creates one, so there is no hook for it here.
 export function useUpdateProvider() {
   const client = useQueryClient();
   return useMutation({

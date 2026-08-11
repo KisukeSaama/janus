@@ -69,7 +69,7 @@ export function SignIn() {
           </form>
         </div>
 
-        <p className="mt-5 text-xs text-text-3">{t('signIn.ephemeral')}</p>
+        <p className="mt-5 text-center text-xs text-text-3">{t('signIn.ephemeral')}</p>
       </div>
     </main>
   );

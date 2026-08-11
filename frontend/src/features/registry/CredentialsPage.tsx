@@ -3,7 +3,6 @@ import { Plus, Search } from 'lucide-react';
 
 import {
   useCreateCredential,
-  useCreateProvider,
   useCredentials,
   useDeleteCredential,
   useDeleteProvider,
@@ -19,7 +18,6 @@ import {
 import {
   CheckField,
   DataTable,
-  DeleteAction,
   Empty,
   EnabledState,
   ExpiryState,
@@ -29,14 +27,17 @@ import {
   PageHead,
   Pager,
   RecordCell,
+  RowMenu,
   SelectField,
   SidePanel,
   SkeletonRows,
   type Column,
+  type RowAction,
 } from '../../components';
 import { useI18n } from '../../i18n';
 import { useErrorMessage } from '../../lib/errors';
 import { fromDateInput, NOTICE_DAYS, toDateInput, WARNING_DAYS } from '../../lib/expiry';
+import { ConnectFlow } from '../connections/ConnectFlow';
 
 const STRATEGIES: AuthType[] = [
   'BEARER',
@@ -50,7 +51,9 @@ const STRATEGIES: AuthType[] = [
 type Panel =
   | { kind: 'activate'; provider: Provider }
   | { kind: 'credential'; credential: Credential; provider: Provider }
-  | { kind: 'api'; provider?: Provider }
+  // Editing only. Registering an API is the setup flow's job, here as on the console's home page,
+  // so an operator never meets two different ways of adding the same record.
+  | { kind: 'api'; provider: Provider }
   | null;
 
 /** Shared API catalogue, with a personal activation and credential boundary layered onto each row. */
@@ -63,6 +66,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const [panel, setPanel] = useState<Panel>(null);
+  const [connecting, setConnecting] = useState(false);
   const [strategy, setStrategy] = useState<AuthType>('BEARER');
   const [formError, setFormError] = useState('');
   const [error, setError] = useState('');
@@ -80,7 +84,6 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
   const createCredential = useCreateCredential();
   const updateCredential = useUpdateCredential();
   const deleteCredential = useDeleteCredential();
-  const createProvider = useCreateProvider();
   const updateProvider = useUpdateProvider();
   const deleteProvider = useDeleteProvider();
 
@@ -95,15 +98,14 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
     setFormError('');
   }
 
-  function openApi(provider?: Provider) {
-    setStrategy(provider?.authType ?? 'BEARER');
+  function openApi(provider: Provider) {
+    setStrategy(provider.authType);
     setPanel({ kind: 'api', provider });
   }
 
-  function credentialInput(provider: Provider, form: FormData) {
-    const secret = String(form.get('secret') ?? '');
+  /** The contract the API states, which a credential only ever repeats back. */
+  function contract(provider: Provider) {
     return {
-      name: provider.slug,
       providerId: provider.id,
       authType: provider.authType,
       headerName: provider.headerName ?? null,
@@ -111,10 +113,37 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
       tokenUrl: provider.tokenUrl ?? null,
       tokenScopes: provider.tokenScopes ?? null,
       tokenClientAuth: provider.tokenClientAuth ?? null,
+    };
+  }
+
+  function credentialInput(provider: Provider, form: FormData) {
+    const secret = String(form.get('secret') ?? '');
+    return {
+      name: provider.slug,
+      ...contract(provider),
       secret: secret || null,
       expiresAt: fromDateInput(String(form.get('expiresAt') ?? '')),
       enabled: form.get('enabled') === 'on',
     };
+  }
+
+  /**
+   * An open API holds no secret, so the only state its activation carries is on or off. That is one
+   * click, not a panel whose single field is a checkbox.
+   */
+  function toggle(provider: Provider, credential: Credential) {
+    return act(() =>
+      updateCredential.mutateAsync({
+        id: credential.id,
+        input: {
+          name: credential.name,
+          ...contract(provider),
+          secret: null,
+          expiresAt: credential.expiresAt ?? null,
+          enabled: !credential.enabled,
+        },
+      }),
+    );
   }
 
   async function submitCredential(e: FormEvent<HTMLFormElement>) {
@@ -155,11 +184,20 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
     };
     setFormError('');
     try {
-      if (panel.provider) await updateProvider.mutateAsync({ id: panel.provider.id, input });
-      else await createProvider.mutateAsync(input);
+      await updateProvider.mutateAsync({ id: panel.provider.id, input });
       close();
     } catch (x) {
       setFormError(describe(x));
+    }
+  }
+
+  /** Row actions report into the page banner: the row they belonged to may no longer be there. */
+  async function act(run: () => Promise<unknown>) {
+    setError('');
+    try {
+      await run();
+    } catch (x) {
+      setError(describe(x));
     }
   }
 
@@ -173,7 +211,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
     },
     {
       key: 'auth',
-      label: t('credentials.fieldStrategy'),
+      label: t('credentials.colStrategy'),
       nowrap: true,
       cell: (provider) => tEnum('authType', provider.authType),
     },
@@ -187,6 +225,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
     {
       key: 'expiry',
       label: t('credentials.colExpiry'),
+      nowrap: true,
       cell: (provider) => {
         const credential = personal.get(provider.id);
         return credential ? <ExpiryState expiresAt={credential.expiresAt} /> : '—';
@@ -195,7 +234,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
   ];
 
   const primary = administrator ? (
-    <button className="btn btn-primary w-full sm:w-auto" onClick={() => openApi()}>
+    <button className="btn btn-primary w-full sm:w-auto" onClick={() => setConnecting(true)}>
       <Plus size={15} strokeWidth={2.25} />
       {t('credentials.addApi')}
     </button>
@@ -231,40 +270,70 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
             columns={columns}
             rows={rows}
             rowKey={(provider) => provider.id}
+            /*
+             * One verb in the row, the one this account came to use, and the rest under a menu that
+             * names whose records they touch. Both deletions used to sit here as buttons reading
+             * `Delete`, side by side, one destroying a personal credential and the other the API for
+             * every account in the deployment.
+             */
             actions={(provider) => {
               const credential = personal.get(provider.id);
+              const menu: RowAction[] = [];
+              if (credential) {
+                menu.push({
+                  key: 'deactivate',
+                  label: t('credentials.deactivate'),
+                  group: t('credentials.groupAccount'),
+                  destructive: true,
+                  consequence: t('credentials.deactivateConsequence'),
+                  confirm: t('common.confirmDelete'),
+                  pending: t('common.deleting'),
+                  onConfirm: () => act(() => deleteCredential.mutateAsync(credential.id)),
+                });
+              }
+              if (administrator) {
+                menu.push(
+                  {
+                    key: 'edit',
+                    label: t('credentials.editApi'),
+                    group: t('credentials.groupAdmin'),
+                    onSelect: () => openApi(provider),
+                  },
+                  {
+                    key: 'delete',
+                    label: t('credentials.deleteApi'),
+                    group: t('credentials.groupAdmin'),
+                    destructive: true,
+                    consequence: `${t('credentials.deleteApi')} ${provider.name}. ${t('credentials.deleteGlobalConsequence')}`,
+                    confirm: t('common.confirmDelete'),
+                    pending: t('common.deleting'),
+                    onConfirm: () => act(() => deleteProvider.mutateAsync(provider.id)),
+                  },
+                );
+              }
               return (
-                <span className="flex flex-wrap items-center justify-end gap-1">
-                  {credential ? (
-                    <>
-                      <button className="btn btn-sm btn-quiet" onClick={() => setPanel({ kind: 'credential', credential, provider })}>
-                        {t('credentials.manageCredentials')}
-                      </button>
-                      <DeleteAction
-                        label={provider.name}
-                        consequence={t('credentials.deactivateConsequence')}
-                        onDelete={() => deleteCredential.mutateAsync(credential.id)}
-                      />
-                    </>
+                <>
+                  {credential && provider.authType === 'NONE' ? (
+                    <button className="btn btn-sm btn-quiet" onClick={() => toggle(provider, credential)}>
+                      {credential.enabled ? t('credentials.turnOff') : t('credentials.turnOn')}
+                      <span className="sr-only"> {provider.name}</span>
+                    </button>
+                  ) : credential ? (
+                    <button
+                      className="btn btn-sm btn-quiet"
+                      onClick={() => setPanel({ kind: 'credential', credential, provider })}
+                    >
+                      {t('credentials.manageCredentials')}
+                      <span className="sr-only"> {provider.name}</span>
+                    </button>
                   ) : (
                     <button className="btn btn-sm btn-secondary" onClick={() => setPanel({ kind: 'activate', provider })}>
                       {t('credentials.activate')}
+                      <span className="sr-only"> {provider.name}</span>
                     </button>
                   )}
-                  {administrator && (
-                    <>
-                      <button className="btn btn-sm btn-quiet" onClick={() => openApi(provider)}>{t('common.edit')}</button>
-                      <DeleteAction
-                        label={provider.name}
-                        consequence={t('credentials.deleteGlobalConsequence')}
-                        onDelete={async () => {
-                          setError('');
-                          try { await deleteProvider.mutateAsync(provider.id); } catch (x) { setError(describe(x)); }
-                        }}
-                      />
-                    </>
-                  )}
-                </span>
+                  <RowMenu label={provider.name} actions={menu} />
+                </>
               );
             }}
           />
@@ -325,15 +394,11 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
       )}
 
       {panel?.kind === 'api' && (
-        <SidePanel
-          title={panel.provider ? t('credentials.editApi') : t('credentials.addApi')}
-          intro={t('credentials.adminIntro')}
-          onClose={close}
-        >
-          <FormLayout onSubmit={submitApi} submitLabel={panel.provider ? t('common.saveChanges') : t('common.create')} error={formError}>
-            <Field label={t('providers.fieldName')} name="name" required defaultValue={panel.provider?.name} />
-            <Field label={t('providers.fieldSlug')} name="slug" required data defaultValue={panel.provider?.slug} />
-            <Field label={t('providers.fieldBaseUrl')} name="baseUrl" required data defaultValue={panel.provider?.baseUrl} />
+        <SidePanel title={t('credentials.editApi')} intro={t('credentials.adminIntro')} onClose={close}>
+          <FormLayout onSubmit={submitApi} submitLabel={t('common.saveChanges')} error={formError}>
+            <Field label={t('providers.fieldName')} name="name" required defaultValue={panel.provider.name} />
+            <Field label={t('providers.fieldSlug')} name="slug" required data defaultValue={panel.provider.slug} />
+            <Field label={t('providers.fieldBaseUrl')} name="baseUrl" required data defaultValue={panel.provider.baseUrl} />
             <SelectField
               label={t('credentials.fieldStrategy')}
               name="authType"
@@ -341,22 +406,26 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
               onChange={(event) => setStrategy(event.target.value as AuthType)}
               options={STRATEGIES.map((value) => ({ value, label: tEnum('authType', value) }))}
             />
-            {strategy === 'API_KEY_HEADER' && <Field label={t('credentials.fieldHeader')} name="headerName" required data defaultValue={panel.provider?.headerName} />}
-            {strategy === 'API_KEY_QUERY' && <Field label={t('credentials.fieldQueryParameter')} name="queryParameter" required data defaultValue={panel.provider?.queryParameter} />}
+            {strategy === 'API_KEY_HEADER' && <Field label={t('credentials.fieldHeader')} name="headerName" required data defaultValue={panel.provider.headerName} />}
+            {strategy === 'API_KEY_QUERY' && <Field label={t('credentials.fieldQueryParameter')} name="queryParameter" required data defaultValue={panel.provider.queryParameter} />}
             {strategy === 'OAUTH2_CLIENT_CREDENTIALS' && (
               <>
-                <Field label={t('credentials.fieldTokenUrl')} name="tokenUrl" required data defaultValue={panel.provider?.tokenUrl} />
-                <Field label={t('credentials.fieldTokenScopes')} name="tokenScopes" data defaultValue={panel.provider?.tokenScopes} />
-                <SelectField label={t('credentials.fieldTokenClientAuth')} name="tokenClientAuth" defaultValue={panel.provider?.tokenClientAuth ?? 'BASIC'} options={[{ value: 'BASIC', label: t('credentials.tokenClientAuthBasic') }, { value: 'POST', label: t('credentials.tokenClientAuthPost') }]} />
+                <Field label={t('credentials.fieldTokenUrl')} name="tokenUrl" required data defaultValue={panel.provider.tokenUrl} />
+                <Field label={t('credentials.fieldTokenScopes')} name="tokenScopes" data defaultValue={panel.provider.tokenScopes} />
+                <SelectField label={t('credentials.fieldTokenClientAuth')} name="tokenClientAuth" defaultValue={panel.provider.tokenClientAuth ?? 'BASIC'} options={[{ value: 'BASIC', label: t('credentials.tokenClientAuthBasic') }, { value: 'POST', label: t('credentials.tokenClientAuthPost') }]} />
               </>
             )}
-            <CheckField label={t('providers.cacheLabel')} name="cacheEnabled" defaultChecked={panel.provider?.cacheEnabled ?? true} />
-            <Field label={t('providers.cacheTtlLabel')} name="cacheTtlSeconds" type="number" min={0} defaultValue={panel.provider?.cacheTtlSeconds ?? 0} />
-            <Field label={t('providers.rateLimitLabel')} name="rateLimitPerMinute" type="number" min={0} defaultValue={panel.provider?.rateLimitPerMinute ?? 0} />
-            <Field label={t('providers.burstLabel')} name="rateLimitBurst" type="number" min={0} defaultValue={panel.provider?.rateLimitBurst ?? 0} />
-            <CheckField label={t('providers.enabledLabel')} name="enabled" defaultChecked={panel.provider?.enabled ?? true} />
+            <CheckField label={t('providers.cacheLabel')} name="cacheEnabled" defaultChecked={panel.provider.cacheEnabled ?? true} />
+            <Field label={t('providers.cacheTtlLabel')} name="cacheTtlSeconds" type="number" min={0} defaultValue={panel.provider.cacheTtlSeconds ?? 0} />
+            <Field label={t('providers.rateLimitLabel')} name="rateLimitPerMinute" type="number" min={0} defaultValue={panel.provider.rateLimitPerMinute ?? 0} />
+            <Field label={t('providers.burstLabel')} name="rateLimitBurst" type="number" min={0} defaultValue={panel.provider.rateLimitBurst ?? 0} />
+            <CheckField label={t('providers.enabledLabel')} name="enabled" defaultChecked={panel.provider.enabled ?? true} />
           </FormLayout>
         </SidePanel>
+      )}
+
+      {connecting && (
+        <ConnectFlow onClose={() => setConnecting(false)} onDone={() => setConnecting(false)} />
       )}
     </>
   );

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Check, Settings2 } from 'lucide-react';
 
+import { useDismiss } from '../hooks/useDismiss';
 import { LOCALE_NAMES, LOCALES, useI18n, type Locale } from '../i18n';
 import { useTheme, type Theme } from '../theme';
 
@@ -12,24 +13,7 @@ export function SettingsMenu() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
-    };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
+  useDismiss(open, wrapRef, triggerRef, () => setOpen(false));
 
   const themes: [Theme, string][] = [
     ['dark', t('common.themeDark')],
@@ -76,7 +60,7 @@ export function SettingsMenu() {
                 <button
                   onClick={() => setLocale(id)}
                   aria-pressed={locale === id}
-                  className={`flex w-full items-center justify-between rounded-control px-2.5 py-2 text-sm transition-colors duration-150 ${
+                  className={`flex w-full items-center justify-between rounded-control px-2.5 py-2 text-sm transition-colors ${
                     locale === id ? 'bg-sunk text-text' : 'text-text-2 hover:bg-sunk hover:text-text'
                   }`}
                 >

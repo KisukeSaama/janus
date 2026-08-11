@@ -119,7 +119,10 @@ public class CredentialService {
         var credential = require(id);
         var subscriptions = grants.findAllByCredentialId(id);
         subscriptions.forEach(grant -> traffic.forgetGrant(grant.getId()));
-        grants.deleteAllInBatch(subscriptions);
+        // Through the session, not in one bulk statement: a batch delete leaves these grants managed
+        // and still pointing at the credential removed just below, and the flush at commit refuses
+        // that as an HTTP 500 rather than as anything the console can act on.
+        grants.deleteAll(subscriptions);
         String secretPath = credential.getSecretPath();
         UUID providerId = credential.getProvider().getId();
         boolean stored = !credential.getAuthType().anonymous();

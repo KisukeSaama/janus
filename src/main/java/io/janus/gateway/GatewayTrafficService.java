@@ -96,6 +96,7 @@ public class GatewayTrafficService {
             int attempts,
             CacheStatus cacheStatus,
             Long ageSeconds,
+            Long freshSeconds,
             String note) {}
 
     public GatewayOutcome forward(GatewayExchange exchange) {
@@ -114,10 +115,16 @@ public class GatewayTrafficService {
                     rateLimitHeaders(client));
 
         // 2. What has already been fetched, if anything may be.
+        //
+        // A caller that set a condition of its own is normally none of the store's business. The one
+        // exception is a bare If-None-Match, which asks a question a stored entry can answer — so the
+        // store is read for it, and the request is forwarded untouched if it cannot.
+        boolean revalidatingCaller = CachePolicy.callerRevalidatesOnly(exchange.headers());
+        boolean conditionalCaller = CachePolicy.callerIsConditional(exchange.headers());
         boolean cacheable = cache.isEnabled()
                 && provider.isCacheEnabled()
                 && SAFE.contains(exchange.method())
-                && !CachePolicy.callerIsConditional(exchange.headers());
+                && (!conditionalCaller || revalidatingCaller);
         boolean mayStore = cacheable && !CachePolicy.callerRefusesStorage(exchange.headers());
         boolean mayReuse = mayStore && !CachePolicy.callerRefusesReuse(exchange.headers());
         String key = mayStore
@@ -134,19 +141,27 @@ public class GatewayTrafficService {
             stored = cache.lookup(key, exchange.headers()).orElse(null);
             long now = System.currentTimeMillis();
             if (stored != null && stored.fresh(now)) {
+                boolean unchanged = revalidatingCaller
+                        && CachePolicy.matchesEtag(
+                                exchange.headers().getFirst(HttpHeaders.IF_NONE_MATCH), stored.etag());
                 cache.record(CacheStatus.HIT);
                 return complete(
                         new Delivery(
-                                stored.status(),
+                                unchanged ? HttpStatus.NOT_MODIFIED.value() : stored.status(),
                                 stored.headers(),
-                                stored.body(),
+                                unchanged ? new byte[0] : stored.body(),
                                 0,
                                 CacheStatus.HIT,
                                 stored.ageSeconds(now),
+                                stored.lifetimeSeconds(),
                                 null),
                         client);
             }
         }
+
+        // Nothing fresh to answer a condition with, so the caller's exchange goes out as its own:
+        // no stored validator mixed into it, and nothing kept from what comes back.
+        if (conditionalCaller) return complete(call(exchange, null, null), client);
 
         try {
             return complete(mayReuse ? coalesced(key, exchange, stored) : call(exchange, key, null), client);
@@ -191,6 +206,7 @@ public class GatewayTrafficService {
                         delivery.attempts(),
                         CacheStatus.COALESCED,
                         delivery.ageSeconds(),
+                        delivery.freshSeconds(),
                         delivery.note());
             } catch (TimeoutException ex) {
                 return call(exchange, key, stored);
@@ -355,18 +371,21 @@ public class GatewayTrafficService {
             cache.invalidateResource(
                     provider.getId(), credential.getId(), exchange.route().decodedPath());
 
+        Long freshSeconds = null;
         if (key != null) {
             var storability = CachePolicy.evaluate(
                     upstream.getStatusCode(),
                     upstream.getHeaders(),
                     provider.getCacheTtlSeconds(),
                     properties.cache().staleIfErrorSeconds());
-            if (storability.storable())
+            if (storability.storable()) {
                 cache.store(key, entry(status, headers, body, upstream.getHeaders(), exchange, storability));
+                freshSeconds = storability.freshSeconds();
+            }
         }
         var outcome = key == null ? CacheStatus.BYPASS : CacheStatus.MISS;
         cache.record(outcome);
-        return new Delivery(status, headers, body, attempts, outcome, null, null);
+        return new Delivery(status, headers, body, attempts, outcome, null, freshSeconds, null);
     }
 
     /** A 304 confirms what is stored; the stored body is returned and its freshness restarted. */
@@ -407,7 +426,14 @@ public class GatewayTrafficService {
         if (key != null) cache.refresh(key, refreshed);
         cache.record(CacheStatus.REVALIDATED);
         return new Delivery(
-                refreshed.status(), refreshed.headers(), refreshed.body(), attempts, CacheStatus.REVALIDATED, 0L, null);
+                refreshed.status(),
+                refreshed.headers(),
+                refreshed.body(),
+                attempts,
+                CacheStatus.REVALIDATED,
+                0L,
+                fresh,
+                null);
     }
 
     /** The upstream's value when it restated one, the stored one otherwise; null when neither exists. */
@@ -420,6 +446,8 @@ public class GatewayTrafficService {
         long now = System.currentTimeMillis();
         if (stored == null || !stored.servableStale(now)) return Optional.empty();
         cache.record(CacheStatus.STALE);
+        // No freshness is announced for an answer that has none: this one is served because the
+        // alternative was an error, and a caller must not go on to reuse it on that basis.
         return Optional.of(new Delivery(
                 stored.status(),
                 stored.headers(),
@@ -427,6 +455,7 @@ public class GatewayTrafficService {
                 0,
                 CacheStatus.STALE,
                 stored.ageSeconds(now),
+                null,
                 reason));
     }
 
@@ -458,6 +487,7 @@ public class GatewayTrafficService {
         var headers = copy(delivery.headers());
         headers.set(CACHE_HEADER, delivery.cacheStatus().name());
         if (delivery.ageSeconds() != null) headers.set(HttpHeaders.AGE, Long.toString(delivery.ageSeconds()));
+        announceFreshness(headers, delivery.freshSeconds());
         if (delivery.attempts() > 1) headers.set(ATTEMPTS_HEADER, Integer.toString(delivery.attempts()));
         if (client.measured()) {
             headers.set(LIMIT_HEADER, Integer.toString(client.limit()));
@@ -474,6 +504,31 @@ public class GatewayTrafficService {
                 delivery.body(),
                 delivery.cacheStatus(),
                 detail.toString());
+    }
+
+    /**
+     * Tells the caller how long its own copy may be reused, when the upstream did not say.
+     *
+     * <p>A provider given a default TTL is one Janus reuses answers from on a policy the upstream
+     * never stated. Without this, the caller was told nothing — and a response with no
+     * {@code Cache-Control} at all leaves the platform's default {@code no-store} in place, so the
+     * only client that could benefit from that policy was Janus itself. Stating the remaining
+     * lifetime makes the same reuse available one hop further out, which is where a chatty client
+     * loop actually costs something.
+     *
+     * <p>Always {@code private}, and this is the part that matters when several accounts call the
+     * same API. A stored answer here is addressed by the credential it was fetched with; one hop
+     * further out, nothing knows that. A shared cache between Janus and the client would be keyed on
+     * the URL alone and would hand one account's answer to another's request. {@code private} is what
+     * says: reusable by the one caller who received it, by nobody in between.
+     *
+     * <p>An upstream that stated its own policy keeps it, whatever it says. Restating it here would
+     * be Janus overruling the only party that knows what the resource is.
+     */
+    private static void announceFreshness(HttpHeaders headers, Long freshSeconds) {
+        if (freshSeconds == null || freshSeconds <= 0) return;
+        if (headers.containsHeader(HttpHeaders.CACHE_CONTROL) || headers.containsHeader(HttpHeaders.EXPIRES)) return;
+        headers.set(HttpHeaders.CACHE_CONTROL, "private, max-age=" + freshSeconds);
     }
 
     /**

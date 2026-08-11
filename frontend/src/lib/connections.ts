@@ -37,7 +37,6 @@ export function buildConnections(
   apps: Application[],
   providers: Provider[],
   credentials: Credential[],
-  _username?: string,
 ): Connection[] {
   const byId = <T extends { id: string }>(rows: T[]) => new Map(rows.map((row) => [row.id, row]));
   const appById = byId(apps);
@@ -108,14 +107,14 @@ export function absolutePath(pattern: string): string {
   return value.startsWith('/') ? value : `/${value}`;
 }
 
-export function gatewayUrl(_username: string, slug: string, origin = window.location.origin): string {
+export function gatewayUrl(slug: string, origin = window.location.origin): string {
   return `${origin.replace(/\/$/, '')}/gateway/${slug}`;
 }
 
-export function curlFor(username: string, slug: string, path: string, applicationId: string, key: string): string {
+export function curlFor(slug: string, path: string, applicationId: string, key: string): string {
   const target = path.startsWith('/') ? path : `/${path}`;
   return [
-    `curl ${gatewayUrl(username, slug)}${target}`,
+    `curl ${gatewayUrl(slug)}${target}`,
     `  -H "X-Janus-Application-Id: ${applicationId}"`,
     `  -H "X-Janus-Api-Key: ${key}"`,
   ].join(' \\\n');
@@ -145,7 +144,6 @@ export type ProbeResult = {
  * an upstream API answers whatever it answers.
  */
 export async function probeGateway(
-  _username: string,
   slug: string,
   path: string,
   applicationId: string,

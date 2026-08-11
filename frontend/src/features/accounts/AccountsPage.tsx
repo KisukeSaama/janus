@@ -151,7 +151,9 @@ export function AccountsPage({ identity }: { identity: Identity }) {
           rowKey={(r) => r.id}
           actions={(r) =>
             manageable(r) ? (
-              <span className="flex flex-wrap items-center justify-end gap-1">
+              // Two entries do not earn a menu: an overflow control here would cost a click to reach
+              // what already fits, and neither verb is ambiguous about what it acts on.
+              <>
                 <button className="btn btn-sm btn-quiet" onClick={() => setPanel(r)}>
                   {t('common.edit')}
                   <span className="sr-only"> {r.displayName}</span>
@@ -170,7 +172,7 @@ export function AccountsPage({ identity }: { identity: Identity }) {
                     }}
                   />
                 )}
-              </span>
+              </>
             ) : (
               // Peers do not hold power over each other; saying so is better than a button that fails.
               <span className="text-xs text-text-3">{t('accounts.notYours')}</span>

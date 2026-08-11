@@ -18,12 +18,6 @@ export function EnabledState({ enabled }: { enabled: boolean }) {
  * reads active. A connection switched off on purpose and one switched off by accident are different
  * states and are named differently: `Paused` is a decision, `Not forwarding` is a fault.
  */
-
-/**
- * Whether calls are actually being forwarded, which is not the same question as whether the grant
- * reads active. A connection switched off on purpose and one switched off by accident are different
- * states and are named differently: `Paused` is a decision, `Not forwarding` is a fault.
- */
 export function LiveState({ live, paused }: { live: boolean; paused: boolean }) {
   const { t } = useI18n();
   const [mark, tone, label] = live
@@ -58,14 +52,6 @@ const EXPIRY_TEXT: Record<'bad' | 'warn' | 'info', string> = {
  * cannot check. Both are shown, and the tone only appears once the date is near enough to be work:
  * a key due in nine months is drawn as quietly as one with no date at all.
  */
-
-/**
- * A recorded deadline, and how far off it is.
- *
- * The date alone is a fact nobody converts in their head, and "in 5 days" alone is a claim you
- * cannot check. Both are shown, and the tone only appears once the date is near enough to be work:
- * a key due in nine months is drawn as quietly as one with no date at all.
- */
 export function ExpiryState({ expiresAt }: { expiresAt?: string }) {
   const { t, tc, formatDate } = useI18n();
   if (!expiresAt) return <span className="text-xs text-text-3">{t('expiry.none')}</span>;
@@ -86,8 +72,6 @@ export function ExpiryState({ expiresAt }: { expiresAt?: string }) {
 }
 
 // Throttled reads as a warning, not a failure: the deployment did exactly what it was told to.
-
-// Throttled reads as a warning, not a failure: the deployment did exactly what it was told to.
 const OUTCOME_TONE: Record<string, string> = { SUCCESS: 'text-ok', DENIED: 'text-warn', THROTTLED: 'text-warn' };
 
 export function Outcome({ value }: { value: string }) {
@@ -96,12 +80,6 @@ export function Outcome({ value }: { value: string }) {
 }
 
 /** Machine data, set in the monospace: tabular figures, slashed zero, no tracking of its own. */
-
-/** Machine data, set in the monospace: tabular figures, slashed zero, no tracking of its own. */
 export function Data({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <span className={`data ${className}`}>{children}</span>;
 }
-
-/* ── Values the reader has to move somewhere else ──────────────────────── */
-
-/** Copy, then say so for a moment. The confirmation is spoken, not only coloured. */

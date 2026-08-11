@@ -13,7 +13,15 @@ export function readStoredTheme(): Theme {
   return localStorage.getItem(STORAGE_KEY) === 'light' ? 'light' : 'dark';
 }
 
-const CHROME: Record<Theme, string> = { dark: '#28241f', light: '#fbfaf9' };
+/**
+ * The browser's own bar, painted the colour of the page under it.
+ *
+ * These are `--c-canvas` in each theme, written as sRGB because a `<meta>` tag cannot read a custom
+ * property. They were a warm grey pair belonging to no palette in this console: `theme.js` set the
+ * right colour before first paint and this replaced it with a brown one the moment React mounted,
+ * so a phone drew its status bar in a colour that appears nowhere on the screen below it.
+ */
+const CHROME: Record<Theme, string> = { dark: '#0b0d10', light: '#f4f5f8' };
 
 function apply(theme: Theme) {
   document.documentElement.dataset.theme = theme;

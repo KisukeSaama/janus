@@ -17,11 +17,10 @@ import {
   type Credential,
 } from '../../api';
 import {
-  ArmedAction,
   CheckField,
+  ConfirmAction,
   CopyField,
   DataTable,
-  DeleteAction,
   Empty,
   EnabledState,
   Field,
@@ -30,10 +29,12 @@ import {
   Notice,
   PageHead,
   RecordCell,
+  RowMenu,
   SidePanel,
   SkeletonRows,
   TextAreaField,
   type Column,
+  type RowAction,
 } from '../../components';
 import { useI18n } from '../../i18n';
 import { isKeyStale } from '../../lib/attention';
@@ -47,7 +48,7 @@ import { useErrorMessage } from '../../lib/errors';
  * identifier, ready to copy. The key itself is not among them — it was shown once, and rotating is
  * the only way back to a value this console can display.
  */
-export function ApplicationsPage({ username: _username }: { username: string }) {
+export function ApplicationsPage() {
   const { t, formatAge, formatDate } = useI18n();
   const describe = useErrorMessage();
 
@@ -264,7 +265,7 @@ export function ApplicationsPage({ username: _username }: { username: string }) 
       {applications.isError && <Notice>{describe(applications.error)}</Notice>}
 
       {applications.isPending ? (
-        <SkeletonRows cols={3} />
+        <SkeletonRows cols={4} />
       ) : rows.length === 0 ? (
         <Empty headline={t('applications.emptyTitle')} hint={t('applications.emptyHint')} action={newButton} />
       ) : (
@@ -272,36 +273,62 @@ export function ApplicationsPage({ username: _username }: { username: string }) 
           columns={columns}
           rows={rows}
           rowKey={(r) => r.id}
-          actions={(r) => (
-            <span className="flex flex-wrap items-center justify-end gap-1">
-              <button className="btn btn-sm btn-secondary" onClick={() => setAccess(r)}>
-                {t('applications.access')}
-                <span className="sr-only"> {r.name}</span>
-              </button>
-              <button className="btn btn-sm btn-quiet" onClick={() => setPanel(r)}>
-                {t('common.edit')}
-                <span className="sr-only"> {r.name}</span>
-              </button>
-              <ArmedAction
-                trigger={t('applications.rotate')}
-                confirm={t('applications.rotateConfirm')}
-                pending={t('applications.rotating')}
-                description={t('applications.rotateDescription', { name: r.name })}
-                prominent={isKeyStale(r)}
-                onConfirm={() =>
-                  act(async () => {
-                    const issued = await rotate.mutateAsync(r.id);
-                    setIssuedKey(issued.apiKey);
-                  })
-                }
-              />
-              <DeleteAction
-                label={r.name}
-                consequence={t('applications.deleteConsequence')}
-                onDelete={() => act(() => remove.mutateAsync(r.id))}
-              />
-            </span>
-          )}
+          /*
+           * What this row is for stays in the row; everything else is one control away. Rotation is
+           * the exception, and only while the key is past the threshold: the console recommends it
+           * there, and a recommendation nobody can see is not one.
+           */
+          actions={(r) => {
+            const stale = isKeyStale(r);
+            const rotateKey = () =>
+              act(async () => {
+                const issued = await rotate.mutateAsync(r.id);
+                setIssuedKey(issued.apiKey);
+              });
+            const menu: RowAction[] = [
+              { key: 'edit', label: t('common.edit'), onSelect: () => setPanel(r) },
+              ...(stale
+                ? []
+                : [
+                    {
+                      key: 'rotate',
+                      label: t('applications.rotate'),
+                      consequence: t('applications.rotateDescription', { name: r.name }),
+                      confirm: t('applications.rotateConfirm'),
+                      pending: t('applications.rotating'),
+                      onConfirm: rotateKey,
+                    } satisfies RowAction,
+                  ]),
+              {
+                key: 'delete',
+                label: t('common.delete'),
+                destructive: true,
+                consequence: `${t('common.delete')} ${r.name}. ${t('applications.deleteConsequence')}`,
+                confirm: t('common.confirmDelete'),
+                pending: t('common.deleting'),
+                onConfirm: () => act(() => remove.mutateAsync(r.id)),
+              },
+            ];
+            return (
+              <>
+                <button className="btn btn-sm btn-secondary" onClick={() => setAccess(r)}>
+                  {t('applications.access')}
+                  <span className="sr-only"> {r.name}</span>
+                </button>
+                {stale && (
+                  <ConfirmAction
+                    trigger={t('applications.rotate')}
+                    confirm={t('applications.rotateConfirm')}
+                    pending={t('applications.rotating')}
+                    description={t('applications.rotateDescription', { name: r.name })}
+                    prominent
+                    onConfirm={rotateKey}
+                  />
+                )}
+                <RowMenu label={r.name} actions={menu} />
+              </>
+            );
+          }}
         />
       )}
 

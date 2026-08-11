@@ -12,11 +12,21 @@ import org.springframework.stereotype.Component;
  *
  * <p>Deliberately in memory and per instance, like the verified-key cache: a stored response is an
  * optimisation, never a source of truth, so losing the store on restart costs latency and nothing
- * else. Running more than one replica simply means each one warms separately.
+ * else. Running more than one replica means each one warms separately — and, less comfortably, that
+ * an administrative purge or a rotated credential invalidates only the instance that received the
+ * call. What keeps this store honest on one instance is that every such change drops what it made
+ * questionable in the same request; that is the guarantee a second replica breaks, not the memory
+ * footprint. See the deployment note in the README before scaling out.
  *
  * <p>Nothing is stored before the request that produced it was authorised, and every key names the
  * credential it was fetched with, so an application that loses its grant cannot be served from an
  * entry it once caused: authorisation happens first, and it no longer passes.
+ *
+ * <p>A resource that varies is held once per representation rather than once in total. The key the
+ * caller computes addresses the resource; the names an upstream said it varies by are remembered
+ * against that key, and the values the request carried for those names are folded into a secondary
+ * key — RFC 9111 §4.1. Without it, two representations of the same resource evicted each other
+ * indefinitely and the store answered nothing while looking perfectly healthy.
  */
 @Component
 public class ResponseCache {
@@ -55,12 +65,27 @@ public class ResponseCache {
         public long ageSeconds(long nowMillis) {
             return Math.max(0, (nowMillis - storedAtMillis) / 1000);
         }
+
+        /**
+         * The freshness lifetime this entry was stored with, counted from when it was fetched.
+         *
+         * <p>The whole lifetime, not what remains of it: a caller subtracts {@code Age} from
+         * {@code max-age} itself, so announcing the remainder alongside an {@code Age} header would
+         * have it subtract the same seconds twice.
+         */
+        public long lifetimeSeconds() {
+            return Math.max(0, (freshUntilMillis - storedAtMillis) / 1000);
+        }
         /** Bodies dominate, but an entry with no body still costs a key, headers, and a map. */
         long weight() {
             return body.length + 1024L;
         }
     }
 
+    /**
+     * @param oversized responses served but never stored, being larger than one entry may be
+     * @param variants  representations held beyond the first for a resource that varies
+     */
     public record Stats(
             boolean enabled,
             int entries,
@@ -69,6 +94,8 @@ public class ResponseCache {
             long maxBytes,
             long stores,
             long evictions,
+            long oversized,
+            int variants,
             Map<String, Long> outcomes) {}
 
     private final boolean enabled;
@@ -77,9 +104,13 @@ public class ResponseCache {
     private final long maxTotalBytes;
 
     private final LinkedHashMap<String, Entry> entries = new LinkedHashMap<>(64, 0.75f, true);
+    /** Per resource key, the header names its upstream said the representation varies by. */
+    private final LinkedHashMap<String, List<String>> variants = new LinkedHashMap<>(64, 0.75f, true);
+
     private final Map<CacheStatus, LongAdder> outcomes = new EnumMap<>(CacheStatus.class);
     private final LongAdder stores = new LongAdder();
     private final LongAdder evictions = new LongAdder();
+    private final LongAdder oversized = new LongAdder();
     private long bytes;
 
     public ResponseCache(GatewayTrafficProperties properties) {
@@ -103,18 +134,27 @@ public class ResponseCache {
     public Optional<Entry> lookup(String key, HttpHeaders request) {
         Entry entry;
         synchronized (entries) {
-            entry = entries.get(key);
+            entry = entries.get(variant(key, request));
         }
         if (entry == null) return Optional.empty();
+        // The secondary key already accounts for every name this resource was known to vary by. This
+        // still holds, for the one exchange during which a new name appears: it is what keeps a
+        // representation from being served to a request that asked for a different one.
         for (var expected : entry.vary().entrySet())
             if (!expected.getValue().equals(varyValue(request, expected.getKey()))) return Optional.empty();
         return Optional.of(entry);
     }
 
     public void store(String key, Entry entry) {
-        if (!isEnabled() || entry.body().length > maxEntryBytes) return;
+        if (!isEnabled()) return;
+        if (entry.body().length > maxEntryBytes) {
+            oversized.increment();
+            return;
+        }
         synchronized (entries) {
-            var replaced = entries.put(key, entry);
+            if (entry.vary().isEmpty()) variants.remove(key);
+            else variants.put(key, List.copyOf(entry.vary().keySet()));
+            var replaced = entries.put(variant(key, entry.vary()), entry);
             bytes += entry.weight() - (replaced == null ? 0 : replaced.weight());
             var eldest = entries.entrySet().iterator();
             while ((entries.size() > maxEntries || bytes > maxTotalBytes) && eldest.hasNext()) {
@@ -130,8 +170,9 @@ public class ResponseCache {
     /** Replaces an entry's freshness and headers after the upstream confirmed it with a 304. */
     public void refresh(String key, Entry refreshed) {
         synchronized (entries) {
-            if (entries.containsKey(key)) {
-                var replaced = entries.put(key, refreshed);
+            String variant = variant(key, refreshed.vary());
+            if (entries.containsKey(variant)) {
+                var replaced = entries.put(variant, refreshed);
                 bytes += refreshed.weight() - (replaced == null ? 0 : replaced.weight());
             }
         }
@@ -173,6 +214,8 @@ public class ResponseCache {
                     maxTotalBytes,
                     stores.sum(),
                     evictions.sum(),
+                    oversized.sum(),
+                    variants.size(),
                     counts);
         }
     }
@@ -185,8 +228,36 @@ public class ResponseCache {
                 bytes -= entry.getValue().weight();
                 return true;
             });
+            // A resource key is a prefix of every secondary key derived from it, so the same
+            // predicate names both. Left behind, these would send the next lookup to a key nothing
+            // is stored under any more.
+            variants.keySet().removeIf(matches);
             return before - entries.size();
         }
+    }
+
+    /**
+     * Where this request's representation of {@code key} is stored.
+     *
+     * <p>The first response for a resource is stored under the resource key itself. Only once an
+     * upstream has said the resource varies does a secondary key appear, and it appears for the
+     * request that comes after — which is exactly RFC 9111's rule that a stored response is selected
+     * using the header names a stored response gave.
+     */
+    private String variant(String key, HttpHeaders request) {
+        var names = variants.get(key);
+        if (names == null || names.isEmpty()) return key;
+        var values = new LinkedHashMap<String, String>();
+        for (String name : names) values.put(name, varyValue(request, name));
+        return variant(key, values);
+    }
+
+    /** The same address, derived from what a stored entry recorded rather than from a request. */
+    private static String variant(String key, Map<String, String> vary) {
+        if (vary.isEmpty()) return key;
+        var joined = new StringJoiner("|");
+        vary.forEach((name, value) -> joined.add(name + "=" + value));
+        return key + CachePolicy.SEPARATOR + CachePolicy.digest(joined.toString());
     }
 
     /** The value a stored representation was keyed on for one {@code Vary} header. */

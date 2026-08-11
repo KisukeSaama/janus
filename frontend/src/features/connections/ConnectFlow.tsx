@@ -10,29 +10,32 @@ import {
   type Credential,
   type Provider,
 } from '../../api';
-import { ChoiceField, Field, Sheet } from '../../components';
+import { CheckField, ChoiceField, ConfirmDialog, Field, Sheet } from '../../components';
 import { useI18n } from '../../i18n';
 import { gatewayUrl, toSlug } from '../../lib/connections';
 import { useErrorMessage } from '../../lib/errors';
 import { fromDateInput, NOTICE_DAYS, WARNING_DAYS } from '../../lib/expiry';
 
 /**
- * An API is registered independently from the applications that may call it. This flow creates the
- * provider and its credential; application forms create the grants afterwards.
+ * An API is registered independently from the applications that may call it. This flow writes the
+ * catalogue entry: the destination and the authentication contract, both deployment-wide.
  *
- * Two steps: where it goes, and what it presents on arrival. Then a key and a request that works as
- * pasted. Nothing here asks which paths the caller may reach — registering an API admits it to all
- * of them, and the API's own authorisation decides the rest — which is what let the third step go.
+ * Registering is not activating. What makes an API active for somebody is the credential their own
+ * account holds for it, so this flow only provisions one when it is asked to, and the box that asks
+ * is unticked. An administrator writing the catalogue on behalf of the deployment is not thereby a
+ * caller of every destination in it.
+ *
+ * Two steps: where it goes, and what it expects on arrival. Nothing here asks which paths the caller
+ * may reach — registering an API admits it to all of them, and the API's own authorisation decides
+ * the rest — which is what let the third step go.
  */
 
 type Step = 1 | 2;
 
 export function ConnectFlow({
-  username,
   onClose,
   onDone,
 }: {
-  username: string;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -50,6 +53,7 @@ export function ConnectFlow({
   const [queryParameter, setQueryParameter] = useState('api_key');
   const [tokenUrl, setTokenUrl] = useState('');
   const [tokenScopes, setTokenScopes] = useState('');
+  const [activate, setActivate] = useState(false);
   const [secret, setSecret] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
   const [busy, setBusy] = useState(false);
@@ -62,10 +66,11 @@ export function ConnectFlow({
   const complete: Record<Step, boolean> = {
     1: apiName.trim() !== '' && effectiveSlug.length >= 3 && baseUrl.trim() !== '',
     2:
-      (secret !== '' || authType === 'NONE') &&
+      // The contract is always required; the secret only when this account is activating with it.
       (authType !== 'API_KEY_HEADER' || headerName.trim() !== '') &&
       (authType !== 'API_KEY_QUERY' || queryParameter.trim() !== '') &&
-      (authType !== 'OAUTH2_CLIENT_CREDENTIALS' || tokenUrl.trim() !== ''),
+      (authType !== 'OAUTH2_CLIENT_CREDENTIALS' || tokenUrl.trim() !== '') &&
+      (!activate || authType === 'NONE' || secret !== ''),
   };
 
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -99,24 +104,28 @@ export function ConnectFlow({
       });
       undo.push(() => del(`/providers/${provider.id}`));
 
-      stage = t('connect.stepSecret');
-      const credential = await post<Credential>('/credentials', {
-        // An open API still gets a record: it is what the grant, the cache and the journal hang off.
-        // Named for what it is, since "-secret" would describe a value that does not exist.
-        name: authType === 'NONE' ? `${effectiveSlug}-open` : `${effectiveSlug}-secret`,
-        providerId: provider.id,
-        authType,
-        headerName: authType === 'API_KEY_HEADER' ? headerName.trim() : null,
-        queryParameter: authType === 'API_KEY_QUERY' ? queryParameter.trim() : null,
-        tokenUrl: authType === 'OAUTH2_CLIENT_CREDENTIALS' ? tokenUrl.trim() : null,
-        tokenScopes: authType === 'OAUTH2_CLIENT_CREDENTIALS' ? tokenScopes.trim() || null : null,
-        secret: authType === 'NONE' ? null : secret,
-        // Empty is a supported answer: many upstream keys have no published end date. Converting
-        // only here keeps the form in the operator's calendar while the API receives an instant.
-        expiresAt: authType === 'NONE' ? null : fromDateInput(expiresAt),
-        enabled: true,
-      });
-      undo.push(() => del(`/credentials/${credential.id}`));
+      // Only when this account asked for it. Without a credential the entry stays available in the
+      // catalogue, which is what every other account sees of it until they activate it themselves.
+      if (activate) {
+        stage = t('connect.stepSecret');
+        const credential = await post<Credential>('/credentials', {
+          // An open API still gets a record: it is what the grant, the cache and the journal hang
+          // off. Named for what it is, since "-secret" would describe a value that does not exist.
+          name: authType === 'NONE' ? `${effectiveSlug}-open` : `${effectiveSlug}-secret`,
+          providerId: provider.id,
+          authType,
+          headerName: authType === 'API_KEY_HEADER' ? headerName.trim() : null,
+          queryParameter: authType === 'API_KEY_QUERY' ? queryParameter.trim() : null,
+          tokenUrl: authType === 'OAUTH2_CLIENT_CREDENTIALS' ? tokenUrl.trim() : null,
+          tokenScopes: authType === 'OAUTH2_CLIENT_CREDENTIALS' ? tokenScopes.trim() || null : null,
+          secret: authType === 'NONE' ? null : secret,
+          // Empty is a supported answer: many upstream keys have no published end date. Converting
+          // only here keeps the form in the operator's calendar while the API receives an instant.
+          expiresAt: authType === 'NONE' ? null : fromDateInput(expiresAt),
+          enabled: true,
+        });
+        undo.push(() => del(`/credentials/${credential.id}`));
+      }
 
       // Registering an API is independent from authorising callers. Applications subscribe to it
       // later from their own form, which may create any number of grants.
@@ -146,20 +155,13 @@ export function ConnectFlow({
               <span key={n} className={`h-1 w-6 rounded-[1px] ${n <= step ? 'bg-accent' : 'bg-line'}`} />
             ))}
           </span>
-          {leaving ? (
-            <span className="flex items-center gap-1">
-              <button className="btn btn-sm btn-destructive font-semibold" onClick={onClose}>
-                {t('common.confirm')}
-              </button>
-              <button className="btn btn-sm btn-quiet" onClick={() => setLeaving(false)}>
-                {t('common.cancel')}
-              </button>
-            </span>
-          ) : (
-            <button className="btn btn-sm btn-quiet" onClick={() => (started ? setLeaving(true) : onClose())}>
-              {t('connect.abandon')}
-            </button>
-          )}
+          <button
+            className="btn btn-sm btn-quiet"
+            aria-haspopup={started ? 'dialog' : undefined}
+            onClick={() => (started ? setLeaving(true) : onClose())}
+          >
+            {t('connect.abandon')}
+          </button>
         </div>
       }
       footer={
@@ -190,6 +192,19 @@ export function ConnectFlow({
         </>
       }
     >
+      {leaving && (
+        <ConfirmDialog
+          title={t('connect.abandonTitle')}
+          description={t('connect.abandonDescription')}
+          confirm={t('connect.abandonConfirm')}
+          pending={t('common.working')}
+          destructive
+          busy={false}
+          onCancel={() => setLeaving(false)}
+          onConfirm={onClose}
+        />
+      )}
+
       <form id="connect" onSubmit={submit} className="space-y-6">
         {step === 1 && (
           <>
@@ -218,7 +233,6 @@ export function ConnectFlow({
               hint={t('connect.baseUrlHint')}
             />
             <GatewayPath
-              username={username}
               slug={effectiveSlug}
               editing={slugEdited}
               onEdit={() => {
@@ -299,49 +313,6 @@ export function ConnectFlow({
                 />
               </>
             )}
-            {authType !== 'NONE' && (
-              <Field
-                label={
-                  authType === 'BASIC'
-                    ? t('credentials.fieldSecretBasic')
-                    : authType === 'OAUTH2_CLIENT_CREDENTIALS'
-                      ? t('credentials.fieldSecretClient')
-                      : authType === 'API_KEY_HEADER' || authType === 'API_KEY_QUERY'
-                        ? t('connect.apiKeyValue')
-                        : t('connect.secretValue')
-                }
-                type="password"
-                required
-                autoFocus
-                autoComplete="new-password"
-                placeholder={
-                  authType === 'BASIC'
-                    ? t('connect.secretBasic')
-                    : authType === 'OAUTH2_CLIENT_CREDENTIALS'
-                      ? 'client_id:client_secret'
-                      : undefined
-                }
-                value={secret}
-                onChange={(e) => setSecret(e.target.value)}
-                hint={
-                  authType === 'OAUTH2_CLIENT_CREDENTIALS' ? t('connect.secretExchangeHint') : t('connect.secretHint')
-                }
-              />
-            )}
-            {authType !== 'NONE' && (
-              <Field
-                label={t('expiry.field')}
-                type="date"
-                data
-                value={expiresAt}
-                onChange={(e) => setExpiresAt(e.target.value)}
-                hint={
-                  authType === 'OAUTH2_CLIENT_CREDENTIALS'
-                    ? t('credentials.expiryHintExchange')
-                    : t('expiry.fieldHint', { notice: NOTICE_DAYS, warning: WARNING_DAYS })
-                }
-              />
-            )}
             <div>
               <p className="stamp mb-1.5 text-text-2">{t('connect.preview')}</p>
               <p className="data rounded-control border border-line bg-sunk px-3 py-2 text-xs leading-5">
@@ -358,13 +329,69 @@ export function ConnectFlow({
               )}
             </div>
 
+            {/* The one question in this flow that is about the operator's own account rather than
+                the deployment, so it is separated from the contract above it. */}
+            <div className="space-y-6 border-t border-line pt-6">
+              <CheckField
+                label={t('connect.activateLabel')}
+                checked={activate}
+                onChange={(e) => setActivate(e.target.checked)}
+                hint={t('connect.activateHint')}
+              />
+              {activate && authType !== 'NONE' && (
+                <>
+                  <Field
+                    label={
+                      authType === 'BASIC'
+                        ? t('credentials.fieldSecretBasic')
+                        : authType === 'OAUTH2_CLIENT_CREDENTIALS'
+                          ? t('credentials.fieldSecretClient')
+                          : authType === 'API_KEY_HEADER' || authType === 'API_KEY_QUERY'
+                            ? t('connect.apiKeyValue')
+                            : t('connect.secretValue')
+                    }
+                    type="password"
+                    required
+                    autoFocus
+                    autoComplete="new-password"
+                    placeholder={
+                      authType === 'BASIC'
+                        ? t('connect.secretBasic')
+                        : authType === 'OAUTH2_CLIENT_CREDENTIALS'
+                          ? 'client_id:client_secret'
+                          : undefined
+                    }
+                    value={secret}
+                    onChange={(e) => setSecret(e.target.value)}
+                    hint={
+                      authType === 'OAUTH2_CLIENT_CREDENTIALS'
+                        ? t('connect.secretExchangeHint')
+                        : t('connect.secretHint')
+                    }
+                  />
+                  <Field
+                    label={t('expiry.field')}
+                    type="date"
+                    data
+                    value={expiresAt}
+                    onChange={(e) => setExpiresAt(e.target.value)}
+                    hint={
+                      authType === 'OAUTH2_CLIENT_CREDENTIALS'
+                        ? t('credentials.expiryHintExchange')
+                        : t('expiry.fieldHint', { notice: NOTICE_DAYS, warning: WARNING_DAYS })
+                    }
+                  />
+                </>
+              )}
+            </div>
+
             <div className="space-y-6 border-t border-line pt-6">
               <Review
                 apiName={apiName.trim()}
-                username={username}
                 slug={effectiveSlug}
                 baseUrl={baseUrl.trim()}
                 authType={authType}
+                activate={activate}
               />
             </div>
           </>
@@ -395,13 +422,11 @@ function StepHead({ title, lead }: { title: string; lead: string }) {
  * recognise later is the address, not the fragment it was built from.
  */
 function GatewayPath({
-  username,
   slug,
   editing,
   onEdit,
   onChange,
 }: {
-  username: string;
   slug: string;
   editing: boolean;
   onEdit: () => void;
@@ -427,7 +452,7 @@ function GatewayPath({
               {t('connect.slugEdit')}
             </button>
           </div>
-          <p className="data mt-1.5 break-all text-sm">{gatewayUrl(username, slug || '…')}/</p>
+          <p className="data mt-1.5 break-all text-sm">{gatewayUrl(slug || '…')}/</p>
         </>
       )}
       <p className="mt-2 text-xs text-text-2">{t('connect.slugLead')}</p>
@@ -435,19 +460,19 @@ function GatewayPath({
   );
 }
 
-/** The last thing before the API and its credential exist: what is about to be created. */
+/** The last thing before the catalogue entry exists: what is about to be created, and for whom. */
 function Review({
   apiName,
-  username,
   slug,
   baseUrl,
   authType,
+  activate,
 }: {
   apiName: string;
-  username: string;
   slug: string;
   baseUrl: string;
   authType: AuthType;
+  activate: boolean;
 }) {
   const { t, tEnum } = useI18n();
   return (
@@ -458,11 +483,13 @@ function Review({
           <span className="font-medium">{apiName}</span>
           <span className="data ml-2 break-all text-xs text-text-2">{baseUrl}</span>
         </Line>
-        <Line label={authType === 'NONE' ? t('connect.reviewAuth') : t('connect.reviewSecret')}>
-          {tEnum('authType', authType)}
-        </Line>
+        <Line label={t('connect.reviewAuth')}>{tEnum('authType', authType)}</Line>
         <Line label={t('connect.reviewReach')}>
-          <span className="data break-all text-xs text-text-2">{gatewayUrl(username, slug)}/**</span>
+          <span className="data break-all text-xs text-text-2">{gatewayUrl(slug)}/**</span>
+        </Line>
+        {/* Two different records, and the reader is about to create either one or both. */}
+        <Line label={t('connect.reviewActivation')}>
+          {activate ? t('connect.reviewActivationNow') : t('connect.reviewActivationLater')}
         </Line>
       </dl>
     </section>

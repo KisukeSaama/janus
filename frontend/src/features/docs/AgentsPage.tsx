@@ -28,7 +28,7 @@ import { Bullet, Note, prose, Steps } from './parts';
 
 type Service = { id: string; name: string; apis: AgentApi[] };
 
-export function AgentsPage({ username }: { username: string }) {
+export function AgentsPage() {
   const { t, tc, formatNumber } = useI18n();
 
   // The same four queries every other page reads, so this one costs no request of its own.
@@ -69,12 +69,11 @@ export function AgentsPage({ username }: { username: string }) {
   const target: AgentTarget = service
     ? {
         origin: window.location.origin,
-        username,
         serviceName: service.name,
         applicationId: service.id,
         apis: [...service.apis].sort((a, b) => a.name.localeCompare(b.name)),
       }
-    : { ...AGENT_PLACEHOLDER, username };
+    : AGENT_PLACEHOLDER;
 
   const file = agentFile(target);
   const apiCount = target.apis.length;
@@ -141,9 +140,17 @@ export function AgentsPage({ username }: { username: string }) {
         </Section>
 
         <Section title={t('agents.ask.title')} lead={t('agents.ask.lead')}>
-          <blockquote className="panel border-l-2 border-l-accent px-4 py-3 text-sm">
-            {t('agents.ask.example')}
-          </blockquote>
+          {/*
+            Named by a caption rather than marked with a coloured stripe down its edge. The console
+            has one way of saying "this block is a specimen", and it is the head `Review` and the
+            code samples already use: a rule, a label, then the thing itself.
+          */}
+          <figure className="panel">
+            <figcaption className="stamp border-b border-line px-4 py-2.5 text-accent-text">
+              {t('agents.ask.exampleLabel')}
+            </figcaption>
+            <blockquote className="px-4 py-3 text-sm">{t('agents.ask.example')}</blockquote>
+          </figure>
           <Note>{t('agents.ask.note')}</Note>
         </Section>
 

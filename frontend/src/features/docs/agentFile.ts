@@ -25,7 +25,6 @@ export type AgentApi = { name: string; slug: string };
 export type AgentTarget = {
   /** Where Janus answers, taken from the address the console was opened at. */
   origin: string;
-  username: string;
   /** The calling service this file is written for, and the id it presents. */
   serviceName: string;
   applicationId: string;
@@ -35,13 +34,12 @@ export type AgentTarget = {
 
 export const AGENT_PLACEHOLDER: AgentTarget = {
   origin: 'https://janus.example.com',
-  username: 'alice',
   serviceName: 'your-service',
   applicationId: '00000000-0000-0000-0000-000000000000',
   apis: [],
 };
 
-export function agentFile({ origin, username, serviceName, applicationId, apis }: AgentTarget): string {
+export function agentFile({ origin, serviceName, applicationId, apis }: AgentTarget): string {
   return `# Janus gateway
 
 This project calls third-party APIs through Janus, which holds each API's own secret and adds it on
@@ -82,7 +80,7 @@ So: no cache layer, no retry or backoff wrapper, no circuit breaker, no token st
 
 ## APIs this service may call
 
-${apiList(username, apis)}
+${apiList(apis)}
 
 Any path and any method under a slug above is forwarded. What the API itself allows for the secret
 Janus presents is the only limit; an API at a slug not listed is not reachable at all.
@@ -108,23 +106,26 @@ and \`Retry-After\` on a 429.
 ## If the API you need is not listed
 
 Stop and ask the operator to register it. Do not call the API directly, and never ask anyone for its
-key. In the Janus console at ${origin}:
+key. In the Janus console at ${origin}, two records are needed:
 
-1. **Connections → Connect**: the API's name and base address, e.g. \`https://api.spotify.com\`. The
-   gateway slug is derived from the name.
-2. **The secret and the caller**: how that API expects its secret (bearer, custom header, query
-   parameter, basic, or OAuth2 client credentials) and its value — it goes to the vault, not into
-   this repository — then pick ${serviceName === AGENT_PLACEHOLDER.serviceName ? 'this service' : `\`${serviceName}\``} as the caller.
-3. The key is shown **once**, on the last screen: it becomes \`JANUS_API_KEY\`, and the id beside it
-   \`JANUS_APPLICATION_ID\`.
+1. **Connections → Register an API**: its name and base address, e.g. \`https://api.spotify.com\` —
+   the gateway slug is derived from the name — then how that API expects its secret (bearer, custom
+   header, query parameter, basic, OAuth2 client credentials, or nothing at all for an open API) and
+   its value, which goes to the vault and not into this repository.
+2. **Registry → Applications**: on ${serviceName === AGENT_PLACEHOLDER.serviceName ? 'this service' : `\`${serviceName}\``}, add the new API under
+   **Subscribed APIs**. Registering an API does not authorise any caller; without that subscription
+   the gateway answers 403.
 
-Then add the new slug to this file. A lost key is rotated from **Connections → the connection →
-rotate**, never recovered.
+\`JANUS_APPLICATION_ID\` is on that service's page. \`JANUS_API_KEY\` appears **once**, on the screen
+that issues it: a lost key is rotated from the connection or from the service, and the previous one
+stops working immediately, tokens included.
+
+Then add the new slug to this file.
 `;
 }
 
 /** One line per API: the name, and the gateway path every one of its routes hangs off. */
-function apiList(username: string, apis: AgentApi[]): string {
+function apiList(apis: AgentApi[]): string {
   if (apis.length === 0) return 'None yet. Follow the next section before writing any call.';
 
   return apis.map(({ name, slug }) => `- ${name} — \`/gateway/${slug}/…\``).join('\n');

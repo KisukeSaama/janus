@@ -127,8 +127,15 @@ public class ProviderService {
         // An API is one operator-facing record even though the gateway stores it as a provider,
         // credential and any number of grants. Remove that aggregate in dependency order so a
         // failed delete cannot leave the slug occupied by an invisible provider.
+        //
+        // Every removal goes through the session rather than a bulk statement, and the database
+        // cascade behind it is only a backstop. Reading a grant here makes it managed, and a managed
+        // grant still points at the provider and the credential it was read with; Hibernate refuses
+        // to flush a live row referencing a removed one, which is the opaque HTTP 500 an operator
+        // used to get for any API a service was connected to.
         var connectedGrants = grants.findAllByProviderId(id);
         for (var grant : connectedGrants) traffic.forgetGrant(grant.getId());
+        grants.deleteAll(connectedGrants);
 
         var heldCredentials = credentials.findAllByProviderId(id);
         var storedPaths = heldCredentials.stream()
@@ -136,10 +143,8 @@ public class ProviderService {
                 .map(credential -> credential.getSecretPath())
                 .toList();
         for (var credential : heldCredentials) traffic.forgetCredential(credential.getId());
+        credentials.deleteAll(heldCredentials);
 
-        // The database cascades from this aggregate root. Keeping one delete statement avoids a
-        // persistence context containing credential entities that a preceding bulk statement has
-        // already removed, which used to make the final flush fail with an opaque HTTP 500.
         repository.delete(provider);
         traffic.forgetProvider(id);
         secretDeletions.enqueueAll(storedPaths);
