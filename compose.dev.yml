@@ -29,7 +29,9 @@ services:
       OPENBAO_TOKEN: ${OPENBAO_DEV_ROOT_TOKEN:?Set OPENBAO_DEV_ROOT_TOKEN in .env}
       JANUS_ADMIN_USERNAME: ${JANUS_ADMIN_USERNAME:-admin}
       JANUS_ADMIN_PASSWORD: ${JANUS_ADMIN_PASSWORD:?Set JANUS_ADMIN_PASSWORD in .env}
+      JANUS_ADMIN_EMAIL: ${JANUS_ADMIN_EMAIL:-admin@localhost}
       JANUS_CORS_ORIGINS: http://localhost:5173
+      JANUS_ALLOW_PRIVATE_DESTINATIONS: ${JANUS_ALLOW_PRIVATE_DESTINATIONS:-false}
     ports: ["8080:8080"]
     depends_on:
       postgres: {condition: service_healthy}
@@ -37,7 +39,7 @@ services:
   frontend:
     image: node:22-alpine
     working_dir: /app
-    command: sh -c "npm install && npm run dev -- --mode docker"
+    command: sh -c "npm ci && npm run dev -- --mode docker"
     volumes: ["./frontend:/app", "frontend_node_modules:/app/node_modules"]
     ports: ["5173:5173"]
     depends_on: [backend]

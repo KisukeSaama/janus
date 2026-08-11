@@ -1,14 +1,48 @@
 package io.janus.grants;
 
-import io.janus.shared.Environment;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
 import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
-import java.util.*;
 
 public interface GrantRepository extends JpaRepository<Grant, UUID> {
-    @Query("select distinct g from Grant g left join fetch g.policies where g.application.id=:appId and g.provider.id=:providerId and g.environment=:environment and g.enabled=true")
-    Optional<Grant> findActive(@Param("appId") UUID appId, @Param("providerId") UUID providerId, @Param("environment") Environment environment);
-    @Query("select distinct g from Grant g left join fetch g.policies")
-    List<Grant> findAllWithPolicies();
+    /** Fetches every association the gateway reads, so no lazy proxy is resolved outside the query. */
+    @Query(
+            """
+           select g from Grant g
+             join fetch g.credential
+           where g.application.id=:appId and g.provider.id=:providerId and g.enabled=true
+           """)
+    Optional<Grant> findActive(@Param("appId") UUID appId, @Param("providerId") UUID providerId);
+
+    /**
+     * An access rule has no owner column of its own: it is the statement "this service may call that
+     * API", and both sides belong to the same person — {@code Grant.bind} refuses to tie together
+     * two owners. Scoping through the application is therefore enough, and cannot drift.
+     */
+    @Query(
+            """
+           select g from Grant g
+             join fetch g.application a
+             join fetch g.provider
+             join fetch g.credential
+           where a.owner.id = :owner
+           """)
+    List<Grant> findAllOwnedBy(@Param("owner") UUID owner);
+
+    @Query(
+            """
+           select g from Grant g
+             join fetch g.application a
+             join fetch g.provider
+             join fetch g.credential
+           where g.id=:id and a.owner.id = :owner
+           """)
+    Optional<Grant> findOwnedBy(@Param("id") UUID id, @Param("owner") UUID owner);
+
     boolean existsByCredentialId(UUID credentialId);
+
+    boolean existsByProviderId(UUID providerId);
 }

@@ -1,4 +1,5 @@
 stages:
+  - verify
   - build
   - deploy_dev
   - deploy_prod
@@ -18,8 +19,60 @@ workflow:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
     - when: never
 
+# The images are built with -DskipTests for speed, so this stage is the only thing
+# standing between a failing test and a deployment.
+test_backend:
+  stage: verify
+  image: maven:3.9.9-eclipse-temurin-21
+  variables:
+    MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+  cache:
+    key: janus-maven
+    paths: [.m2/repository]
+  script:
+    # verify runs the unit suite, then the integration suite against a real PostgreSQL, then holds
+    # coverage to the floor in the POM. The integration tests skip themselves where there is no
+    # Docker to start a container with, so this job stays green on a runner without one.
+    - mvn -B -ntp verify
+    # The one number worth reading in the job log, and what GitLab picks up as the coverage figure.
+    - awk -F, 'NR>1 {m+=$4; c+=$5} END {printf "Coverage: %.1f%%\n", 100*c/(m+c)}' target/site/jacoco/jacoco.csv
+  coverage: '/Coverage: (\d+\.\d+)%/'
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - target/surefire-reports/TEST-*.xml
+        - target/failsafe-reports/TEST-*.xml
+    paths:
+      - target/site/jacoco
+    expire_in: 1 week
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+
+test_frontend:
+  stage: verify
+  image: node:22-alpine
+  cache:
+    key: janus-npm
+    paths: [frontend/node_modules]
+  script:
+    - cd frontend
+    - npm ci
+    - npm run lint
+    - npm test
+    - npm run build
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+
 build:
   stage: build
+  needs:
+    - job: test_backend
+      artifacts: false
+    - job: test_frontend
+      artifacts: false
   before_script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   script:
@@ -54,11 +107,13 @@ build:
     - cp deploy/openbao/openbao.hcl "$TARGET_DIR/openbao/openbao.hcl"
     - chmod 640 "$TARGET_DIR/compose.yml" "$TARGET_DIR/paths.env"
     - chmod 644 "$TARGET_DIR/openbao/openbao.hcl"
-    - printf '%s' "$JANUS_POSTGRES_PASSWORD" > "$TARGET_DIR/.secrets/postgres_password"
-    - printf '%s' "$JANUS_ADMIN_PASSWORD" > "$TARGET_DIR/.secrets/admin_password"
-    - printf '%s' "$JANUS_OPENBAO_TOKEN" > "$TARGET_DIR/.secrets/openbao_token"
-    - chmod 644 "$TARGET_DIR/.secrets/"*
-    - printf 'DEPLOY_ENV=%s\nBACKEND_IMAGE=%s\nWEB_IMAGE=%s\nJANUS_PUBLIC_HOST=%s\nJANUS_ADMIN_USERNAME=%s\n' "$DEPLOY_ENV" "$BACKEND_IMAGE" "$WEB_IMAGE" "$JANUS_PUBLIC_HOST" "${JANUS_ADMIN_USERNAME:-admin}" > "$TARGET_DIR/app.env"
+    # Written under umask 077 so a secret is never briefly world-readable between
+    # creation and chmod. The Docker daemon reads them as root regardless.
+    - (umask 077; printf '%s' "$JANUS_POSTGRES_PASSWORD" > "$TARGET_DIR/.secrets/postgres_password")
+    - (umask 077; printf '%s' "$JANUS_ADMIN_PASSWORD" > "$TARGET_DIR/.secrets/admin_password")
+    - (umask 077; printf '%s' "$JANUS_OPENBAO_TOKEN" > "$TARGET_DIR/.secrets/openbao_token")
+    - chmod 600 "$TARGET_DIR/.secrets/"*
+    - printf 'DEPLOY_ENV=%s\nBACKEND_IMAGE=%s\nWEB_IMAGE=%s\nJANUS_PUBLIC_HOST=%s\nJANUS_ADMIN_USERNAME=%s\nJANUS_ADMIN_EMAIL=%s\n' "$DEPLOY_ENV" "$BACKEND_IMAGE" "$WEB_IMAGE" "$JANUS_PUBLIC_HOST" "${JANUS_ADMIN_USERNAME:-admin}" "${JANUS_ADMIN_EMAIL:-admin@localhost}" > "$TARGET_DIR/app.env"
     - TARGET_REL="${TARGET_DIR#/home/kisuke/}"
     - DATA_REL="${DATA_DIR#/home/kisuke/}"
     - |
@@ -74,9 +129,12 @@ build:
           host_data="/host-home/$DATA_REL/$DEPLOY_ENV"
           mkdir -p "$host_target" "$host_data/postgres" "$host_data/openbao"
           tar -C "$host_target" -xf -
-          chmod 750 "$host_target" "$host_target/.secrets" "$host_target/openbao" "$host_data" "$host_data/postgres" "$host_data/openbao"
+          chmod 750 "$host_target" "$host_data" "$host_data/postgres" "$host_data/openbao"
+          chmod 700 "$host_target/.secrets"
+          chmod 750 "$host_target/openbao"
           chmod 640 "$host_target/compose.yml" "$host_target/paths.env" "$host_target/app.env"
-          chmod 644 "$host_target/openbao/openbao.hcl" "$host_target/.secrets/"*
+          chmod 644 "$host_target/openbao/openbao.hcl"
+          chmod 600 "$host_target/.secrets/"*
         '
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   script:

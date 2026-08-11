@@ -10,7 +10,7 @@ Platform and security engineers administer Janus; application teams consume appr
 
 ## Product Purpose
 
-Janus keeps third-party credentials out of client applications while enforcing environment, provider, route, and method boundaries at a controlled proxy. Success means every outbound request is attributable, authorized, and incapable of revealing the underlying credential.
+Janus keeps third-party credentials out of client applications while enforcing which service may reach which destination, at a controlled proxy. Success means every outbound request is attributable, authorized, and incapable of revealing the underlying credential.
 
 ## Brand Personality
 
@@ -22,7 +22,7 @@ Avoid “hacker terminal” theatrics, generic purple SaaS dashboards, ornamenta
 
 ## Design Principles
 
-1. Make the active environment impossible to miss.
+1. Make the active connection and its state impossible to miss.
 2. Show authorization relationships in the language operators use.
 3. Reveal metadata and status, never secret material.
 4. Prefer familiar controls and explicit outcomes over clever interaction.

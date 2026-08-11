@@ -27,6 +27,7 @@ services:
       JANUS_DATABASE_USERNAME: janus
       OPENBAO_ADDR: http://openbao:8200
       JANUS_ADMIN_USERNAME: ${JANUS_ADMIN_USERNAME:-admin}
+      JANUS_ADMIN_EMAIL: ${JANUS_ADMIN_EMAIL:-admin@localhost}
       JANUS_CORS_ORIGINS: https://${JANUS_PUBLIC_HOST}
     secrets:
       - postgres_password

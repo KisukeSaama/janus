@@ -1,0 +1,427 @@
+package io.janus.gateway;
+
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+import java.util.*;
+import java.util.function.Supplier;
+
+import org.junit.jupiter.api.*;
+import org.mockito.Mockito;
+import org.springframework.http.*;
+import org.springframework.http.MediaType;
+import org.springframework.web.reactive.function.client.*;
+import reactor.core.publisher.Mono;
+
+import io.janus.accounts.Account;
+import io.janus.applications.Application;
+import io.janus.credentials.*;
+import io.janus.grants.Grant;
+import io.janus.openbao.OpenBaoClient;
+import io.janus.providers.Provider;
+import io.janus.testing.Fixtures;
+
+/**
+ * The outbound half of the gateway: what it reuses, what it waits for, what it retries, and what it
+ * refuses to let travel.
+ *
+ * <p>The store, the buckets and the cooldown are the real ones. Only the two things that reach
+ * outside the process are stood in for — OpenBao and the network — because the behaviour under test
+ * is precisely how those three collaborate, and mocking them would leave the tests asserting the
+ * mocks' arrangement instead.
+ */
+class GatewayTrafficServiceTest {
+    private static final String SECRET = "sk_live_31337";
+
+    private final OpenBaoClient bao = Mockito.mock(OpenBaoClient.class);
+    private final UpstreamTokenProvider tokens = Mockito.mock(UpstreamTokenProvider.class);
+
+    private final GatewayTrafficProperties properties = new GatewayTrafficProperties(
+            new GatewayTrafficProperties.Cache(true, 100, 1_000_000, 10_000_000, 300),
+            // Deliberately impatient: a test should not spend two seconds discovering a refusal, and
+            // a one-millisecond backoff exercises the same branch a realistic one does.
+            new GatewayTrafficProperties.Throttle(1, 300),
+            new GatewayTrafficProperties.Retry(2, 1, 1));
+
+    private final ResponseCache cache = new ResponseCache(properties);
+    private final RateLimiter limiter = new RateLimiter();
+    private final UpstreamCooldown cooldown = new UpstreamCooldown();
+
+    private final List<ClientRequest> sent = new ArrayList<>();
+    private final Deque<Supplier<Mono<ClientResponse>>> answers = new ArrayDeque<>();
+
+    private final Account owner = Fixtures.owner();
+    private final Provider provider = Fixtures.provider(owner);
+    private final Application application = Fixtures.application(owner);
+
+    private GatewayTrafficService service;
+
+    @BeforeEach
+    void setUp() {
+        var web = WebClient.builder()
+                .exchangeFunction(request -> {
+                    sent.add(request);
+                    var next = answers.poll();
+                    return next == null ? Mono.just(cacheable("{}")) : next.get();
+                })
+                .build();
+        service = new GatewayTrafficService(web, bao, tokens, cache, limiter, cooldown, properties, 30);
+        when(bao.read(any())).thenReturn(SECRET);
+    }
+
+    // --- building the call under test ---------------------------------------
+
+    private GatewayExchange exchange(Credential credential) {
+        return exchange(HttpMethod.GET, "/v1/tracks", credential, new HttpHeaders());
+    }
+
+    private GatewayExchange exchange(HttpMethod method, String path, Credential credential, HttpHeaders headers) {
+        var grant = Fixtures.grant(application, provider, credential);
+        return exchange(method, path, grant, headers);
+    }
+
+    private GatewayExchange exchange(HttpMethod method, String path, Grant grant, HttpHeaders headers) {
+        var route = GatewayPath.parse("/gateway/" + provider.getSlug() + path, provider.getSlug(), null);
+        return new GatewayExchange(provider, grant, application.getId(), method, route, headers, null, "correlation-1");
+    }
+
+    private Credential bearer() {
+        return Fixtures.credential(provider);
+    }
+
+    /** A response the store is allowed to keep, so a second call can be answered from it. */
+    private static ClientResponse cacheable(String body) {
+        return ClientResponse.create(HttpStatus.OK)
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .header(HttpHeaders.CACHE_CONTROL, "max-age=60")
+                .body(body)
+                .build();
+    }
+
+    private static ClientResponse status(HttpStatus status, String... headers) {
+        var builder = ClientResponse.create(status);
+        for (int i = 0; i < headers.length; i += 2) builder.header(headers[i], headers[i + 1]);
+        return builder.body("").build();
+    }
+
+    private void willAnswer(ClientResponse... responses) {
+        for (var response : responses) answers.add(() -> Mono.just(response));
+    }
+
+    private void willFailToConnect() {
+        answers.add(() -> Mono.error(new IllegalStateException("Connection refused")));
+    }
+
+    private static String header(ClientRequest request, String name) {
+        return request.headers().getFirst(name);
+    }
+
+    // --- how a credential is presented --------------------------------------
+
+    @Test
+    void readsTheSecretOnlyWhenARequestActuallyHasToLeave() {
+        service.forward(exchange(bearer()));
+
+        verify(bao).read(any());
+        assertThat(header(sent.getFirst(), HttpHeaders.AUTHORIZATION)).isEqualTo("Bearer " + SECRET);
+    }
+
+    @Test
+    void presentsAnApiKeyInTheHeaderTheProviderExpects() {
+        var credential = new Credential(
+                provider,
+                "key",
+                new Credential.Strategy(AuthType.API_KEY_HEADER, "X-Api-Key", null, null, null, null),
+                null,
+                true);
+
+        service.forward(exchange(credential));
+
+        assertThat(header(sent.getFirst(), "X-Api-Key")).isEqualTo(SECRET);
+        assertThat(header(sent.getFirst(), HttpHeaders.AUTHORIZATION)).isNull();
+    }
+
+    @Test
+    void presentsAnApiKeyInTheQueryStringWhenThatIsWhereItGoes() {
+        var credential = new Credential(
+                provider,
+                "key",
+                new Credential.Strategy(AuthType.API_KEY_QUERY, null, "apikey", null, null, null),
+                null,
+                true);
+
+        service.forward(exchange(credential));
+
+        assertThat(sent.getFirst().url().toString()).contains("apikey=" + SECRET);
+        assertThat(header(sent.getFirst(), HttpHeaders.AUTHORIZATION)).isNull();
+    }
+
+    @Test
+    void encodesABasicCredentialTheWayTheStandardRequires() {
+        when(bao.read(any())).thenReturn("alice:hunter2");
+        var credential = Fixtures.credential(provider, AuthType.BASIC);
+
+        service.forward(exchange(credential));
+
+        String expected = "Basic "
+                + Base64.getEncoder().encodeToString("alice:hunter2".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThat(header(sent.getFirst(), HttpHeaders.AUTHORIZATION)).isEqualTo(expected);
+    }
+
+    /** The stored value is the means of obtaining a token; it is never what travels. */
+    @Test
+    void sendsTheObtainedTokenRatherThanTheStoredClientCredentials() {
+        when(bao.read(any())).thenReturn("client-id:client-secret");
+        when(tokens.tokenFor(any(), eq("client-id:client-secret"))).thenReturn("short-lived-token");
+        var credential = new Credential(
+                provider,
+                "key",
+                new Credential.Strategy(
+                        AuthType.OAUTH2_CLIENT_CREDENTIALS,
+                        null,
+                        null,
+                        "https://auth.example.com/token",
+                        null,
+                        TokenClientAuth.BASIC),
+                null,
+                true);
+
+        service.forward(exchange(credential));
+
+        assertThat(header(sent.getFirst(), HttpHeaders.AUTHORIZATION)).isEqualTo("Bearer short-lived-token");
+        assertThat(sent.getFirst().headers().toString()).doesNotContain("client-secret");
+    }
+
+    // --- reuse ---------------------------------------------------------------
+
+    /**
+     * The strongest guarantee the store offers is not that it is fast: it is that a served hit never
+     * caused a secret to be read, so nothing left OpenBao and nothing left the process.
+     */
+    @Test
+    void aStoredAnswerIsServedWithoutReadingTheSecretAgain() {
+        var credential = bearer();
+        service.forward(exchange(credential));
+        clearInvocations(bao);
+
+        var second = service.forward(exchange(credential));
+
+        assertThat(second.cacheStatus()).isEqualTo(CacheStatus.HIT);
+        assertThat(second.headers().getFirst(GatewayTrafficService.CACHE_HEADER))
+                .isEqualTo("HIT");
+        assertThat(second.headers().getFirst(HttpHeaders.AGE)).isNotNull();
+        verifyNoInteractions(bao);
+        assertThat(sent).hasSize(1);
+    }
+
+    @Test
+    void aCallerAskingForAFreshCopyGetsOne() {
+        var credential = bearer();
+        service.forward(exchange(credential));
+
+        var headers = new HttpHeaders();
+        headers.set(HttpHeaders.CACHE_CONTROL, "no-cache");
+        var second = service.forward(exchange(HttpMethod.GET, "/v1/tracks", credential, headers));
+
+        assertThat(second.cacheStatus()).isEqualTo(CacheStatus.MISS);
+        assertThat(sent).hasSize(2);
+    }
+
+    @Test
+    void anUnsafeMethodIsNeverAnsweredFromTheStore() {
+        var credential = bearer();
+
+        var outcome = service.forward(exchange(HttpMethod.POST, "/v1/tracks", credential, new HttpHeaders()));
+
+        assertThat(outcome.cacheStatus()).isEqualTo(CacheStatus.BYPASS);
+    }
+
+    /** A write makes what was read about that resource questionable, including what lives under it. */
+    @Test
+    void aWriteDropsWhatWasStoredAboutTheResource() {
+        var credential = bearer();
+        service.forward(exchange(HttpMethod.GET, "/v1/tracks", credential, new HttpHeaders()));
+
+        service.forward(exchange(HttpMethod.POST, "/v1/tracks", credential, new HttpHeaders()));
+        var afterWrite = service.forward(exchange(HttpMethod.GET, "/v1/tracks", credential, new HttpHeaders()));
+
+        assertThat(afterWrite.cacheStatus()).isEqualTo(CacheStatus.MISS);
+    }
+
+    @Test
+    void storesNothingForAProviderThatDoesNotAllowIt() {
+        provider.applyTrafficPolicy(new Provider.TrafficPolicy(false, 0, 0, 0));
+        var credential = bearer();
+
+        service.forward(exchange(credential));
+        var second = service.forward(exchange(credential));
+
+        assertThat(second.cacheStatus()).isEqualTo(CacheStatus.BYPASS);
+        assertThat(sent).hasSize(2);
+    }
+
+    /**
+     * The entry carries an ETag and no Last-Modified, which is the ordinary shape of a JSON API's
+     * response and the case where carrying both validators over used to require both to exist.
+     */
+    @Test
+    void aConfirmedStoredAnswerIsReturnedWithoutItsBodyBeingSentAgain() {
+        var credential = bearer();
+        willAnswer(
+                ClientResponse.create(HttpStatus.OK)
+                        .header(HttpHeaders.CACHE_CONTROL, "max-age=0")
+                        .header(HttpHeaders.ETAG, "\"v1\"")
+                        .body("original body")
+                        .build(),
+                status(HttpStatus.NOT_MODIFIED));
+
+        service.forward(exchange(credential));
+        var revalidated = service.forward(exchange(credential));
+
+        assertThat(revalidated.cacheStatus()).isEqualTo(CacheStatus.REVALIDATED);
+        assertThat(new String(revalidated.body())).isEqualTo("original body");
+        assertThat(header(sent.get(1), HttpHeaders.IF_NONE_MATCH)).isEqualTo("\"v1\"");
+    }
+
+    // --- allowances ----------------------------------------------------------
+
+    @Test
+    void refusesACallerThatHasSpentItsOwnAllowance() {
+        var credential = bearer();
+        var grant = Fixtures.grant(application, provider, credential);
+        grant.applyQuota(new Grant.Quota(1, 1));
+
+        service.forward(exchange(HttpMethod.GET, "/v1/one", grant, new HttpHeaders()));
+        var refusal =
+                catchThrowable(() -> service.forward(exchange(HttpMethod.GET, "/v1/two", grant, new HttpHeaders())));
+
+        assertThat(refusal).isInstanceOf(Throttled.class);
+        var throttled = (Throttled) refusal;
+        assertThat(throttled.retryAfterSeconds).isPositive();
+        assertThat(throttled.headers.getFirst(GatewayTrafficService.LIMIT_HEADER))
+                .isEqualTo("1");
+    }
+
+    /** The caller's own standing is reported even when the refusal was owed to the provider. */
+    @Test
+    void aProviderRefusalStillTellsTheCallerWhereItStands() {
+        provider.applyTrafficPolicy(new Provider.TrafficPolicy(true, 0, 1, 1));
+        var credential = bearer();
+        var grant = Fixtures.grant(application, provider, credential);
+        grant.applyQuota(new Grant.Quota(100, 100));
+
+        service.forward(exchange(HttpMethod.GET, "/v1/one", grant, new HttpHeaders()));
+        var refusal =
+                catchThrowable(() -> service.forward(exchange(HttpMethod.GET, "/v1/two", grant, new HttpHeaders())));
+
+        assertThat(refusal).isInstanceOf(Throttled.class);
+        assertThat(((Throttled) refusal).headers.getFirst(GatewayTrafficService.LIMIT_HEADER))
+                .isEqualTo("100");
+    }
+
+    // --- failing upstreams ---------------------------------------------------
+
+    @Test
+    void retriesAnIdempotentCallThatTheProviderCouldNotServe() {
+        willAnswer(status(HttpStatus.SERVICE_UNAVAILABLE), cacheable("{}"));
+
+        var outcome = service.forward(exchange(bearer()));
+
+        assertThat(outcome.status()).isEqualTo(HttpStatus.OK);
+        assertThat(outcome.headers().getFirst(GatewayTrafficService.ATTEMPTS_HEADER))
+                .isEqualTo("2");
+        assertThat(sent).hasSize(2);
+    }
+
+    /** A second POST could create a second thing; no retry can be safe without knowing the API. */
+    @Test
+    void doesNotRetryACallThatCouldHappenTwice() {
+        willAnswer(status(HttpStatus.SERVICE_UNAVAILABLE));
+
+        var outcome = service.forward(exchange(HttpMethod.POST, "/v1/tracks", bearer(), new HttpHeaders()));
+
+        assertThat(outcome.status()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(sent).hasSize(1);
+    }
+
+    /**
+     * A pause longer than a retry could absorb is a rate limit, not a hiccup. Honouring it for
+     * everybody is what keeps a short refusal from turning into a long ban.
+     */
+    @Test
+    void holdsTheDoorForEverybodyWhenAProviderAsksForALongPause() {
+        willAnswer(status(HttpStatus.TOO_MANY_REQUESTS, HttpHeaders.RETRY_AFTER, "120"));
+        var credential = bearer();
+
+        service.forward(exchange(HttpMethod.GET, "/v1/one", credential, new HttpHeaders()));
+        int sentBefore = sent.size();
+        var refusal = catchThrowable(
+                () -> service.forward(exchange(HttpMethod.GET, "/v1/two", credential, new HttpHeaders())));
+
+        assertThat(refusal).isInstanceOf(Throttled.class);
+        assertThat(sent).hasSize(sentBefore);
+        assertThat(cooldown.active()).hasSize(1);
+    }
+
+    @Test
+    void servesAnExpiredAnswerRatherThanAnErrorWhenTheProviderIsUnreachable() {
+        var credential = bearer();
+        willAnswer(ClientResponse.create(HttpStatus.OK)
+                .header(HttpHeaders.CACHE_CONTROL, "max-age=0, stale-if-error=300")
+                .body("last known good")
+                .build());
+        service.forward(exchange(credential));
+
+        // One first attempt plus the two retries an idempotent method is allowed.
+        willFailToConnect();
+        willFailToConnect();
+        willFailToConnect();
+        var outcome = service.forward(exchange(credential));
+
+        assertThat(outcome.cacheStatus()).isEqualTo(CacheStatus.STALE);
+        assertThat(new String(outcome.body())).isEqualTo("last known good");
+        assertThat(outcome.auditDetail()).contains("upstream unreachable");
+    }
+
+    @Test
+    void raisesTheFailureWhenThereIsNoStoredAnswerToFallBackOn() {
+        willFailToConnect();
+        willFailToConnect();
+        willFailToConnect();
+
+        assertThatThrownBy(() -> service.forward(exchange(bearer()))).isInstanceOf(IllegalStateException.class);
+    }
+
+    // --- what must not travel back ------------------------------------------
+
+    /** A provider must not be able to set a cookie or issue a challenge in the caller's context. */
+    @Test
+    void doesNotReturnTheProvidersSessionOrAuthenticationHeaders() {
+        willAnswer(ClientResponse.create(HttpStatus.OK)
+                .header(HttpHeaders.SET_COOKIE, "session=abc")
+                .header(HttpHeaders.WWW_AUTHENTICATE, "Basic realm=\"provider\"")
+                .header("X-Request-Id", "upstream-1")
+                .body("{}")
+                .build());
+
+        var outcome = service.forward(exchange(bearer()));
+
+        assertThat(outcome.headers().headerNames())
+                .doesNotContain(HttpHeaders.SET_COOKIE, HttpHeaders.WWW_AUTHENTICATE);
+        assertThat(outcome.headers().getFirst("X-Request-Id")).isEqualTo("upstream-1");
+    }
+
+    /** An upstream that rejects a key routinely quotes it back in the refusal it returns. */
+    @Test
+    void scrubsTheCredentialOutOfAnythingTheProviderEchoesBack() {
+        willAnswer(ClientResponse.create(HttpStatus.UNAUTHORIZED)
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .body("{\"error\":\"invalid key " + SECRET + "\"}")
+                .build());
+
+        var outcome = service.forward(exchange(HttpMethod.POST, "/v1/tracks", bearer(), new HttpHeaders()));
+
+        assertThat(new String(outcome.body())).doesNotContain(SECRET);
+    }
+}

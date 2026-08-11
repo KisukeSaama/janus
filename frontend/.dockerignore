@@ -1,0 +1,9 @@
+# The root .dockerignore does not apply here: this directory is its own build context.
+# Without this file the host's node_modules is copied over the one npm ci just installed,
+# which breaks the build on any host whose platform differs from the image.
+node_modules
+dist
+.env
+.env.*
+*.log
+*.tsbuildinfo

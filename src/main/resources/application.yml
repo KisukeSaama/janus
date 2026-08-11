@@ -1,29 +1,134 @@
 spring:
   application.name: janus
+  # A proxied request spends nearly all of its life waiting on someone else's API, and used to hold
+  # a platform thread for the whole wait. On virtual threads the wait costs a stack, not a thread,
+  # so concurrency stops being bounded by the Tomcat pool. Safe here because every lock Janus holds
+  # guards an in-memory map for a few instructions and never spans a blocking call.
+  threads.virtual.enabled: true
   datasource:
     url: ${JANUS_DATABASE_URL:jdbc:postgresql://localhost:5432/janus}
     username: ${JANUS_DATABASE_USERNAME:janus}
     password: ${JANUS_DATABASE_PASSWORD:janus}
+    hikari:
+      # With virtual threads the connection pool, not the request pool, is what bounds concurrency.
+      # It stays deliberately small: a proxied call holds a connection only to read its grant, and
+      # queueing briefly for one is far cheaper than an oversized pool is for PostgreSQL.
+      maximum-pool-size: ${JANUS_DATABASE_POOL_SIZE:10}
+      connection-timeout: 10000
   jpa:
     open-in-view: false
     hibernate.ddl-auto: validate
     properties.hibernate.jdbc.time_zone: UTC
   flyway.enabled: true
   config.import: optional:configtree:/run/secrets/
+  jackson:
+    default-property-inclusion: non_null
+    deserialization.fail-on-unknown-properties: false
+  web.resources.add-mappings: false
 server:
-  forward-headers-strategy: framework
+  # `native`, not `framework`. Both read X-Forwarded-For, but the framework filter takes the
+  # header's first entry, and nginx appends the real peer to whatever the caller sent: a request
+  # carrying its own X-Forwarded-For would then choose its own throttling identity, and rotating
+  # that header would buy unlimited password and API-key guesses. Tomcat's RemoteIpValve instead
+  # walks the header right to left, discarding hops it recognises as internal proxies and keeping
+  # the first address it does not — an address the caller cannot choose.
+  forward-headers-strategy: native
+  tomcat.remoteip:
+    remote-ip-header: x-forwarded-for
+    protocol-header: x-forwarded-proto
+    # Every hop Janus sits behind, and nothing else. Loopback and the private ranges, which is
+    # where a containerised nginx or Traefik lives. A proxy on a public address must be named
+    # here, or its own address becomes the throttled client and one bad caller blocks everybody.
+    #
+    # Narrower than Tomcat's own default, which also trusts 100.64.0.0/10: that range is carrier
+    # NAT, so real clients arrive from it, and trusting a range a caller can reach Janus from is
+    # how a caller starts choosing its own identity again.
+    internal-proxies: ${JANUS_TRUSTED_PROXIES:127.0.0.0/8, ::1/128, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, fe80::/10, fc00::/7}
   error.include-message: never
-management.endpoints.web.exposure.include: health,info
-management.endpoint.health.probes.enabled: true
+  error.include-stacktrace: never
+  error.include-binding-errors: never
+  max-http-request-header-size: 16KB
+  tomcat:
+    max-http-form-post-size: 1MB
+    max-swallow-size: 2MB
+    relaxed-query-chars: "[,]"
+management:
+  # Health stays open for orchestrator probes. Metrics name providers and response times, so they sit
+  # behind the same administrator authentication as the rest of the control plane.
+  endpoints.web.exposure.include: health,metrics
+  endpoint.health:
+    probes.enabled: true
+    show-details: never
+  info.env.enabled: false
+server.servlet.session:
+  # Sessions live in Tomcat's memory: a restart signs everybody out, which is a reconnection rather
+  # than a loss. One more piece of per-instance state to move before running several replicas.
+  timeout: ${JANUS_SESSION_TIMEOUT:8h}
+  cookie:
+    name: JANUS_SESSION
+    http-only: true
+    same-site: strict
+
 janus:
   admin:
     username: ${JANUS_ADMIN_USERNAME:admin}
     password: ${JANUS_ADMIN_PASSWORD:change-me-in-production}
+    # Where this account's own expiry notices go. Applied while the account still carries the address
+    # the migration wrote; once a real one is set, here or from the console, that one stands.
+    email: ${JANUS_ADMIN_EMAIL:admin@localhost}
   cors-origins: ${JANUS_CORS_ORIGINS:http://localhost:5173}
+  # The token exchange every client library already speaks. A service's own identifier and API key
+  # are its client id and client secret; nothing extra to create.
+  oauth:
+    access-token-ttl: ${JANUS_ACCESS_TOKEN_TTL:15m}
+    refresh-token-ttl: ${JANUS_REFRESH_TOKEN_TTL:30d}
+    refresh-enabled: ${JANUS_REFRESH_TOKENS_ENABLED:true}
+    max-active-tokens: ${JANUS_MAX_ACTIVE_TOKENS:10000}
   openbao:
     address: ${OPENBAO_ADDR:http://localhost:8200}
     token: ${OPENBAO_TOKEN:${openbao_token:}}
     kv-mount: ${OPENBAO_KV_MOUNT:secret}
+  security:
+    max-auth-failures: ${JANUS_MAX_AUTH_FAILURES:10}
+    auth-failure-window-seconds: ${JANUS_AUTH_FAILURE_WINDOW_SECONDS:300}
+    auth-block-seconds: ${JANUS_AUTH_BLOCK_SECONDS:900}
+    # Volume ceilings per client address, applied before authentication and independently of the
+    # failure throttle above, which by construction never sees a caller whose requests succeed.
+    # The console spends a handful of requests per screen; the gateway is called by services in a
+    # loop, so its allowance is the one sized for machines. Zero on either leaves it unmetered.
+    rate-limit:
+      admin-per-minute: ${JANUS_RATE_LIMIT_ADMIN_PER_MINUTE:300}
+      admin-burst: ${JANUS_RATE_LIMIT_ADMIN_BURST:60}
+      gateway-per-minute: ${JANUS_RATE_LIMIT_GATEWAY_PER_MINUTE:1800}
+      gateway-burst: ${JANUS_RATE_LIMIT_GATEWAY_BURST:300}
   gateway:
     allow-private-destinations: ${JANUS_ALLOW_PRIVATE_DESTINATIONS:false}
     max-response-bytes: ${JANUS_MAX_RESPONSE_BYTES:10485760}
+    max-request-bytes: ${JANUS_MAX_REQUEST_BYTES:10485760}
+    connect-timeout-millis: ${JANUS_CONNECT_TIMEOUT_MILLIS:5000}
+    response-timeout-seconds: ${JANUS_RESPONSE_TIMEOUT_SECONDS:30}
+    cache:
+      enabled: ${JANUS_CACHE_ENABLED:true}
+      max-entries: ${JANUS_CACHE_MAX_ENTRIES:1000}
+      max-entry-bytes: ${JANUS_CACHE_MAX_ENTRY_BYTES:1048576}
+      max-total-bytes: ${JANUS_CACHE_MAX_TOTAL_BYTES:67108864}
+      stale-if-error-seconds: ${JANUS_CACHE_STALE_IF_ERROR_SECONDS:300}
+    throttle:
+      max-wait-millis: ${JANUS_THROTTLE_MAX_WAIT_MILLIS:2000}
+      max-cooldown-seconds: ${JANUS_THROTTLE_MAX_COOLDOWN_SECONDS:300}
+    retry:
+      max-attempts: ${JANUS_RETRY_MAX_ATTEMPTS:2}
+      initial-backoff-millis: ${JANUS_RETRY_INITIAL_BACKOFF_MILLIS:200}
+      max-backoff-millis: ${JANUS_RETRY_MAX_BACKOFF_MILLIS:2000}
+  notifications:
+    check-cron: ${JANUS_EXPIRY_CHECK_CRON:0 15 7 * * *}
+    zone: ${JANUS_EXPIRY_CHECK_ZONE:UTC}
+    expiry:
+      notice-days: ${JANUS_EXPIRY_NOTICE_DAYS:30}
+      warning-days: ${JANUS_EXPIRY_WARNING_DAYS:7}
+    email:
+      enabled: ${JANUS_EXPIRY_EMAIL_ENABLED:false}
+      recipients: ${JANUS_EXPIRY_EMAIL_RECIPIENTS:}
+      from: ${JANUS_EXPIRY_EMAIL_FROM:janus@localhost}
+      subject-prefix: ${JANUS_EXPIRY_EMAIL_SUBJECT_PREFIX:[Janus]}
+logging.pattern.level: "%5p [correlationId=%X{correlationId:-}]"
