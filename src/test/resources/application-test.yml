@@ -1,0 +1,22 @@
+# Settings that only make sense while a test is running. Everything else is inherited from the
+# real application.yml on purpose: a test that reconfigures the thing it is testing proves less.
+janus:
+  security:
+    # A suite that asserts refusals produces refusals by design, and would otherwise throttle itself
+    # out of the deployment halfway through. The throttle's own behaviour is asserted directly, in
+    # AdminAuthenticationThrottleFilterTest, where the counting is the subject rather than the noise.
+    max-auth-failures: 100000
+  notifications:
+    # Far enough away that the sweep never fires mid-suite and writes events a test did not expect.
+    check-cron: "0 0 0 1 1 *"
+    email.enabled: false
+  gateway:
+    # Retries and waits are real behaviour, but a suite should not spend seconds re-enacting them.
+    throttle.max-wait-millis: 50
+    retry:
+      initial-backoff-millis: 1
+      max-backoff-millis: 5
+logging.level:
+  org.testcontainers: WARN
+  com.github.dockerjava: WARN
+  org.springframework.test.context.cache: WARN

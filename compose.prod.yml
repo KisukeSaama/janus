@@ -7,7 +7,8 @@ services:
     ports: ["80:80", "443:443"]
     volumes: ["./deploy/certs:/etc/nginx/certs:ro"]
     networks: [public, private]
-    depends_on: [backend]
+    depends_on:
+      backend: {condition: service_healthy}
     restart: unless-stopped
   backend:
     build: .
@@ -17,11 +18,13 @@ services:
       JANUS_DATABASE_USERNAME: janus
       OPENBAO_ADDR: http://openbao:8200
       JANUS_CORS_ORIGINS: https://${JANUS_PUBLIC_HOST:?Set JANUS_PUBLIC_HOST}
+      JANUS_ADMIN_EMAIL: ${JANUS_ADMIN_EMAIL:-admin@localhost}
     secrets: [postgres_password, openbao_token, admin_password]
     networks: [private, egress]
     depends_on:
       postgres: {condition: service_healthy}
       openbao: {condition: service_healthy}
+    healthcheck: {test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080'"], interval: 10s, timeout: 5s, retries: 20, start_period: 30s}
     restart: unless-stopped
     read_only: true
     tmpfs: ["/tmp"]
@@ -40,9 +43,11 @@ services:
     security_opt: ["no-new-privileges:true"]
   openbao:
     image: openbao/openbao:2.3
-    command: server -config=/openbao/config/openbao.hcl
+    command: server
     cap_add: ["IPC_LOCK"]
-    volumes: ["./deploy/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro", "openbao_prod:/openbao/data"]
+    environment:
+      BAO_ADDR: http://127.0.0.1:8200
+    volumes: ["./deploy/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro", "openbao_prod:/openbao/file"]
     networks: [private]
     healthcheck: {test: ["CMD-SHELL", "bao status >/dev/null 2>&1 || [ $$? -eq 2 ]"], interval: 10s, timeout: 5s, retries: 30}
     restart: unless-stopped

@@ -1,43 +1,507 @@
 @import "tailwindcss";
 
-:root {
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: oklch(0.18 0.025 294);
-  background: oklch(1 0 0);
-  font-synthesis: none;
-  --canvas: oklch(1 0 0);
-  --surface: oklch(0.97 0.008 294);
-  --surface-strong: oklch(0.935 0.012 294);
-  --ink: oklch(0.18 0.025 294);
-  --muted: oklch(0.46 0.025 294);
-  --line: oklch(0.88 0.015 294);
-  --primary: oklch(0.50 0.14 294);
-  --primary-dark: oklch(0.42 0.14 294);
-  --accent: oklch(0.45 0.12 235);
-  --success: oklch(0.48 0.12 155);
-  --warning: oklch(0.58 0.14 75);
-  --danger: oklch(0.50 0.17 25);
+/*
+ * Two faces, two themes, one accent.
+ *
+ * The console speaks in two textures. Prose, labels, and headings are set in a grotesque with some
+ * tension in it; anything the machine will match literally — slugs, paths, methods, identifiers,
+ * keys — is set in a monospace. The split is not decoration: a path you can misread is a path you
+ * can misconfigure, and an operator trusts a tool that sets machine data like machine data.
+ *
+ * Tokens are declared twice as raw `--c-*` custom properties, once per theme, and mapped into
+ * Tailwind with `@theme inline` so every utility resolves through the live variable. Switching
+ * `data-theme` on <html> repaints the whole console without a second class tree.
+ */
+
+@theme inline {
+  /*
+   * One structural breakpoint, spelled the same in both languages. `WIDE` in JS and `lg:` in CSS
+   * have to name the same width or the rail can be hidden by CSS while the bar has already dropped
+   * the button that opens it. 60rem is where a table becomes a table and the rail becomes permanent.
+   */
+  --breakpoint-lg: 60rem;
+
+  --font-sans: "Instrument Sans Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Spline Sans Mono Variable", ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+
+  --color-canvas: var(--c-canvas);
+  --color-surface: var(--c-surface);
+  --color-sunk: var(--c-sunk);
+  --color-line: var(--c-line);
+  --color-line-strong: var(--c-line-strong);
+
+  --color-text: var(--c-text);
+  --color-text-2: var(--c-text-2);
+  --color-text-3: var(--c-text-3);
+
+  --color-accent: var(--c-accent);
+  --color-accent-hover: var(--c-accent-hover);
+  --color-accent-edge: var(--c-accent-edge);
+  --color-accent-text: var(--c-accent-text);
+  --color-accent-wash: var(--c-accent-wash);
+  --color-on-accent: var(--c-on-accent);
+
+  --color-ok: var(--c-ok);
+  --color-warn: var(--c-warn);
+  --color-bad: var(--c-bad);
+  --color-ok-wash: var(--c-ok-wash);
+  --color-warn-wash: var(--c-warn-wash);
+  --color-bad-wash: var(--c-bad-wash);
+
+  --radius-control: 5px;
+  --radius-panel: 8px;
+
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.375rem;
+  --text-lg: 1rem;
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.3125rem;
+  --text-xl--line-height: 1.6875rem;
+  --text-2xl: 1.625rem;
+  --text-2xl--line-height: 2rem;
+
+  /*
+   * Instrument Sans sets a touch tight at display sizes and a touch loose in small caps. Two
+   * tokens carry the correction so no component has to guess at an arbitrary em value.
+   */
+  --tracking-title: -0.019em;
+  --tracking-stamp: 0.085em;
+
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --shadow-overlay: 0 24px 60px -20px var(--c-shadow), 0 2px 6px -2px var(--c-shadow);
 }
-* { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--canvas); }
-button, input, select, textarea { font: inherit; }
-button { cursor: pointer; }
-button:disabled { cursor: not-allowed; opacity: .55; }
-:focus-visible { outline: 3px solid oklch(0.73 0.12 294 / .5); outline-offset: 2px; }
-.field { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--canvas); color: var(--ink); padding: .65rem .75rem; transition: border-color 160ms ease, box-shadow 160ms ease; }
-.field:hover { border-color: oklch(0.72 0.04 294); }
-.field:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px oklch(0.50 0.14 294 / .12); }
-.field::placeholder { color: oklch(0.48 0.02 294); }
-.label { display:block; color: var(--ink); font-size:.8rem; font-weight:650; margin-bottom:.4rem; }
-.btn { display:inline-flex; align-items:center; justify-content:center; gap:.45rem; min-height:38px; border-radius:8px; padding:.5rem .8rem; font-weight:650; font-size:.84rem; transition:background 160ms ease,color 160ms ease,transform 100ms ease; }
-.btn:active { transform:translateY(1px); }
-.btn-primary { border:0; color:white; background:var(--primary); }
-.btn-primary:hover { background:var(--primary-dark); }
-.btn-secondary { border:1px solid var(--line); color:var(--ink); background:var(--canvas); }
-.btn-secondary:hover { background:var(--surface); }
-.btn-danger { border:0; color:var(--danger); background:transparent; }
-.btn-danger:hover { background:oklch(0.95 0.025 25); }
-.panel { border:1px solid var(--line); border-radius:12px; background:var(--canvas); }
-.skeleton { background:linear-gradient(90deg,var(--surface),var(--surface-strong),var(--surface)); background-size:200% 100%; animation:skeleton 1.4s ease infinite; }
-@keyframes skeleton { to { background-position:-200% 0; } }
-@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important;}}
+
+/* Dark is the product default: the console is read beside a terminal and an editor, not on paper. */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /*
+   * Neutrals stay cool and near-achromatic: warm greys under an orange accent read as brown and
+   * dull the very colour they are meant to support. The ground is ink rather than office grey,
+   * which is what keeps the orange hot instead of merely present.
+   */
+  --c-canvas: oklch(0.158 0.008 268);
+  --c-surface: oklch(0.203 0.009 268);
+  --c-sunk: oklch(0.246 0.01 268);
+  --c-line: oklch(0.3 0.011 268);
+  /* Control borders, not decorative rules: held at 3:1 against the surface for WCAG 1.4.11. */
+  --c-line-strong: oklch(0.505 0.014 268);
+
+  --c-text: oklch(0.963 0.003 268);
+  --c-text-2: oklch(0.79 0.008 268);
+  --c-text-3: oklch(0.672 0.01 268);
+
+  --c-accent: oklch(0.735 0.185 46);
+  --c-accent-hover: oklch(0.795 0.16 50);
+  --c-accent-edge: oklch(0.735 0.185 46);
+  --c-accent-text: oklch(0.785 0.165 50);
+  --c-accent-wash: oklch(0.272 0.06 45);
+  --c-on-accent: oklch(0.165 0.038 45);
+
+  --c-ok: oklch(0.78 0.15 155);
+  --c-warn: oklch(0.855 0.145 92);
+  --c-bad: oklch(0.7 0.19 22);
+  /* Dark washes stay near-neutral: a dark yellow is olive, and olive is not a status. */
+  --c-ok-wash: oklch(0.25 0.03 155);
+  --c-warn-wash: oklch(0.252 0.03 92);
+  --c-bad-wash: oklch(0.256 0.04 22);
+
+  --c-shadow: oklch(0.05 0.006 268 / 0.75);
+  --c-scrim: oklch(0.08 0.006 268 / 0.68);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --c-canvas: oklch(0.97 0.004 268);
+  --c-surface: oklch(0.998 0.002 268);
+  --c-sunk: oklch(0.945 0.006 268);
+  --c-line: oklch(0.892 0.008 268);
+  --c-line-strong: oklch(0.66 0.012 268);
+
+  --c-text: oklch(0.225 0.012 268);
+  --c-text-2: oklch(0.44 0.012 268);
+  --c-text-3: oklch(0.528 0.013 268);
+
+  /* Orange keeps its identity but splits in two: a fill you can see, and a text tone you can read. */
+  --c-accent: oklch(0.688 0.198 46);
+  --c-accent-hover: oklch(0.638 0.192 44);
+  --c-accent-edge: oklch(0.588 0.182 43);
+  --c-accent-text: oklch(0.492 0.165 41);
+  --c-accent-wash: oklch(0.96 0.045 62);
+  --c-on-accent: oklch(0.195 0.042 41);
+
+  --c-ok: oklch(0.47 0.105 155);
+  --c-warn: oklch(0.498 0.12 84);
+  --c-bad: oklch(0.472 0.18 24);
+  --c-ok-wash: oklch(0.956 0.028 155);
+  --c-warn-wash: oklch(0.96 0.038 90);
+  --c-bad-wash: oklch(0.956 0.03 24);
+
+  --c-shadow: oklch(0.25 0.014 268 / 0.18);
+  --c-scrim: oklch(0.28 0.012 268 / 0.44);
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    background: var(--c-canvas);
+    /* The platform scrollbar is drawn light by default and punches a hole in a dark console. */
+    scrollbar-color: var(--c-line-strong) transparent;
+    /*
+     * The gutter is reserved whether or not the page scrolls. Without it, moving from a page that
+     * overflows to one that does not takes the scrollbar away, widens the viewport by its width, and
+     * slides every centred thing on the page sideways. That shift is read as the interface being
+     * loose, and it is the one layout bug no component can fix on its own.
+     */
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100svh;
+    background: var(--c-canvas);
+    color: var(--c-text);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    font-synthesis: none;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  button {
+    cursor: pointer;
+    background: none;
+    border: 0;
+    padding: 0;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: var(--c-accent-wash);
+    color: var(--c-text);
+  }
+}
+
+@layer components {
+  /*
+   * Machine data, set as machine data. The monospace is what the gateway will match literally, so
+   * a path, a slug, or a key is never mistaken for prose. Figures stay tabular so columns align,
+   * and the zero keeps its slash so it never reads as an O.
+   */
+  .data {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums slashed-zero;
+    font-weight: 400;
+    letter-spacing: 0;
+  }
+
+  /* Figures inside running prose: aligned, but still in the UI face. */
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Small caps label: column heads, section heads, environment marks. */
+  .stamp {
+    font-size: var(--text-2xs);
+    line-height: 1;
+    font-weight: 600;
+    letter-spacing: var(--tracking-stamp);
+    text-transform: uppercase;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .field {
+    display: block;
+    width: 100%;
+    min-height: 38px;
+    padding: 0.5rem 0.625rem;
+    border: 1px solid var(--c-line-strong);
+    border-radius: var(--radius-control);
+    /* Inputs sit below the panel they live in rather than flush with it. */
+    background: var(--c-sunk);
+    color: var(--c-text);
+    transition:
+      border-color 160ms var(--ease-out-quint),
+      background-color 160ms var(--ease-out-quint),
+      box-shadow 160ms var(--ease-out-quint);
+  }
+
+  .field:hover:not(:disabled) {
+    border-color: var(--c-text-3);
+  }
+
+  .field:focus {
+    outline: none;
+    border-color: var(--c-accent);
+    background: var(--c-surface);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--c-accent) 26%, transparent);
+  }
+
+  .field:focus-visible {
+    box-shadow: none;
+  }
+
+  .field:disabled {
+    border-color: var(--c-line);
+    color: var(--c-text-3);
+  }
+
+  .field[aria-invalid="true"] {
+    border-color: var(--c-bad);
+  }
+
+  .field::placeholder {
+    color: var(--c-text-3);
+  }
+
+  select.field {
+    appearance: none;
+    padding-right: 1.875rem;
+    background-image: linear-gradient(45deg, transparent 50%, var(--c-text-2) 50%),
+      linear-gradient(135deg, var(--c-text-2) 50%, transparent 50%);
+    background-position:
+      right 0.875rem center,
+      right 0.625rem center;
+    background-size:
+      5px 5px,
+      5px 5px;
+    background-repeat: no-repeat;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4375rem;
+    min-height: 38px;
+    padding: 0 0.75rem;
+    border-radius: var(--radius-control);
+    border: 1px solid transparent;
+    font-size: var(--text-sm);
+    font-weight: 580;
+    white-space: nowrap;
+    transition:
+      background-color 160ms var(--ease-out-quint),
+      border-color 160ms var(--ease-out-quint),
+      color 160ms var(--ease-out-quint),
+      translate 90ms var(--ease-out-quint);
+  }
+
+  .btn-sm {
+    min-height: 32px;
+    padding: 0 0.5rem;
+  }
+
+  .btn:disabled {
+    opacity: 0.45;
+  }
+
+  /* A press is worth half a pixel: enough to feel, too little to notice. */
+  .btn:active:not(:disabled) {
+    translate: 0 0.5px;
+  }
+
+  .btn-primary {
+    background: var(--c-accent);
+    border-color: var(--c-accent-edge);
+    color: var(--c-on-accent);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background: var(--c-accent-hover);
+    border-color: var(--c-accent-hover);
+  }
+
+  .btn-secondary {
+    background: var(--c-surface);
+    border-color: var(--c-line-strong);
+    color: var(--c-text);
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--c-sunk);
+    border-color: var(--c-text-3);
+  }
+
+  .btn-quiet {
+    color: var(--c-text-2);
+  }
+
+  .btn-quiet:hover:not(:disabled) {
+    background: var(--c-sunk);
+    color: var(--c-text);
+  }
+
+  .btn-destructive {
+    color: var(--c-bad);
+    border-color: color-mix(in oklch, var(--c-bad) 45%, transparent);
+  }
+
+  .btn-destructive:hover:not(:disabled) {
+    background: var(--c-bad-wash);
+    border-color: var(--c-bad);
+  }
+
+  /* Touch pointers get larger targets without pushing desktop density around. */
+  @media (pointer: coarse) {
+    .btn {
+      min-height: 44px;
+    }
+
+    .btn-sm {
+      min-height: 38px;
+    }
+
+    .field {
+      min-height: 44px;
+    }
+  }
+
+  .panel {
+    background: var(--c-surface);
+    border: 1px solid var(--c-line);
+    border-radius: var(--radius-panel);
+  }
+
+  /*
+   * A destination in the rail. The current one is a filled ground and an accent icon, never a
+   * heavier word: bolding the current page would widen the row and shift the count beside it on
+   * every navigation. Hover is a lighter wash of the same fill, so the two states are one family
+   * without being the same colour.
+   */
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    width: 100%;
+    min-height: 34px;
+    padding: 0.375rem 0.625rem;
+    border-radius: var(--radius-control);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--c-text-2);
+    text-align: left;
+    transition:
+      background-color 160ms var(--ease-out-quint),
+      color 160ms var(--ease-out-quint);
+  }
+
+  .nav-item .nav-icon {
+    color: var(--c-text-3);
+    transition: color 160ms var(--ease-out-quint);
+  }
+
+  .nav-item:hover {
+    background: color-mix(in oklch, var(--c-sunk) 55%, transparent);
+    color: var(--c-text);
+  }
+
+  .nav-item:hover .nav-icon {
+    color: var(--c-text-2);
+  }
+
+  .nav-item[aria-current="page"] {
+    background: var(--c-sunk);
+    color: var(--c-text);
+  }
+
+  .nav-item[aria-current="page"] .nav-icon {
+    color: var(--c-accent-text);
+  }
+
+  @media (pointer: coarse) {
+    .nav-item {
+      min-height: 42px;
+    }
+  }
+
+  .skeleton {
+    background: var(--c-sunk);
+    border-radius: 3px;
+    animation: pulse 1.6s var(--ease-out-quint) infinite;
+  }
+
+  .scroll-x {
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--c-line-strong) transparent;
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes slide-in-x {
+  from {
+    transform: translateX(1.5rem);
+    opacity: 0;
+  }
+}
+
+/* The rail comes in from the edge it lives on, at the width it will keep. */
+@keyframes slide-in-rail {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes slide-in-y {
+  from {
+    transform: translateY(2rem);
+    opacity: 0;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .btn:active:not(:disabled) {
+    translate: none;
+  }
+}
