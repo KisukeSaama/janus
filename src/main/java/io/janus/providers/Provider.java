@@ -6,6 +6,8 @@ import java.util.UUID;
 import jakarta.persistence.*;
 
 import io.janus.accounts.Account;
+import io.janus.credentials.AuthType;
+import io.janus.credentials.TokenClientAuth;
 
 /**
  * Fixed upstream destination. Gateway callers never supply a URL; they name a provider slug.
@@ -13,24 +15,18 @@ import io.janus.accounts.Account;
  * <p>The traffic policy lives here rather than in a service because its one rule — a burst is
  * meaningless without an allowance to burst against — must hold for every path that writes it.
  *
- * <p>A slug is unique within its owner, not across the deployment: two people each registering the
- * Spotify API is the ordinary case. The gateway resolves a slug within the namespace of whoever's
- * application is calling, so {@code /gateway/spotify/...} still means one destination per caller.
+ * <p>A provider is a deployment-wide catalogue entry. Administrators define it once; each account
+ * activates it with a separate credential.
  */
 @Entity
-@Table(
-        name = "providers",
-        uniqueConstraints =
-                @UniqueConstraint(
-                        name = "uq_provider_owner_slug",
-                        columnNames = {"owner_id", "slug"}))
+@Table(name = "providers", uniqueConstraints = @UniqueConstraint(name = "uq_provider_slug", columnNames = "slug"))
 public class Provider {
     @Id
     private UUID id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "owner_id", nullable = false)
-    private Account owner;
+    /** Only retained for source compatibility with pre-catalogue unit fixtures; never persisted. */
+    @Transient
+    private Account legacyOwner;
 
     @Column(nullable = false, length = 120)
     private String name;
@@ -60,6 +56,26 @@ public class Provider {
     @Column(name = "rate_limit_burst", nullable = false)
     private int rateLimitBurst;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "auth_type", nullable = false, length = 32)
+    private AuthType authType;
+
+    @Column(name = "header_name", length = 100)
+    private String headerName;
+
+    @Column(name = "query_parameter", length = 100)
+    private String queryParameter;
+
+    @Column(name = "token_url", length = 500)
+    private String tokenUrl;
+
+    @Column(name = "token_scopes", length = 500)
+    private String tokenScopes;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "token_client_auth", length = 16)
+    private TokenClientAuth tokenClientAuth;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -69,13 +85,19 @@ public class Provider {
     /** For Hibernate only. */
     protected Provider() {}
 
-    public Provider(Account owner, String name, String slug, String baseUrl, boolean enabled, TrafficPolicy traffic) {
+    public Provider(String name, String slug, String baseUrl, boolean enabled, TrafficPolicy traffic, Auth auth) {
         this.id = UUID.randomUUID();
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
-        this.owner = owner;
         describe(name, slug, baseUrl, enabled);
         applyTrafficPolicy(traffic);
+        applyAuth(auth);
+    }
+
+    /** Compatibility constructor for tests and migration-era callers. */
+    public Provider(Account owner, String name, String slug, String baseUrl, boolean enabled, TrafficPolicy traffic) {
+        this(name, slug, baseUrl, enabled, traffic, Auth.none());
+        this.legacyOwner = owner;
     }
 
     /**
@@ -90,6 +112,18 @@ public class Provider {
         public TrafficPolicy {
             if (burst > 0 && ratePerMinute == 0)
                 throw new IllegalArgumentException("A burst is only meaningful with a per-minute rate limit");
+        }
+    }
+
+    public record Auth(
+            AuthType type,
+            String headerName,
+            String queryParameter,
+            String tokenUrl,
+            String tokenScopes,
+            TokenClientAuth tokenClientAuth) {
+        public static Auth none() {
+            return new Auth(AuthType.NONE, null, null, null, null, null);
         }
     }
 
@@ -112,16 +146,29 @@ public class Provider {
         this.rateLimitBurst = traffic.burst();
     }
 
+    public void applyAuth(Auth auth) {
+        this.authType = auth.type();
+        this.headerName = auth.type() == AuthType.API_KEY_HEADER ? auth.headerName() : null;
+        this.queryParameter = auth.type() == AuthType.API_KEY_QUERY ? auth.queryParameter() : null;
+        this.tokenUrl = auth.type().exchanged() ? auth.tokenUrl() : null;
+        this.tokenScopes = auth.type().exchanged() ? blankToNull(auth.tokenScopes()) : null;
+        this.tokenClientAuth = auth.type().exchanged()
+                ? java.util.Objects.requireNonNullElse(auth.tokenClientAuth(), TokenClientAuth.BASIC)
+                : null;
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
     /**
      * Hands the destination to somebody else. The slug moves with it, so the caller must invalidate
      * what was addressed by it — {@code TrafficPolicyRegistry.forgetProvider} — as for any edit.
      */
-    public void transferTo(Account owner) {
-        this.owner = owner;
-    }
-
+    /** @deprecated APIs are global; only kept for old fixtures. */
+    @Deprecated
     public Account getOwner() {
-        return owner;
+        return legacyOwner;
     }
 
     public UUID getId() {
@@ -158,6 +205,30 @@ public class Provider {
 
     public int getRateLimitBurst() {
         return rateLimitBurst;
+    }
+
+    public AuthType getAuthType() {
+        return authType;
+    }
+
+    public String getHeaderName() {
+        return headerName;
+    }
+
+    public String getQueryParameter() {
+        return queryParameter;
+    }
+
+    public String getTokenUrl() {
+        return tokenUrl;
+    }
+
+    public String getTokenScopes() {
+        return tokenScopes;
+    }
+
+    public TokenClientAuth getTokenClientAuth() {
+        return tokenClientAuth;
     }
 
     public Instant getCreatedAt() {

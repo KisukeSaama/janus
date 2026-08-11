@@ -47,7 +47,7 @@ import { useErrorMessage } from '../../lib/errors';
  * identifier, ready to copy. The key itself is not among them — it was shown once, and rotating is
  * the only way back to a value this console can display.
  */
-export function ApplicationsPage({ username }: { username: string }) {
+export function ApplicationsPage({ username: _username }: { username: string }) {
   const { t, formatAge, formatDate } = useI18n();
   const describe = useErrorMessage();
 
@@ -390,7 +390,7 @@ export function ApplicationsPage({ username }: { username: string }) {
           <div className="space-y-4">
             <CopyField
               label={t('applications.accessGateway')}
-              value={`${window.location.origin}/${encodeURIComponent(username)}/gateway/`}
+              value={`${window.location.origin}/gateway/`}
             />
             <CopyField label="X-Janus-Application-Id" value={access.id} />
             <div>
@@ -415,7 +415,7 @@ export function ApplicationsPage({ username }: { username: string }) {
                     <li key={api.name} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 py-2.5">
                       <span>{api.name}</span>
                       <span className="data text-xs text-text-2">
-                        /{username}/gateway/{api.slug ?? '…'}/**
+                        /gateway/{api.slug ?? '…'}/**
                       </span>
                     </li>
                   ))}

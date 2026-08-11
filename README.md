@@ -15,7 +15,7 @@ Requests run on virtual threads. A proxied call spends nearly all of its life wa
 ## Security boundaries
 
 - `/api/admin/**` authenticates a console account, by session cookie for a browser or HTTP Basic for a script, and is independent from gateway authentication. Everything not explicitly permitted is denied. CSRF protection is on, and skipped only for requests carrying an `Authorization` header — a browser never attaches one on its own, so there is nothing there to forge.
-- `/{username}/gateway/{providerSlug}/**` requires `X-Janus-Application-Id` and `X-Janus-Api-Key`, or a bearer token obtained from the exchange below.
+- `/gateway/{providerSlug}/**` requires `X-Janus-Application-Id` and `X-Janus-Api-Key`, or a bearer token obtained from the exchange below.
 - `/oauth/token` exchanges an application's own identifier and key for a short-lived opaque bearer token, and `/oauth/revoke` drops one. Tokens are held per instance and keyed by digest, so revocation — disabling a service, rotating its key, handing it to another account — takes effect at once rather than when a signed token would have expired. Refresh tokens rotate, and a value presented twice revokes its whole family. The surface is unauthenticated by construction (no token exists yet when it is called), so it authenticates the client itself, throttles failures, and is capped on volume like the console.
 - Application keys are generated with 256 bits of randomness, displayed once, and persisted only as BCrypt hashes. Verified keys are cached in memory for five minutes so a proxied request does not pay a BCrypt verification each time; administrative changes and key rotation invalidate that cache immediately.
 - An unknown application identifier still costs a hash comparison, so response timing does not disclose which identifiers exist.
@@ -80,7 +80,7 @@ Everything below has a working default for development; the ones without a safe 
 | Variable | Default | Purpose |
 |---|---|---|
 | `JANUS_DATABASE_URL` / `_USERNAME` / `_PASSWORD` | local PostgreSQL | datastore connection |
-| `JANUS_ADMIN_USERNAME` / `JANUS_ADMIN_PASSWORD` | `admin` / placeholder | bootstrap console credentials. **A production profile refuses to start on a placeholder, a value under 8 characters, one missing an upper-case letter, a lower-case letter or a digit, or a password equal to the username.** Read once, on the first start; afterwards the account is managed from the console. |
+| `JANUS_ADMIN_PASSWORD` | placeholder | password for the `kisuke` bootstrap super-administrator. **A production profile refuses to start on a placeholder, a value under 8 characters, one missing an upper-case letter, a lower-case letter or a digit, or a password equal to the username.** Read once, on the first start; afterwards the account is managed from the console. |
 | `JANUS_ADMIN_EMAIL` | `admin@localhost` | where the bootstrap account's own expiry notices go. Applied while that account still carries the address the migration wrote; once a real one is set, here or from the console, that one stands. |
 | `JANUS_CORS_ORIGINS` | `http://localhost:5173` | comma-separated console origins. `*` is refused. |
 | `OPENBAO_ADDR` / `OPENBAO_TOKEN` / `OPENBAO_KV_MOUNT` | local dev server | KV v2 integration |
@@ -128,7 +128,7 @@ curl -u admin:$JANUS_ADMIN_PASSWORD -H 'Content-Type: application/json' \
 # Call any path on that API, once a provider, credential and grant exist.
 curl -H 'X-Janus-Application-Id: <application-uuid>' \
   -H 'X-Janus-Api-Key: <one-time-key>' \
-  http://localhost:8080/<username>/gateway/<provider-slug>/<any-path>
+  http://localhost:8080/gateway/<provider-slug>/<any-path>
 ```
 
 ## Authenticating a client
@@ -153,7 +153,7 @@ curl -X POST http://localhost:8080/oauth/token \
 
 # Call the gateway with it
 curl -H 'Authorization: Bearer jnt_…' \
-  http://localhost:8080/<username>/gateway/<provider-slug>/<allowed-path>
+  http://localhost:8080/gateway/<provider-slug>/<allowed-path>
 
 # Come back without the secret when it expires
 curl -X POST http://localhost:8080/oauth/token \
@@ -214,7 +214,7 @@ curl -u admin:$JANUS_ADMIN_PASSWORD -H 'Content-Type: application/json' -d '{
 
 # then, from the client service, with a grant on this provider
 curl -H 'Authorization: Bearer jnt_…' \
-  'http://localhost:8080/<username>/gateway/spotify/v1/search?q=miles+davis&type=artist'
+  'http://localhost:8080/gateway/spotify/v1/search?q=miles+davis&type=artist'
 ```
 
 `expiresAt` on such a credential dates the **client secret**, not the tokens it produces. Access
@@ -276,7 +276,6 @@ Configure these GitLab CI/CD variables (names only; never commit their values):
 - `JANUS_ADMIN_PASSWORD` (at least 8 characters with an upper-case letter, a lower-case letter and a digit, and not a placeholder; the deployment job rejects anything weaker before it reaches the server)
 - `JANUS_OPENBAO_TOKEN`
 - `JANUS_OPENBAO_SEAL_KEY` (environment-scoped; 32 random bytes in base64, from `openssl rand -base64 32`)
-- `JANUS_ADMIN_USERNAME` (optional, defaults to `admin`)
 - `JANUS_ADMIN_EMAIL` (optional, defaults to `admin@localhost`; set it, or the first account's expiry notices go nowhere)
 
 Use environment-scoped values for `dev` and `production`, protect the production values, and protect the `v*` tag pattern so those values are available to release pipelines. The runner must have the `devops` tag and Docker socket access; the server must already provide the external `traefik` network. Deployment files live in `/home/kisuke/deploy-janus/{dev,prod}` and persistent data in `/home/kisuke/janus/{dev,prod}`. Because the runner exposes the host Docker socket but does not mount `/home/kisuke`, the pipeline stages those files onto the host through a short-lived container. Secret files are written under a `077` umask, then land on the host as `644` inside a root-owned `700` directory. Compose uses file bind mounts for these secrets, so this lets the non-root application user read them without making them reachable through the host filesystem.

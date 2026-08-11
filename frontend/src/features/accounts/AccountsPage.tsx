@@ -196,7 +196,9 @@ export function AccountsPage({ identity }: { identity: Identity }) {
               required
               data
               autoComplete="off"
-              placeholder="ada"
+              minLength={6}
+              maxLength={60}
+              placeholder="adalovelace"
               defaultValue={editing?.username}
               disabled={!!editing}
               hint={t('accounts.usernameHint')}

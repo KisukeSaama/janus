@@ -13,6 +13,7 @@ import {
   useUpdateGrant,
   useUpdateProvider,
   type Grant,
+  type Identity,
   type Provider,
 } from '../../api';
 import {
@@ -56,11 +57,13 @@ export function ConnectionPage({
   id,
   onBack,
   onFix,
+  identity,
 }: {
   username: string;
   id: string;
   onBack: () => void;
   onFix: (to: 'applications' | 'credentials') => void;
+  identity: Identity;
 }) {
   const { t, tEnum, formatAge, formatDate } = useI18n();
   const describe = useErrorMessage();
@@ -154,7 +157,11 @@ export function ConnectionPage({
         action={<LiveState live={connection.live} paused={connection.blockedBy === 'grant'} />}
       />
 
-      <Diagnosis connection={connection} onFix={onFix} onFixDestination={() => setPanel('destination')} />
+      <Diagnosis
+        connection={connection}
+        onFix={onFix}
+        onFixDestination={identity.role === 'USER' ? undefined : () => setPanel('destination')}
+      />
 
       {error && <Notice>{error}</Notice>}
 
@@ -173,7 +180,7 @@ export function ConnectionPage({
             lead={t('detail.destinationLead')}
             aside={
               <span className="flex items-center gap-1">
-                {provider.cacheEnabled && (
+                {identity.role !== 'USER' && provider.cacheEnabled && (
                   <ArmedAction
                     trigger={t('providers.purge')}
                     confirm={t('providers.purgeConfirm')}
@@ -182,9 +189,11 @@ export function ConnectionPage({
                     onConfirm={() => guard(() => purgeCache.mutateAsync(provider.id))}
                   />
                 )}
-                <button className="btn btn-sm btn-secondary" onClick={() => setPanel('destination')}>
-                  {t('detail.destinationEdit')}
-                </button>
+                {identity.role !== 'USER' && (
+                  <button className="btn btn-sm btn-secondary" onClick={() => setPanel('destination')}>
+                    {t('detail.destinationEdit')}
+                  </button>
+                )}
               </span>
             }
           >
@@ -313,7 +322,7 @@ export function ConnectionPage({
         </Block>
       </div>
 
-      {panel === 'destination' && provider && (
+      {panel === 'destination' && provider && identity.role !== 'USER' && (
         <DestinationPanel
           provider={provider}
           onClose={() => setPanel('closed')}
@@ -370,7 +379,7 @@ function Diagnosis({
   connection: Connection;
   onFix: (to: 'applications' | 'credentials') => void;
   /** The destination is edited here rather than elsewhere, so its fix opens a panel instead. */
-  onFixDestination: () => void;
+  onFixDestination?: () => void;
 }) {
   const { t } = useI18n();
   const { grant, blockedBy } = connection;
@@ -397,10 +406,13 @@ function Diagnosis({
     <div className="mb-7 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-panel border border-warn/45 bg-warn-wash px-3.5 py-3">
       <AlertTriangle size={16} strokeWidth={2.25} className="shrink-0 text-warn" />
       <p className="min-w-0 flex-1 text-sm">{message}</p>
-      {blockedBy !== 'grant' && (
+      {blockedBy !== 'grant' && (blockedBy !== 'provider' || onFixDestination) && (
         <button
           className="btn btn-sm btn-secondary"
-          onClick={() => (blockedBy === 'provider' ? onFixDestination() : onFix(FIX_TARGET[blockedBy]))}
+          onClick={() => {
+            if (blockedBy === 'provider') onFixDestination?.();
+            else onFix(FIX_TARGET[blockedBy]);
+          }}
         >
           {t('detail.fix')}
         </button>
@@ -432,6 +444,12 @@ function DestinationPanel({
     cacheTtlSeconds: number;
     rateLimitPerMinute: number;
     rateLimitBurst: number;
+    authType: Provider['authType'];
+    headerName?: string;
+    queryParameter?: string;
+    tokenUrl?: string;
+    tokenScopes?: string;
+    tokenClientAuth?: Provider['tokenClientAuth'];
   }) => Promise<void>;
 }) {
   const { t } = useI18n();
@@ -451,6 +469,12 @@ function DestinationPanel({
         cacheTtlSeconds: Number(form.get('cacheTtlSeconds') || 0),
         rateLimitPerMinute: Number(form.get('rateLimitPerMinute') || 0),
         rateLimitBurst: Number(form.get('rateLimitBurst') || 0),
+        authType: provider.authType,
+        headerName: provider.headerName,
+        queryParameter: provider.queryParameter,
+        tokenUrl: provider.tokenUrl,
+        tokenScopes: provider.tokenScopes,
+        tokenClientAuth: provider.tokenClientAuth,
       });
     } catch (x) {
       setError(describe(x));

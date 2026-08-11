@@ -56,12 +56,12 @@ the way out. Never hold, request, or hardcode an API secret here.
 ## Calling
 
 Send the request you would have sent to the API, with its address replaced by
-\`$JANUS_URL/${username}/gateway/<slug>\` and two headers added:
+\`$JANUS_URL/gateway/<slug>\` and two headers added:
 
     X-Janus-Application-Id: $JANUS_APPLICATION_ID
     X-Janus-Api-Key: $JANUS_API_KEY
 
-- The path after the slug is forwarded as is: \`/${username}/gateway/spotify/v1/me\` reaches the API at \`/v1/me\`.
+- The path after the slug is forwarded as is: \`/gateway/spotify/v1/me\` reaches the API at \`/v1/me\`.
 - Method, query, body and response are unchanged. No SDK: use the stock HTTP client.
 - Never send \`Authorization\` or cookies (Janus strips them), and never the API's own key.
 - Body limit 10 MiB. Janus waits 30 s upstream, so set the client timeout above 35 s.
@@ -127,5 +127,5 @@ rotate**, never recovered.
 function apiList(username: string, apis: AgentApi[]): string {
   if (apis.length === 0) return 'None yet. Follow the next section before writing any call.';
 
-  return apis.map(({ name, slug }) => `- ${name} — \`/${username}/gateway/${slug}/…\``).join('\n');
+  return apis.map(({ name, slug }) => `- ${name} — \`/gateway/${slug}/…\``).join('\n');
 }

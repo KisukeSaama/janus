@@ -67,9 +67,9 @@ class AccountAdminControllerTest {
     void neverReturnsAPasswordHash() throws Exception {
         mvc.perform(post("/api/admin/accounts")
                         .contentType("application/json")
-                        .content(body("bo", "USER", STRONG, true)))
+                        .content(body("bobby6", "USER", STRONG, true)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.username").value("bo"))
+                .andExpect(jsonPath("$.username").value("bobby6"))
                 .andExpect(jsonPath("$.role").value("USER"))
                 .andExpect(content()
                         .string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("passwordHash"))))
@@ -77,23 +77,29 @@ class AccountAdminControllerTest {
     }
 
     @Test
+    void refusesAUsernameShorterThanSixCharacters() throws Exception {
+        createAccount("bobby", "USER", STRONG).actions().andExpect(status().isBadRequest());
+        verify(repository, never()).save(any());
+    }
+
+    @Test
     void refusesAUsernameThatIsAlreadyTaken() throws Exception {
-        when(repository.existsByUsername("bo")).thenReturn(true);
-        createAccount("bo", "USER", STRONG).actions().andExpect(status().isBadRequest());
+        when(repository.existsByUsername("bobby6")).thenReturn(true);
+        createAccount("bobby6", "USER", STRONG).actions().andExpect(status().isBadRequest());
         verify(repository, never()).save(any());
     }
 
     @Test
     void aWeakPasswordIsRejected() throws Exception {
-        createAccount("bo", "USER", "short").actions().andExpect(status().isBadRequest());
+        createAccount("bobby6", "USER", "short").actions().andExpect(status().isBadRequest());
         verify(repository, never()).save(any());
     }
 
     /** A login is compared, never displayed as typed, so two accounts cannot differ by case alone. */
     @Test
     void aUsernameIsComparedInLowerCase() throws Exception {
-        when(repository.existsByUsername("bo")).thenReturn(true);
-        createAccount("BO", "USER", STRONG).actions().andExpect(status().isBadRequest());
+        when(repository.existsByUsername("bobby6")).thenReturn(true);
+        createAccount("BOBBY6", "USER", STRONG).actions().andExpect(status().isBadRequest());
     }
 
     // --- who may act on whom ------------------------------------------------
@@ -102,7 +108,7 @@ class AccountAdminControllerTest {
     @Test
     void anAdministratorMayAppointAnotherAdministrator() throws Exception {
         callerIs(AccountRole.ADMIN);
-        createAccount("bo", "ADMIN", STRONG)
+        createAccount("bobby6", "ADMIN", STRONG)
                 .actions()
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.role").value("ADMIN"));
@@ -111,7 +117,7 @@ class AccountAdminControllerTest {
     @Test
     void anAdministratorMayNotAppointASuperAdministrator() throws Exception {
         callerIs(AccountRole.ADMIN);
-        createAccount("bo", "SUPER_ADMIN", STRONG).actions().andExpect(status().isBadRequest());
+        createAccount("bobby6", "SUPER_ADMIN", STRONG).actions().andExpect(status().isBadRequest());
         verify(repository, never()).save(any());
     }
 

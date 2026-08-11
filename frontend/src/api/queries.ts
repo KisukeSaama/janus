@@ -15,6 +15,7 @@ import type {
   IssuedApplication,
   NotificationFeed,
   Provider,
+  ProviderPage,
   ProviderInput,
   Traffic,
 } from './types';
@@ -31,6 +32,7 @@ import type {
 export const keys = {
   applications: ['applications'] as const,
   providers: ['providers'] as const,
+  providerCatalog: (query: string, page: number, size: number) => ['providers', query, page, size] as const,
   credentials: ['credentials'] as const,
   grants: ['grants'] as const,
   notifications: ['notifications'] as const,
@@ -54,7 +56,26 @@ export function useApplications() {
 export function useProviders() {
   return useQuery({
     queryKey: keys.providers,
-    queryFn: () => api<Provider[]>('/providers'),
+    queryFn: async () => {
+      const first = await api<ProviderPage>('/providers?size=100');
+      if (first.totalPages <= 1) return first.content;
+      const rest = await Promise.all(
+        Array.from({ length: first.totalPages - 1 }, (_, index) =>
+          api<ProviderPage>(`/providers?size=100&page=${index + 1}`),
+        ),
+      );
+      return [first, ...rest].flatMap((page) => page.content);
+    },
+    staleTime: RECORD_STALE_MS,
+  });
+}
+
+export function useProviderCatalog(query: string, page: number, size = 20) {
+  const params = new URLSearchParams({ q: query, page: String(page), size: String(size) });
+  return useQuery({
+    queryKey: keys.providerCatalog(query, page, size),
+    queryFn: () => api<ProviderPage>(`/providers?${params}`),
+    placeholderData: (previous) => previous,
     staleTime: RECORD_STALE_MS,
   });
 }

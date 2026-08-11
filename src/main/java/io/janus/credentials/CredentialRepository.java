@@ -7,17 +7,25 @@ import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
 
 /**
- * A secret has no owner column of its own: it is reached through its provider, which it can never
- * change and from which {@code secret_path} was derived once. Scoping therefore joins the provider's
- * owner, which cannot drift from the destination the secret actually belongs to.
+ * Personal API activations and their secret metadata. The provider is global, so ownership lives on
+ * the credential itself and every console query scopes by that column.
  */
 public interface CredentialRepository extends JpaRepository<Credential, UUID> {
 
-    @Query("select c from Credential c join fetch c.provider p where p.owner.id = :owner order by c.name")
+    @Query("select c from Credential c join fetch c.provider where c.ownerId = :owner order by c.name")
     List<Credential> findAllOwnedBy(@Param("owner") UUID owner);
 
-    @Query("select c from Credential c join fetch c.provider p where c.id = :id and p.owner.id = :owner")
+    @Query("select c from Credential c join fetch c.provider where c.id = :id and c.ownerId = :owner")
     Optional<Credential> findOwnedBy(@Param("id") UUID id, @Param("owner") UUID owner);
+
+    Optional<Credential> findByProviderIdAndOwnerId(UUID providerId, UUID ownerId);
+
+    List<Credential> findAllByOwnerId(UUID ownerId);
+
+    long countByOwnerId(UUID ownerId);
+
+    @Query("select c.provider.id from Credential c where c.ownerId = :owner and c.provider.id in :providers")
+    Set<UUID> findActivatedProviderIds(@Param("owner") UUID owner, @Param("providers") Collection<UUID> providers);
 
     /** Unscoped: the gateway and the expiry sweep, neither of which has a signed-in person. */
     @Query("select c from Credential c join fetch c.provider where c.id=:id")
@@ -34,7 +42,7 @@ public interface CredentialRepository extends JpaRepository<Credential, UUID> {
      */
     @Query(
             """
-           select c from Credential c join fetch c.provider p join fetch p.owner
+           select c from Credential c join fetch c.provider
            where c.enabled = true and c.expiresAt is not null and c.expiresAt <= :horizon
            order by c.expiresAt""")
     List<Credential> findExpiringBy(@Param("horizon") Instant horizon);
@@ -44,7 +52,7 @@ public interface CredentialRepository extends JpaRepository<Credential, UUID> {
      * fetches the owner for the same reason: the announcement it rebuilds carries one, and there is
      * no open session left by the time anything asks for it.
      */
-    @Query("select c from Credential c join fetch c.provider p join fetch p.owner where c.id in :ids")
+    @Query("select c from Credential c join fetch c.provider where c.id in :ids")
     List<Credential> findAllWithOwner(@Param("ids") Collection<UUID> ids);
 
     /**

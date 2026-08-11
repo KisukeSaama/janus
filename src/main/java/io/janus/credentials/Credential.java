@@ -10,10 +10,18 @@ import io.janus.providers.Provider;
 
 /** Metadata for a secret held in OpenBao. The secret value itself never reaches this table. */
 @Entity
-@Table(name = "credentials")
+@Table(
+        name = "credentials",
+        uniqueConstraints =
+                @UniqueConstraint(
+                        name = "uq_credential_owner_provider",
+                        columnNames = {"owner_id", "provider_id"}))
 public class Credential {
     @Id
     private UUID id;
+
+    @Column(name = "owner_id", nullable = false)
+    private UUID ownerId;
 
     @Column(nullable = false, length = 120)
     private String name;
@@ -50,6 +58,9 @@ public class Credential {
     @Column(nullable = false)
     private boolean enabled = true;
 
+    @Column(name = "requires_reprovision", nullable = false)
+    private boolean requiresReprovision;
+
     @Column(name = "expires_at")
     private Instant expiresAt;
 
@@ -66,15 +77,41 @@ public class Credential {
     /** For Hibernate only. */
     protected Credential() {}
 
-    public Credential(Provider provider, String name, Strategy strategy, Instant expiresAt, boolean enabled) {
+    public Credential(
+            UUID ownerId, Provider provider, String name, Strategy strategy, Instant expiresAt, boolean enabled) {
         this.id = UUID.randomUUID();
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
+        this.ownerId = ownerId;
         this.provider = provider;
         // Server-derived, and derived once: the path is where the stored secret lives for the rest of
         // this credential's life, so it must never move when the record is edited.
         this.secretPath = "janus/" + provider.getSlug() + "/" + this.id;
         describe(name, strategy, expiresAt, enabled);
+    }
+
+    /** Compatibility constructor for older fixtures. */
+    public Credential(Provider provider, String name, Strategy strategy, Instant expiresAt, boolean enabled) {
+        this(provider.getOwner().getId(), provider, name, strategy, expiresAt, enabled);
+    }
+
+    public static Strategy strategyOf(Provider provider) {
+        return new Strategy(
+                provider.getAuthType(),
+                provider.getHeaderName(),
+                provider.getQueryParameter(),
+                provider.getTokenUrl(),
+                provider.getTokenScopes(),
+                provider.getTokenClientAuth());
+    }
+
+    /** Keeps personal credential metadata aligned with the administrator-owned API contract. */
+    public void adoptProviderStrategy(AuthType previousType) {
+        describe(name, strategyOf(provider), expiresAt, enabled);
+        if (previousType != provider.getAuthType()) {
+            enabled = false;
+            requiresReprovision = !provider.getAuthType().anonymous();
+        }
     }
 
     /**
@@ -136,6 +173,14 @@ public class Credential {
         return id;
     }
 
+    public UUID getOwnerId() {
+        return ownerId;
+    }
+
+    public void transferTo(UUID ownerId) {
+        this.ownerId = ownerId;
+    }
+
     public String getName() {
         return name;
     }
@@ -174,6 +219,14 @@ public class Credential {
 
     public boolean isEnabled() {
         return enabled;
+    }
+
+    public boolean requiresReprovision() {
+        return requiresReprovision;
+    }
+
+    public void markProvisioned() {
+        requiresReprovision = false;
     }
 
     public Instant getExpiresAt() {

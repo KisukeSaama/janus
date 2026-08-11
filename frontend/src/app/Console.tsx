@@ -139,6 +139,7 @@ export function Console({ identity }: { identity: Identity }) {
             {location.page === 'connections' &&
               (openId ? (
                 <ConnectionPage
+                  identity={identity}
                   username={identity.username}
                   id={openId}
                   onBack={() => navigate({ page: 'connections' })}
@@ -148,14 +149,14 @@ export function Console({ identity }: { identity: Identity }) {
                 <ConnectionsPage
                   username={identity.username}
                   onOpen={(id) => navigate({ page: 'connections', id })}
-                  onConnect={() => setConnecting(true)}
+                  onConnect={() => (identity.role === 'USER' ? go('credentials') : setConnecting(true))}
                   onNavigate={go}
                 />
               ))}
 
             {location.page === 'activity' && <ActivityPage />}
             {location.page === 'applications' && <ApplicationsPage username={identity.username} />}
-            {location.page === 'credentials' && <CredentialsPage />}
+            {location.page === 'credentials' && <CredentialsPage identity={identity} />}
             {location.page === 'accounts' && <AccountsPage identity={identity} />}
             {location.page === 'documentation' && <DocsPage username={identity.username} />}
             {location.page === 'agents' && <AgentsPage username={identity.username} />}
@@ -163,7 +164,7 @@ export function Console({ identity }: { identity: Identity }) {
         </main>
       </div>
 
-      {connecting && (
+      {connecting && identity.role !== 'USER' && (
         <Suspense fallback={null}>
           <ConnectFlow
             username={identity.username}

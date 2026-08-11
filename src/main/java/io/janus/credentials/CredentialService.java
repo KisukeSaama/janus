@@ -64,12 +64,20 @@ public class CredentialService {
 
     @Transactional
     public CredentialResponse create(CredentialRequest request) {
-        if (!request.carriesSecret() && !request.authType().anonymous())
-            throw new IllegalArgumentException("Secret is required when creating a credential");
-        request.validate();
         var provider = provider(request.providerId());
-        var credential =
-                new Credential(provider, request.name(), strategy(request), request.expiresAt(), request.enabled());
+        if (repository
+                .findByProviderIdAndOwnerId(provider.getId(), scope.accountId())
+                .isPresent()) throw new IllegalArgumentException("This API is already active on your account");
+        validateSecret(provider, request);
+        if (!request.carriesSecret() && !provider.getAuthType().anonymous())
+            throw new IllegalArgumentException("Credentials are required to activate this API");
+        var credential = new Credential(
+                scope.accountId(),
+                provider,
+                provider.getSlug(),
+                Credential.strategyOf(provider),
+                request.expiresAt(),
+                request.enabled());
         // An anonymous destination reserves its path and stores nothing at it, so that changing its
         // mind later is a write rather than a new record with a new identity.
         if (request.carriesSecret()) openBao.write(credential.getSecretPath(), request.secret());
@@ -86,20 +94,16 @@ public class CredentialService {
         var credential = require(id);
         if (!credential.getProvider().getId().equals(request.providerId()))
             throw new IllegalArgumentException("Credential provider cannot be changed; create a separate credential");
-        request.validate();
-        // Crossing into presenting something needs the thing to present: nothing was ever stored at
-        // this path, and an update that left it empty would fail on the first proxied call instead of
-        // here.
-        if (credential.getAuthType().anonymous() && !request.authType().anonymous() && !request.carriesSecret())
-            throw new IllegalArgumentException("Secret is required to give this credential a strategy");
-        boolean abandonsSecret =
-                !credential.getAuthType().anonymous() && request.authType().anonymous();
-        credential.describe(request.name(), strategy(request), request.expiresAt(), request.enabled());
-        if (request.carriesSecret()) openBao.write(credential.getSecretPath(), request.secret());
-        // Crossing the other way leaves a value nothing will ever read again. It is destroyed for the
-        // same reason a deleted credential's is: a secret Janus no longer uses is a secret Janus has
-        // no business keeping.
-        if (abandonsSecret) secretDeletions.enqueue(credential.getSecretPath());
+        var provider = credential.getProvider();
+        validateSecret(provider, request);
+        if (credential.requiresReprovision() && !request.carriesSecret())
+            throw new IllegalArgumentException("New credentials are required because the API authentication changed");
+        credential.describe(
+                provider.getSlug(), Credential.strategyOf(provider), request.expiresAt(), request.enabled());
+        if (request.carriesSecret()) {
+            openBao.write(credential.getSecretPath(), request.secret());
+            credential.markProvisioned();
+        }
         // Stored responses are addressed by credential. A rotated secret can mean a different
         // identity upstream, so nothing fetched with the old one may be served after it.
         traffic.forgetCredential(id);
@@ -113,8 +117,9 @@ public class CredentialService {
     @Transactional
     public void delete(UUID id) {
         var credential = require(id);
-        if (grants.existsByCredentialId(id))
-            throw new IllegalStateException("Credential is still used by an access grant");
+        var subscriptions = grants.findAllByCredentialId(id);
+        subscriptions.forEach(grant -> traffic.forgetGrant(grant.getId()));
+        grants.deleteAllInBatch(subscriptions);
         String secretPath = credential.getSecretPath();
         UUID providerId = credential.getProvider().getId();
         boolean stored = !credential.getAuthType().anonymous();
@@ -135,9 +140,7 @@ public class CredentialService {
     }
 
     private Provider provider(UUID id) {
-        return providers
-                .findOwnedBy(id, scope.ownerFilter())
-                .orElseThrow(() -> new NotFoundException("Provider not found"));
+        return providers.findById(id).orElseThrow(() -> new NotFoundException("Provider not found"));
     }
 
     /**
@@ -145,15 +148,17 @@ public class CredentialService {
      * call: HTTPS, no credentials or query in the URL, and not resolving to a private address. It is
      * a destination the gateway dials with a secret in hand, so it gets the destination rules.
      */
-    private Credential.Strategy strategy(CredentialRequest request) {
-        var strategy = request.strategy();
-        if (!strategy.authType().exchanged()) return strategy;
-        return new Credential.Strategy(
-                strategy.authType(),
-                strategy.headerName(),
-                strategy.queryParameter(),
-                destinations.validate(strategy.tokenUrl()).toString(),
-                strategy.tokenScopes(),
-                strategy.tokenClientAuth());
+    private void validateSecret(Provider provider, CredentialRequest request) {
+        if (!request.carriesSecret()) return;
+        switch (provider.getAuthType()) {
+            case NONE -> throw new IllegalArgumentException("This API does not accept credentials");
+            case BASIC, OAUTH2_CLIENT_CREDENTIALS -> {
+                if (request.secret().indexOf(':') < 0)
+                    throw new IllegalArgumentException("Credentials must be supplied as identifier:secret");
+            }
+            default -> {
+                // The stored value travels as supplied.
+            }
+        }
     }
 }

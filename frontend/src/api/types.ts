@@ -42,8 +42,24 @@ export type Provider = {
   /** Outbound ceiling for this destination, every caller combined. Zero is no ceiling. */
   rateLimitPerMinute: number;
   rateLimitBurst: number;
+  authType: AuthType;
+  headerName?: string;
+  queryParameter?: string;
+  tokenUrl?: string;
+  tokenScopes?: string;
+  tokenClientAuth?: TokenClientAuth;
+  /** Whether the signed-in account has provisioned its personal credential for this API. */
+  activated: boolean;
   createdAt: string;
   updatedAt?: string;
+};
+
+export type ProviderPage = {
+  content: Provider[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
 };
 
 export type Credential = {
@@ -173,6 +189,12 @@ export type ProviderInput = {
   cacheTtlSeconds?: number;
   rateLimitPerMinute?: number;
   rateLimitBurst?: number;
+  authType: AuthType;
+  headerName?: string | null;
+  queryParameter?: string | null;
+  tokenUrl?: string | null;
+  tokenScopes?: string | null;
+  tokenClientAuth?: TokenClientAuth | null;
 };
 
 export type CredentialInput = {
@@ -202,8 +224,7 @@ export type GrantInput = {
 /* ── Who may sign in ────────────────────────────────────────────────────── */
 
 /**
- * The ladder governs accounts and only accounts: every role sees its own registry and nobody else's,
- * an administrator included. What administration buys is the right to say who may sign in.
+ * Every role owns personal applications and credentials. Administrators also manage the shared API catalogue.
  */
 export type AccountRole = 'SUPER_ADMIN' | 'ADMIN' | 'USER';
 

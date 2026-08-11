@@ -138,7 +138,7 @@ export function DocsPage({ username }: { username: string }) {
                 items={[
                   {
                     term: t('docs.call.pathTerm'),
-                    note: t('docs.call.pathNote', { gateway: `/${ctx.username}/gateway/${ctx.slug}` }),
+                    note: t('docs.call.pathNote', { gateway: `/gateway/${ctx.slug}` }),
                   },
                   { term: t('docs.call.reachTerm'), note: t('docs.call.reachNote') },
                   { term: t('docs.call.methodTerm'), note: t('docs.call.methodNote') },

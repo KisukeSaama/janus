@@ -61,7 +61,8 @@ class SchemaIT extends IntegrationTest {
                         "grants",
                         "audit_events",
                         "notifications",
-                        "application_refresh_tokens");
+                        "application_refresh_tokens",
+                        "pending_secret_deletions");
     }
 
     /**
@@ -99,5 +100,19 @@ class SchemaIT extends IntegrationTest {
                         String.class);
 
         assertThat(unique).isNotEmpty();
+    }
+
+    /** Removing an API removes its database aggregate; OpenBao cleanup is queued separately. */
+    @Test
+    void credentialMetadataCascadesFromItsApi() {
+        var deleteAction = jdbc().queryForObject(
+                        """
+                select rc.delete_rule
+                  from information_schema.referential_constraints rc
+                 where rc.constraint_name = 'credentials_provider_id_fkey'
+                """,
+                        String.class);
+
+        assertThat(deleteAction).isEqualTo("CASCADE");
     }
 }

@@ -1,14 +1,19 @@
-import { useState, type FormEvent } from 'react';
-import { Plus } from 'lucide-react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Plus, Search } from 'lucide-react';
 
 import {
   useCreateCredential,
+  useCreateProvider,
   useCredentials,
+  useDeleteCredential,
   useDeleteProvider,
-  useProviders,
+  useProviderCatalog,
   useUpdateCredential,
+  useUpdateProvider,
   type AuthType,
   type Credential,
+  type Identity,
+  type Provider,
   type TokenClientAuth,
 } from '../../api';
 import {
@@ -22,6 +27,7 @@ import {
   FormLayout,
   Notice,
   PageHead,
+  Pager,
   RecordCell,
   SelectField,
   SidePanel,
@@ -32,24 +38,6 @@ import { useI18n } from '../../i18n';
 import { useErrorMessage } from '../../lib/errors';
 import { fromDateInput, NOTICE_DAYS, toDateInput, WARNING_DAYS } from '../../lib/expiry';
 
-const STRATEGY_HINT: Record<
-  string,
-  | 'credentials.hintBearer'
-  | 'credentials.hintApiKeyHeader'
-  | 'credentials.hintApiKeyQuery'
-  | 'credentials.hintBasic'
-  | 'credentials.hintOauth2'
-  | 'credentials.hintNone'
-> = {
-  BEARER: 'credentials.hintBearer',
-  API_KEY_HEADER: 'credentials.hintApiKeyHeader',
-  API_KEY_QUERY: 'credentials.hintApiKeyQuery',
-  BASIC: 'credentials.hintBasic',
-  OAUTH2_CLIENT_CREDENTIALS: 'credentials.hintOauth2',
-  NONE: 'credentials.hintNone',
-};
-
-/** Every strategy Janus can present, in the order a reader is likely to need them. */
 const STRATEGIES: AuthType[] = [
   'BEARER',
   'API_KEY_HEADER',
@@ -59,300 +47,314 @@ const STRATEGIES: AuthType[] = [
   'NONE',
 ];
 
-/** What the secret field is asking for, which differs for the two strategies holding two values. */
-const SECRET_PLACEHOLDER: Partial<Record<AuthType, string>> = {
-  BASIC: 'username:password',
-  OAUTH2_CLIENT_CREDENTIALS: 'client_id:client_secret',
-};
+type Panel =
+  | { kind: 'activate'; provider: Provider }
+  | { kind: 'credential'; credential: Credential; provider: Provider }
+  | { kind: 'api'; provider?: Provider }
+  | null;
 
-/** Secret metadata. The value itself only ever travels one way, into OpenBao. */
-export function CredentialsPage() {
+/** Shared API catalogue, with a personal activation and credential boundary layered onto each row. */
+export function CredentialsPage({ identity }: { identity: Identity }) {
   const { t, tEnum } = useI18n();
   const describe = useErrorMessage();
+  const administrator = identity.role !== 'USER';
 
-  const credentials = useCredentials();
-  const providers = useProviders();
-  const create = useCreateCredential();
-  const update = useUpdateCredential();
-  const remove = useDeleteProvider();
-
-  const [panel, setPanel] = useState<'closed' | 'new' | Credential>('closed');
+  const [query, setQuery] = useState('');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(0);
+  const [panel, setPanel] = useState<Panel>(null);
   const [strategy, setStrategy] = useState<AuthType>('BEARER');
   const [formError, setFormError] = useState('');
   const [error, setError] = useState('');
 
-  const rows = credentials.data ?? [];
-  const destinations = providers.data ?? [];
-  const editing = typeof panel === 'object' ? panel : null;
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearch(query.trim());
+      setPage(0);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
-  function open(credential: Credential | 'new') {
-    setStrategy(credential === 'new' ? 'BEARER' : credential.authType);
-    setPanel(credential);
-  }
+  const catalog = useProviderCatalog(search, page);
+  const credentials = useCredentials();
+  const createCredential = useCreateCredential();
+  const updateCredential = useUpdateCredential();
+  const deleteCredential = useDeleteCredential();
+  const createProvider = useCreateProvider();
+  const updateProvider = useUpdateProvider();
+  const deleteProvider = useDeleteProvider();
+
+  const personal = useMemo(
+    () => new Map((credentials.data ?? []).map((credential) => [credential.providerId, credential])),
+    [credentials.data],
+  );
+  const rows = catalog.data?.content ?? [];
 
   function close() {
-    setPanel('closed');
+    setPanel(null);
     setFormError('');
   }
 
-  async function submit(e: FormEvent<HTMLFormElement>) {
-    const form = new FormData(e.currentTarget);
+  function openApi(provider?: Provider) {
+    setStrategy(provider?.authType ?? 'BEARER');
+    setPanel({ kind: 'api', provider });
+  }
+
+  function credentialInput(provider: Provider, form: FormData) {
     const secret = String(form.get('secret') ?? '');
-    const input = {
-      name: String(form.get('name') ?? ''),
-      providerId: String(form.get('providerId') ?? ''),
-      authType: String(form.get('authType') ?? 'BEARER') as AuthType,
-      headerName: String(form.get('headerName') ?? '') || null,
-      queryParameter: String(form.get('queryParameter') ?? '') || null,
-      tokenUrl: String(form.get('tokenUrl') ?? '') || null,
-      tokenScopes: String(form.get('tokenScopes') ?? '') || null,
-      tokenClientAuth: (String(form.get('tokenClientAuth') ?? '') || null) as TokenClientAuth | null,
-      // On edit an empty field means "keep the stored secret"; it is never sent back to the browser.
-      secret: secret === '' ? null : secret,
-      // An empty date field means "no known end", and clears a deadline recorded before.
+    return {
+      name: provider.slug,
+      providerId: provider.id,
+      authType: provider.authType,
+      headerName: provider.headerName ?? null,
+      queryParameter: provider.queryParameter ?? null,
+      tokenUrl: provider.tokenUrl ?? null,
+      tokenScopes: provider.tokenScopes ?? null,
+      tokenClientAuth: provider.tokenClientAuth ?? null,
+      secret: secret || null,
       expiresAt: fromDateInput(String(form.get('expiresAt') ?? '')),
       enabled: form.get('enabled') === 'on',
     };
+  }
+
+  async function submitCredential(e: FormEvent<HTMLFormElement>) {
+    const form = new FormData(e.currentTarget);
+    if (!panel || (panel.kind !== 'activate' && panel.kind !== 'credential')) return;
+    const provider = panel.provider;
     setFormError('');
     try {
-      if (editing) await update.mutateAsync({ id: editing.id, input });
-      else await create.mutateAsync(input);
+      if (panel.kind === 'credential') {
+        await updateCredential.mutateAsync({ id: panel.credential.id, input: credentialInput(provider, form) });
+      } else {
+        await createCredential.mutateAsync(credentialInput(provider, form));
+      }
       close();
     } catch (x) {
       setFormError(describe(x));
     }
   }
 
-  const newButton = (
-    <button className="btn btn-primary w-full sm:w-auto" onClick={() => open('new')} disabled={destinations.length === 0}>
-      <Plus size={15} strokeWidth={2.25} />
-      {t('credentials.new')}
-    </button>
-  );
+  async function submitApi(e: FormEvent<HTMLFormElement>) {
+    const form = new FormData(e.currentTarget);
+    if (!panel || panel.kind !== 'api') return;
+    const input = {
+      name: String(form.get('name') ?? ''),
+      slug: String(form.get('slug') ?? ''),
+      baseUrl: String(form.get('baseUrl') ?? ''),
+      enabled: form.get('enabled') === 'on',
+      cacheEnabled: form.get('cacheEnabled') === 'on',
+      cacheTtlSeconds: Number(form.get('cacheTtlSeconds') || 0),
+      rateLimitPerMinute: Number(form.get('rateLimitPerMinute') || 0),
+      rateLimitBurst: Number(form.get('rateLimitBurst') || 0),
+      authType: strategy,
+      headerName: String(form.get('headerName') ?? '') || null,
+      queryParameter: String(form.get('queryParameter') ?? '') || null,
+      tokenUrl: String(form.get('tokenUrl') ?? '') || null,
+      tokenScopes: String(form.get('tokenScopes') ?? '') || null,
+      tokenClientAuth: (String(form.get('tokenClientAuth') ?? '') || null) as TokenClientAuth | null,
+    };
+    setFormError('');
+    try {
+      if (panel.provider) await updateProvider.mutateAsync({ id: panel.provider.id, input });
+      else await createProvider.mutateAsync(input);
+      close();
+    } catch (x) {
+      setFormError(describe(x));
+    }
+  }
 
-  const columns: Column<Credential>[] = [
+  const columns: Column<Provider>[] = [
     {
-      // The API leads, because that is what the reader came looking for: the record is only ever
-      // "the secret I hold for Spotify", never a secret with a life of its own.
-      key: 'provider',
+      key: 'api',
       label: t('credentials.colProvider'),
       primary: true,
       grow: true,
-      cell: (r) => <RecordCell name={r.providerName} note={r.name} mono />,
+      cell: (provider) => <RecordCell name={provider.name} note={provider.slug} mono />,
     },
     {
-      key: 'strategy',
-      label: t('credentials.colStrategy'),
+      key: 'auth',
+      label: t('credentials.fieldStrategy'),
       nowrap: true,
-      cell: (r) => (
-        <>
-          <span>{tEnum('authType', r.authType)}</span>
-          {r.headerName && <span className="data ml-2 text-text-3">{r.headerName}</span>}
-        </>
-      ),
+      cell: (provider) => tEnum('authType', provider.authType),
     },
-    { key: 'expiry', label: t('credentials.colExpiry'), cell: (r) => <ExpiryState expiresAt={r.expiresAt} /> },
     {
-      key: 'state',
-      label: t('state.label'),
+      key: 'activation',
+      label: t('credentials.activation'),
       badge: true,
-      nowrap: true,
-      cell: (r) => <EnabledState enabled={r.enabled} />,
+      cell: (provider) =>
+        personal.has(provider.id) ? <EnabledState enabled={personal.get(provider.id)!.enabled} /> : t('credentials.available'),
+    },
+    {
+      key: 'expiry',
+      label: t('credentials.colExpiry'),
+      cell: (provider) => {
+        const credential = personal.get(provider.id);
+        return credential ? <ExpiryState expiresAt={credential.expiresAt} /> : '—';
+      },
     },
   ];
 
+  const primary = administrator ? (
+    <button className="btn btn-primary w-full sm:w-auto" onClick={() => openApi()}>
+      <Plus size={15} strokeWidth={2.25} />
+      {t('credentials.addApi')}
+    </button>
+  ) : undefined;
+
   return (
     <>
-      <PageHead
-        section={t('nav.registry')}
-        title={t('credentials.title')}
-        intro={t('credentials.intro')}
-        action={newButton}
-      />
+      <PageHead section={t('nav.registry')} title={t('credentials.title')} intro={t('credentials.catalogIntro')} action={primary} />
       {error && <Notice>{error}</Notice>}
-      {credentials.isError && <Notice>{describe(credentials.error)}</Notice>}
 
-      {credentials.isPending ? (
-        <SkeletonRows cols={5} />
+      <div className="mb-4 flex max-w-xl items-center gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-3" />
+          <input
+            className="field w-full pl-9"
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t('credentials.searchPlaceholder')}
+            aria-label={t('credentials.searchLabel')}
+          />
+        </div>
+      </div>
+
+      {catalog.isError && <Notice>{describe(catalog.error)}</Notice>}
+      {catalog.isPending || credentials.isPending ? (
+        <SkeletonRows cols={4} />
       ) : rows.length === 0 ? (
-        <Empty
-          headline={t('credentials.emptyTitle')}
-          hint={destinations.length === 0 ? t('credentials.emptyHintNoProvider') : t('credentials.emptyHint')}
-          action={destinations.length > 0 ? newButton : undefined}
-        />
+        <Empty headline={t('credentials.noResults')} hint={t('credentials.noResultsHint')} />
       ) : (
-        <DataTable
-          columns={columns}
-          rows={rows}
-          rowKey={(r) => r.id}
-          actions={(r) => (
-            <span className="flex flex-wrap items-center justify-end gap-1">
-              <button className="btn btn-sm btn-quiet" onClick={() => open(r)}>
-                {t('common.edit')}
-                <span className="sr-only"> {r.name}</span>
-              </button>
-              <DeleteAction
-                label={r.name}
-                consequence={t('credentials.deleteConsequence')}
-                onDelete={async () => {
-                  setError('');
-                  try {
-                    await remove.mutateAsync(r.providerId);
-                  } catch (x) {
-                    setError(describe(x));
-                  }
-                }}
-              />
-            </span>
-          )}
-        />
+        <>
+          <DataTable
+            columns={columns}
+            rows={rows}
+            rowKey={(provider) => provider.id}
+            actions={(provider) => {
+              const credential = personal.get(provider.id);
+              return (
+                <span className="flex flex-wrap items-center justify-end gap-1">
+                  {credential ? (
+                    <>
+                      <button className="btn btn-sm btn-quiet" onClick={() => setPanel({ kind: 'credential', credential, provider })}>
+                        {t('credentials.manageCredentials')}
+                      </button>
+                      <DeleteAction
+                        label={provider.name}
+                        consequence={t('credentials.deactivateConsequence')}
+                        onDelete={() => deleteCredential.mutateAsync(credential.id)}
+                      />
+                    </>
+                  ) : (
+                    <button className="btn btn-sm btn-secondary" onClick={() => setPanel({ kind: 'activate', provider })}>
+                      {t('credentials.activate')}
+                    </button>
+                  )}
+                  {administrator && (
+                    <>
+                      <button className="btn btn-sm btn-quiet" onClick={() => openApi(provider)}>{t('common.edit')}</button>
+                      <DeleteAction
+                        label={provider.name}
+                        consequence={t('credentials.deleteGlobalConsequence')}
+                        onDelete={async () => {
+                          setError('');
+                          try { await deleteProvider.mutateAsync(provider.id); } catch (x) { setError(describe(x)); }
+                        }}
+                      />
+                    </>
+                  )}
+                </span>
+              );
+            }}
+          />
+          <Pager
+            page={catalog.data?.page ?? page}
+            totalPages={catalog.data?.totalPages ?? 0}
+            totalElements={catalog.data?.totalElements ?? 0}
+            busy={catalog.isFetching}
+            onPage={setPage}
+          />
+        </>
       )}
 
-      {panel !== 'closed' && (
+      {panel && (panel.kind === 'activate' || panel.kind === 'credential') && (
         <SidePanel
-          title={editing ? t('credentials.editTitle') : t('credentials.panelTitle')}
-          intro={editing ? t('credentials.editIntro') : t('credentials.panelIntro')}
+          title={panel.kind === 'activate' ? t('credentials.activateTitle') : t('credentials.credentialsTitle')}
+          intro={t('credentials.personalIntro', { api: panel.provider.name })}
           onClose={close}
         >
           <FormLayout
-            onSubmit={submit}
-            submitLabel={
-              editing
-                ? t('common.saveChanges')
-                : strategy === 'NONE'
-                  ? t('credentials.submitOpen')
-                  : t('credentials.submit')
-            }
+            onSubmit={submitCredential}
+            submitLabel={panel.kind === 'activate' ? t('credentials.activate') : t('common.saveChanges')}
             error={formError}
           >
-            <Field
-              label={t('credentials.fieldName')}
-              name="name"
-              required
-              autoComplete="off"
-              placeholder="payments-live"
-              defaultValue={editing?.name}
-            />
-            {editing ? (
-              <input type="hidden" name="providerId" value={editing.providerId} />
-            ) : (
-              <SelectField
-                label={t('credentials.colProvider')}
-                name="providerId"
-                options={destinations.map((p) => ({ value: p.id, label: p.name }))}
-              />
-            )}
-            <SelectField
-              label={t('credentials.fieldStrategy')}
-              name="authType"
-              value={strategy}
-              onChange={(e) => setStrategy(e.target.value as AuthType)}
-              options={STRATEGIES.map((v) => ({ value: v, label: tEnum('authType', v) }))}
-              hint={t(STRATEGY_HINT[strategy])}
-            />
-            {strategy === 'API_KEY_HEADER' && (
-              <Field
-                label={t('credentials.fieldHeader')}
-                name="headerName"
-                required
-                data
-                autoComplete="off"
-                placeholder="X-Api-Key"
-                defaultValue={editing?.headerName}
-              />
-            )}
-            {strategy === 'API_KEY_QUERY' && (
-              <Field
-                label={t('credentials.fieldQueryParameter')}
-                name="queryParameter"
-                required
-                data
-                autoComplete="off"
-                placeholder="api_key"
-                defaultValue={editing?.queryParameter}
-                hint={t('credentials.queryParameterHint')}
-              />
-            )}
-            {strategy === 'OAUTH2_CLIENT_CREDENTIALS' && (
+            <div className="border-y border-line py-3 text-sm">
+              <span className="text-text-2">{t('credentials.fieldStrategy')}</span>
+              <span className="ml-2 font-medium">{tEnum('authType', panel.provider.authType)}</span>
+            </div>
+            {panel.provider.authType !== 'NONE' && (
               <>
                 <Field
-                  label={t('credentials.fieldTokenUrl')}
-                  name="tokenUrl"
-                  required
-                  data
-                  autoComplete="off"
-                  placeholder="https://accounts.spotify.com/api/token"
-                  defaultValue={editing?.tokenUrl}
-                  hint={t('credentials.tokenUrlHint')}
-                />
-                <Field
-                  label={t('credentials.fieldTokenScopes')}
-                  name="tokenScopes"
-                  data
-                  autoComplete="off"
-                  placeholder="playlist-read-private user-read-email"
-                  defaultValue={editing?.tokenScopes}
-                  hint={t('credentials.tokenScopesHint')}
-                />
-                <SelectField
-                  label={t('credentials.fieldTokenClientAuth')}
-                  name="tokenClientAuth"
-                  defaultValue={editing?.tokenClientAuth ?? 'BASIC'}
-                  options={[
-                    { value: 'BASIC', label: t('credentials.tokenClientAuthBasic') },
-                    { value: 'POST', label: t('credentials.tokenClientAuthPost') },
-                  ]}
-                  hint={t('credentials.tokenClientAuthHint')}
-                />
-              </>
-            )}
-            {/* Nothing is stored for an open API, so there is nothing to type and nothing to expire.
-                Both fields are withheld rather than disabled: an empty box invites a value. */}
-            {strategy !== 'NONE' && (
-              <>
-                <Field
-                  label={
-                    editing
-                      ? t('credentials.replacementSecret')
-                      : strategy === 'BASIC'
-                        ? t('credentials.fieldSecretBasic')
-                        : strategy === 'OAUTH2_CLIENT_CREDENTIALS'
-                          ? t('credentials.fieldSecretClient')
-                          : t('credentials.fieldSecret')
-                  }
+                  label={panel.kind === 'credential' ? t('credentials.replacementSecret') : t('credentials.fieldSecret')}
                   name="secret"
                   type="password"
-                  // Required on create, and on an edit that gives a strategy to what had none: no
-                  // value was ever stored for it.
-                  required={!editing || editing.authType === 'NONE'}
+                  required={panel.kind === 'activate'}
                   autoComplete="new-password"
-                  placeholder={editing ? t('credentials.replacementPlaceholder') : SECRET_PLACEHOLDER[strategy]}
-                  hint={
-                    editing && editing.authType !== 'NONE'
-                      ? t('credentials.replacementHint')
-                      : t('credentials.secretHint')
-                  }
+                  placeholder={panel.provider.authType === 'BASIC' ? 'username:password' : panel.provider.authType === 'OAUTH2_CLIENT_CREDENTIALS' ? 'client_id:client_secret' : undefined}
+                  hint={panel.kind === 'credential' ? t('credentials.replacementHint') : t('credentials.secretHint')}
                 />
                 <Field
                   label={t('expiry.field')}
                   name="expiresAt"
                   type="date"
                   data
-                  defaultValue={toDateInput(editing?.expiresAt)}
-                  hint={
-                    strategy === 'OAUTH2_CLIENT_CREDENTIALS'
-                      ? t('credentials.expiryHintExchange')
-                      : t('expiry.fieldHint', { notice: NOTICE_DAYS, warning: WARNING_DAYS })
-                  }
+                  defaultValue={toDateInput(panel.kind === 'credential' ? panel.credential.expiresAt : undefined)}
+                  hint={t('expiry.fieldHint', { notice: NOTICE_DAYS, warning: WARNING_DAYS })}
                 />
               </>
             )}
             <CheckField
               label={t('credentials.enabledLabel')}
               name="enabled"
-              defaultChecked={editing ? editing.enabled : true}
+              defaultChecked={panel.kind === 'credential' ? panel.credential.enabled : true}
               hint={t('credentials.enabledHint')}
             />
+          </FormLayout>
+        </SidePanel>
+      )}
+
+      {panel?.kind === 'api' && (
+        <SidePanel
+          title={panel.provider ? t('credentials.editApi') : t('credentials.addApi')}
+          intro={t('credentials.adminIntro')}
+          onClose={close}
+        >
+          <FormLayout onSubmit={submitApi} submitLabel={panel.provider ? t('common.saveChanges') : t('common.create')} error={formError}>
+            <Field label={t('providers.fieldName')} name="name" required defaultValue={panel.provider?.name} />
+            <Field label={t('providers.fieldSlug')} name="slug" required data defaultValue={panel.provider?.slug} />
+            <Field label={t('providers.fieldBaseUrl')} name="baseUrl" required data defaultValue={panel.provider?.baseUrl} />
+            <SelectField
+              label={t('credentials.fieldStrategy')}
+              name="authType"
+              value={strategy}
+              onChange={(event) => setStrategy(event.target.value as AuthType)}
+              options={STRATEGIES.map((value) => ({ value, label: tEnum('authType', value) }))}
+            />
+            {strategy === 'API_KEY_HEADER' && <Field label={t('credentials.fieldHeader')} name="headerName" required data defaultValue={panel.provider?.headerName} />}
+            {strategy === 'API_KEY_QUERY' && <Field label={t('credentials.fieldQueryParameter')} name="queryParameter" required data defaultValue={panel.provider?.queryParameter} />}
+            {strategy === 'OAUTH2_CLIENT_CREDENTIALS' && (
+              <>
+                <Field label={t('credentials.fieldTokenUrl')} name="tokenUrl" required data defaultValue={panel.provider?.tokenUrl} />
+                <Field label={t('credentials.fieldTokenScopes')} name="tokenScopes" data defaultValue={panel.provider?.tokenScopes} />
+                <SelectField label={t('credentials.fieldTokenClientAuth')} name="tokenClientAuth" defaultValue={panel.provider?.tokenClientAuth ?? 'BASIC'} options={[{ value: 'BASIC', label: t('credentials.tokenClientAuthBasic') }, { value: 'POST', label: t('credentials.tokenClientAuthPost') }]} />
+              </>
+            )}
+            <CheckField label={t('providers.cacheLabel')} name="cacheEnabled" defaultChecked={panel.provider?.cacheEnabled ?? true} />
+            <Field label={t('providers.cacheTtlLabel')} name="cacheTtlSeconds" type="number" min={0} defaultValue={panel.provider?.cacheTtlSeconds ?? 0} />
+            <Field label={t('providers.rateLimitLabel')} name="rateLimitPerMinute" type="number" min={0} defaultValue={panel.provider?.rateLimitPerMinute ?? 0} />
+            <Field label={t('providers.burstLabel')} name="rateLimitBurst" type="number" min={0} defaultValue={panel.provider?.rateLimitBurst ?? 0} />
+            <CheckField label={t('providers.enabledLabel')} name="enabled" defaultChecked={panel.provider?.enabled ?? true} />
           </FormLayout>
         </SidePanel>
       )}

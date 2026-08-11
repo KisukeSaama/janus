@@ -91,6 +91,11 @@ export function ConnectFlow({
         slug: effectiveSlug,
         baseUrl: baseUrl.trim(),
         enabled: true,
+        authType,
+        headerName: authType === 'API_KEY_HEADER' ? headerName.trim() : null,
+        queryParameter: authType === 'API_KEY_QUERY' ? queryParameter.trim() : null,
+        tokenUrl: authType === 'OAUTH2_CLIENT_CREDENTIALS' ? tokenUrl.trim() : null,
+        tokenScopes: authType === 'OAUTH2_CLIENT_CREDENTIALS' ? tokenScopes.trim() || null : null,
       });
       undo.push(() => del(`/providers/${provider.id}`));
 

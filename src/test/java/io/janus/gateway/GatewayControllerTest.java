@@ -68,8 +68,7 @@ class GatewayControllerTest {
 
         SecurityContextHolder.getContext()
                 .setAuthentication(new UsernamePasswordAuthenticationToken(principal, null, List.of()));
-        when(providers.findBySlugAndOwnerIdAndEnabledTrue("spotify", owner.getId()))
-                .thenReturn(Optional.of(provider));
+        when(providers.findBySlugAndEnabledTrue("spotify")).thenReturn(Optional.of(provider));
         when(grants.findActive(application.getId(), provider.getId())).thenReturn(Optional.of(grant));
         when(traffic.forward(any())).thenReturn(anOutcome());
     }
@@ -105,17 +104,15 @@ class GatewayControllerTest {
     }
 
     @Test
-    void relaysAUsernameScopedGatewayCall() throws Exception {
-        mvc.perform(get("/owner/gateway/spotify/v1/tracks"))
-                .andExpect(status().isOk())
-                .andExpect(content().string("{\"ok\":true}"));
+    void noLongerExposesAUsernameScopedGatewayCall() throws Exception {
+        mvc.perform(get("/owner/gateway/spotify/v1/tracks")).andExpect(status().isNotFound());
     }
 
     @Test
     void refusesAUsernameNamespaceThatDoesNotOwnThePresentedKey() throws Exception {
         mvc.perform(get("/somebody-else/gateway/spotify/v1/tracks")).andExpect(status().isNotFound());
 
-        verify(providers, never()).findBySlugAndOwnerIdAndEnabledTrue(any(), any());
+        verify(providers, never()).findBySlugAndEnabledTrue(any());
         verify(traffic, never()).forward(any());
     }
 
@@ -165,8 +162,7 @@ class GatewayControllerTest {
      */
     @Test
     void aSlugBelongingToSomebodyElseIsNotFound() throws Exception {
-        when(providers.findBySlugAndOwnerIdAndEnabledTrue("spotify", owner.getId()))
-                .thenReturn(Optional.empty());
+        when(providers.findBySlugAndEnabledTrue("spotify")).thenReturn(Optional.empty());
 
         mvc.perform(get("/gateway/spotify/v1/tracks")).andExpect(status().isNotFound());
         verify(traffic, never()).forward(any());
@@ -192,8 +188,7 @@ class GatewayControllerTest {
                 null,
                 false);
         var grantOnDisabled = Fixtures.grant(application, withdrawn, disabled);
-        when(providers.findBySlugAndOwnerIdAndEnabledTrue("disabled", owner.getId()))
-                .thenReturn(Optional.of(withdrawn));
+        when(providers.findBySlugAndEnabledTrue("disabled")).thenReturn(Optional.of(withdrawn));
         when(grants.findActive(application.getId(), withdrawn.getId())).thenReturn(Optional.of(grantOnDisabled));
 
         mvc.perform(get("/gateway/disabled/v1/tracks")).andExpect(status().isForbidden());
@@ -225,10 +220,10 @@ class GatewayControllerTest {
     void aMethodTheGatewayDoesNotProxyIsRefusedBeforeAnythingIsLookedUp() {
         var request = new org.springframework.mock.web.MockHttpServletRequest("TRACE", "/gateway/spotify/v1/tracks");
 
-        var response = controller.proxy(null, "spotify", principal, request, null);
+        var response = controller.proxy("spotify", principal, request, null);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
-        verify(providers, never()).findBySlugAndOwnerIdAndEnabledTrue(any(), any());
+        verify(providers, never()).findBySlugAndEnabledTrue(any());
         verify(traffic, never()).forward(any());
     }
 
@@ -327,8 +322,7 @@ class GatewayControllerTest {
      */
     @Test
     void doesNotTagMetricsWithASlugThatWasNeverResolved() throws Exception {
-        when(providers.findBySlugAndOwnerIdAndEnabledTrue("invented", owner.getId()))
-                .thenReturn(Optional.empty());
+        when(providers.findBySlugAndEnabledTrue("invented")).thenReturn(Optional.empty());
 
         mvc.perform(get("/gateway/invented/v1/tracks"));
 

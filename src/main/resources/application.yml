@@ -71,7 +71,6 @@ server.servlet.session:
 
 janus:
   admin:
-    username: ${JANUS_ADMIN_USERNAME:admin}
     password: ${JANUS_ADMIN_PASSWORD:change-me-in-production}
     # Where this account's own expiry notices go. Applied while the account still carries the address
     # the migration wrote; once a real one is set, here or from the console, that one stands.

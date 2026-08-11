@@ -220,8 +220,8 @@ class ProviderAdminControllerTest {
 
         mvc.perform(delete("/api/admin/providers/" + provider.getId())).andExpect(status().isOk());
 
-        verify(grants).deleteAllInBatch(List.of(grant));
-        verify(credentials).deleteAllInBatch(List.of(credential));
+        verify(grants, never()).deleteAllInBatch(any());
+        verify(credentials, never()).deleteAllInBatch(any());
         verify(repository).delete(provider);
     }
 

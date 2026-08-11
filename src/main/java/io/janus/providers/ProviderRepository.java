@@ -2,33 +2,55 @@ package io.janus.providers;
 
 import java.util.*;
 
+import org.springframework.data.domain.*;
 import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
 
 /**
- * The {@code ...OwnedBy} finders are the console's, and take an owner that is never optional. The
- * others belong to paths with no signed-in person: the gateway resolving a slug for the application
- * that is calling, and a transfer moving a whole registry.
+ * Shared API catalogue queries. Slugs are global, while activation state is joined separately from
+ * the signed-in account's credentials.
  */
 public interface ProviderRepository extends JpaRepository<Provider, UUID> {
 
     /**
-     * The gateway's own lookup. A slug names a destination only within its owner's namespace: two
-     * people may each register {@code spotify}, and the caller's application decides which one is
-     * meant. A slug also only names a destination while that destination is enabled.
+     * The gateway's own lookup. A global slug names a destination only while it is enabled; the
+     * application grant decides whether the caller may use it.
      */
-    Optional<Provider> findBySlugAndOwnerIdAndEnabledTrue(String slug, UUID ownerId);
+    Optional<Provider> findBySlugAndEnabledTrue(String slug);
 
-    @Query("select p from Provider p join fetch p.owner where p.owner.id = :owner order by p.name")
-    List<Provider> findAllOwnedBy(@Param("owner") UUID owner);
+    @Query(
+            value =
+                    "select p from Provider p where lower(p.name) like lower(concat('%', :query, '%')) or lower(p.slug) like lower(concat('%', :query, '%'))",
+            countQuery =
+                    "select count(p) from Provider p where lower(p.name) like lower(concat('%', :query, '%')) or lower(p.slug) like lower(concat('%', :query, '%'))")
+    Page<Provider> search(@Param("query") String query, Pageable pageable);
 
-    @Query("select p from Provider p join fetch p.owner where p.id = :id and p.owner.id = :owner")
-    Optional<Provider> findOwnedBy(@Param("id") UUID id, @Param("owner") UUID owner);
+    boolean existsBySlug(String slug);
 
-    boolean existsBySlugAndOwnerId(String slug, UUID ownerId);
+    /** @deprecated APIs are global; retained while older integrations migrate. */
+    @Deprecated
+    default Optional<Provider> findOwnedBy(UUID id, UUID ignoredOwner) {
+        return findById(id);
+    }
 
-    /** Unscoped, for handing one person's registry to another. */
-    List<Provider> findAllByOwnerId(UUID ownerId);
+    /** @deprecated APIs are global; retained while older integrations migrate. */
+    @Deprecated
+    default boolean existsBySlugAndOwnerId(String slug, UUID ignoredOwner) {
+        return existsBySlug(slug);
+    }
 
-    long countByOwnerId(UUID ownerId);
+    /** @deprecated APIs are global; retained while older integrations migrate. */
+    @Deprecated
+    default List<Provider> findAllOwnedBy(UUID ignoredOwner) {
+        return findAll(Sort.by("name"));
+    }
+
+    /** Global APIs are no longer transferred with accounts. */
+    default List<Provider> findAllByOwnerId(UUID ignoredOwner) {
+        return List.of();
+    }
+
+    default long countByOwnerId(UUID ignoredOwner) {
+        return 0;
+    }
 }
