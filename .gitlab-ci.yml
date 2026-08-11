@@ -127,7 +127,10 @@ variables:
             chmod 700 "$host_target/.secrets"
             chmod 640 "$host_target/compose.yml" "$host_target/paths.env" "$host_target/app.env"
             chmod 644 "$host_target/openbao/openbao.hcl"
-            chmod 600 "$host_target/.secrets/"*
+            # Compose file-backed secrets are bind mounts, so the non-root
+            # application user must be able to read the host files. The 700
+            # parent directory still prevents other host users from reaching them.
+            chmod 644 "$host_target/.secrets/"*
           '
       }
 
