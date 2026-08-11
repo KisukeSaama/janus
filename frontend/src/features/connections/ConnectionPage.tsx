@@ -1,17 +1,24 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle } from 'lucide-react';
 
 import {
+  del,
+  keys,
+  post,
   useApplications,
   useCredentials,
   useDeleteGrant,
   useGrants,
+  usePingProvider,
   useProviders,
   usePurgeProviderCache,
   useRotateApplicationKey,
   useUpdateCredential,
+  useOAuthCallback,
   useUpdateGrant,
   useUpdateProvider,
+  type Credential,
   type Grant,
   type Identity,
   type Provider,
@@ -30,6 +37,7 @@ import {
   Notice,
   PageHead,
   PageSkeleton,
+  PingState,
   SidePanel,
 } from '../../components';
 import { useI18n } from '../../i18n';
@@ -75,6 +83,7 @@ export function ConnectionPage({
   const updateCredential = useUpdateCredential();
   const updateProvider = useUpdateProvider();
   const purgeCache = usePurgeProviderCache();
+  const pingProvider = usePingProvider();
   const rotateKey = useRotateApplicationKey();
 
   const [panel, setPanel] = useState<'closed' | 'destination' | 'quota' | 'secret'>('closed');
@@ -177,6 +186,19 @@ export function ConnectionPage({
             lead={t('detail.destinationLead')}
             aside={
               <span className="flex items-center gap-1">
+                {/* Asked, never watched: a probe leaves the deployment, so it happens when somebody
+                    wants to know and not on a timer behind an open console. */}
+                {identity.role !== 'USER' && (
+                  <button
+                    className="btn btn-sm btn-secondary"
+                    disabled={pingProvider.isPending}
+                    /* The row states the verdict in two words; a probe that could not even be sent
+                       says why in the page's own notice, rather than reading as a silent API. */
+                    onClick={() => guard(() => pingProvider.mutateAsync(provider.id))}
+                  >
+                    {pingProvider.isPending ? t('providers.pinging') : t('providers.ping')}
+                  </button>
+                )}
                 {identity.role !== 'USER' && provider.cacheEnabled && (
                   <ConfirmAction
                     trigger={t('providers.purge')}
@@ -209,6 +231,20 @@ export function ConnectionPage({
                       : t('providers.cacheUpstream')}
                 </dd>
               </div>
+              {identity.role !== 'USER' && (
+                <div className="flex flex-wrap items-baseline justify-between gap-4 px-4 py-3">
+                  <dt className="text-text-2">{t('providers.pingLabel')}</dt>
+                  <dd>
+                    {/* A probe that could not be sent is the same news as one that came back with
+                        nothing: the destination is not answering this console. */}
+                    <PingState
+                      result={pingProvider.data}
+                      pending={pingProvider.isPending}
+                      failed={pingProvider.isError}
+                    />
+                  </dd>
+                </div>
+              )}
               <div className="flex flex-wrap items-baseline justify-between gap-4 px-4 py-3">
                 <dt className="text-text-2">{t('providers.rateLimitLabel')}</dt>
                 <dd className={provider.rateLimitPerMinute > 0 ? 'data' : 'text-text-3'}>
@@ -266,6 +302,13 @@ export function ConnectionPage({
               </dd>
             </dl>
           </Block>
+        )}
+
+        {/* The one thing on this page that an administrator cannot do by editing a field: somebody
+            has to agree, at the provider, in their own browser. So it gets its own block rather than
+            a line in the one above, and it says which of the two states it is in. */}
+        {credential && credential.authType === 'OAUTH2_AUTHORIZATION_CODE' && (
+          <AuthorizationBlock credential={credential} />
         )}
 
         {application && (
@@ -635,5 +678,93 @@ function SecretPanel({ onClose, onSave }: { onClose: () => void; onSave: (secret
         />
       </FormLayout>
     </SidePanel>
+  );
+}
+
+/**
+ * Consent: whether somebody has agreed at the provider, and the one action that changes it.
+ *
+ * Everything else about a connection is settled by an administrator filling in a field. This is not,
+ * and the block says so plainly rather than reporting "disabled" and leaving a reader to work out
+ * that the fix is a person rather than a value. Until consent exists there is one button; afterwards
+ * there is who it belongs to, and the way to withdraw it.
+ */
+function AuthorizationBlock({ credential }: { credential: Credential }) {
+  const { t, formatAge } = useI18n();
+  const describe = useErrorMessage();
+  const client = useQueryClient();
+  const callback = useOAuthCallback();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function authorize() {
+    setBusy(true);
+    setError('');
+    try {
+      // A full navigation rather than a popup: the provider decides what its consent screen looks
+      // like, several refuse to be framed, and a browser that blocks popups would fail silently.
+      const started = await post<{ authorizationUrl: string }>(
+        `/credentials/${credential.id}/authorization`,
+        {},
+      );
+      window.location.assign(started.authorizationUrl);
+    } catch (x) {
+      setError(describe(x));
+      setBusy(false);
+    }
+  }
+
+  async function revoke() {
+    await del(`/credentials/${credential.id}/authorization`);
+    await client.invalidateQueries({ queryKey: keys.credentials });
+  }
+
+  return (
+    <Block
+      title={t('detail.consentTitle')}
+      lead={credential.awaitingAuthorization ? t('detail.consentLeadPending') : t('detail.consentLeadGiven')}
+      aside={
+        credential.awaitingAuthorization ? (
+          <button className="btn btn-sm btn-primary" onClick={authorize} disabled={busy}>
+            {busy ? t('common.working') : t('detail.consentConnect')}
+          </button>
+        ) : (
+          <ConfirmAction
+            trigger={t('detail.consentRevoke')}
+            confirm={t('detail.consentRevokeConfirm')}
+            pending={t('common.working')}
+            description={t('detail.consentRevokeDescription')}
+            onConfirm={revoke}
+          />
+        )
+      }
+    >
+      {/* Before the first consent, the redirect is the thing most likely to be missing at the
+          provider's end, and the refusal it causes names nothing. Shown while it is still useful. */}
+      {credential.awaitingAuthorization && callback.data && (
+        <div className="space-y-2">
+          <CopyField label={t('connect.callbackLabel')} value={callback.data.url} />
+          <p className="text-xs text-text-2">{t('connect.callbackHint')}</p>
+        </div>
+      )}
+      {!credential.awaitingAuthorization && (
+        <dl className="panel flex flex-wrap items-baseline justify-between gap-4 px-4 py-3 text-sm">
+          <dt className="text-text-2">{t('detail.consentHolder')}</dt>
+          <dd className="data">
+            {credential.authorizedSubject ?? t('detail.consentHolderUnknown')}
+            {credential.authorizedAt && (
+              <span className="ml-2 text-xs text-text-2">
+                {t('detail.consentSince', { age: formatAge(credential.authorizedAt) })}
+              </span>
+            )}
+          </dd>
+        </dl>
+      )}
+      {error && (
+        <p role="alert" className="mt-3 rounded-panel border border-bad/40 bg-bad-wash px-3.5 py-3 text-sm">
+          {error}
+        </p>
+      )}
+    </Block>
   );
 }

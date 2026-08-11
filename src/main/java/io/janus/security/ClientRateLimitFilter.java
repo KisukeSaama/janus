@@ -42,6 +42,14 @@ import io.janus.shared.CorrelationIdFilter;
  * <p>Refusals are counted, never audited and never logged per request: writing a row or a line for
  * each rejected call would turn a flood into a second flood against the database and the log, which
  * is the outcome the filter exists to prevent.
+ *
+ * <p>The defaults are deliberately loose. What this filter keys on is one address, and an address
+ * is shared: an office behind a single NAT, or every service in a cluster behind one egress, is one
+ * client as far as the bucket is concerned. A ceiling tight enough to shape ordinary traffic would
+ * therefore cut a busy legitimate site before it cut anything abusive, and a false 429 here is felt
+ * by everybody at that address at once. So the figures are set to catch only the violent case — a
+ * runaway loop, a scripted flood — which arrives an order of magnitude above them; anything subtler
+ * is a question for the per-grant policy buckets, which know who the caller is.
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
@@ -59,10 +67,10 @@ public class ClientRateLimitFilter extends OncePerRequestFilter {
     private final ObjectMapper mapper;
 
     public ClientRateLimitFilter(
-            @Value("${janus.security.rate-limit.admin-per-minute:300}") int adminPerMinute,
-            @Value("${janus.security.rate-limit.admin-burst:60}") int adminBurst,
-            @Value("${janus.security.rate-limit.gateway-per-minute:1800}") int gatewayPerMinute,
-            @Value("${janus.security.rate-limit.gateway-burst:300}") int gatewayBurst,
+            @Value("${janus.security.rate-limit.admin-per-minute:1200}") int adminPerMinute,
+            @Value("${janus.security.rate-limit.admin-burst:240}") int adminBurst,
+            @Value("${janus.security.rate-limit.gateway-per-minute:6000}") int gatewayPerMinute,
+            @Value("${janus.security.rate-limit.gateway-burst:1200}") int gatewayBurst,
             MeterRegistry registry,
             ObjectMapper mapper) {
         this.adminPerMinute = adminPerMinute;

@@ -6,6 +6,7 @@ import {
   useCredentials,
   useDeleteCredential,
   useDeleteProvider,
+  usePingProvider,
   useProviderCatalog,
   useUpdateCredential,
   useUpdateProvider,
@@ -26,6 +27,7 @@ import {
   Notice,
   PageHead,
   Pager,
+  PingState,
   RecordCell,
   RowMenu,
   SelectField,
@@ -34,6 +36,7 @@ import {
   type Column,
   type RowAction,
 } from '../../components';
+import { useLocation } from '../../app/routes';
 import { useI18n } from '../../i18n';
 import { useErrorMessage } from '../../lib/errors';
 import { fromDateInput, NOTICE_DAYS, toDateInput, WARNING_DAYS } from '../../lib/expiry';
@@ -60,6 +63,7 @@ type Panel =
 export function CredentialsPage({ identity }: { identity: Identity }) {
   const { t, tEnum } = useI18n();
   const describe = useErrorMessage();
+  const [, navigate] = useLocation();
   const administrator = identity.role !== 'USER';
 
   const [query, setQuery] = useState('');
@@ -86,6 +90,14 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
   const deleteCredential = useDeleteCredential();
   const updateProvider = useUpdateProvider();
   const deleteProvider = useDeleteProvider();
+  const pingProvider = usePingProvider();
+
+  /**
+   * The API the last probe was about. Kept beside the result rather than in the row, because a
+   * catalogue of a hundred entries with a `Reachable` column would ask an operator to read ninety-nine
+   * dashes to find the one they just tested — and would tempt the console into probing every row.
+   */
+  const [probed, setProbed] = useState<Provider | null>(null);
 
   const personal = useMemo(
     () => new Map((credentials.data ?? []).map((credential) => [credential.providerId, credential])),
@@ -259,6 +271,13 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
         </div>
       </div>
 
+      {probed && (
+        <div className="panel mb-4 flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+          <span>{probed.name}</span>
+          <PingState result={pingProvider.data} pending={pingProvider.isPending} failed={pingProvider.isError} />
+        </div>
+      )}
+
       {catalog.isError && <Notice>{describe(catalog.error)}</Notice>}
       {catalog.isPending || credentials.isPending ? (
         <SkeletonRows cols={4} />
@@ -293,6 +312,17 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
               }
               if (administrator) {
                 menu.push(
+                  {
+                    key: 'ping',
+                    label: t('providers.ping'),
+                    group: t('credentials.groupAdmin'),
+                    onSelect: () => {
+                      setProbed(provider);
+                      // Reported twice on purpose: the verdict beside the name, and the reason a
+                      // probe never left at all in the notice the rest of this page writes to.
+                      void act(() => pingProvider.mutateAsync(provider.id));
+                    },
+                  },
                   {
                     key: 'edit',
                     label: t('credentials.editApi'),
@@ -425,7 +455,16 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
       )}
 
       {connecting && (
-        <ConnectFlow onClose={() => setConnecting(false)} onDone={() => setConnecting(false)} />
+        <ConnectFlow
+          onClose={() => setConnecting(false)}
+          // Raised from this page, so closing it uncovers this page again. The wordmark is the one
+          // exit that leaves, and it says where it leads before it is taken.
+          onHome={() => {
+            setConnecting(false);
+            navigate({ page: 'dashboard' });
+          }}
+          onDone={() => setConnecting(false)}
+        />
       )}
     </>
   );

@@ -36,6 +36,7 @@ class ProviderAdminControllerTest {
     private final CredentialRepository credentials = Mockito.mock(CredentialRepository.class);
     private final GrantRepository grants = Mockito.mock(GrantRepository.class);
     private final SecretDeletionQueue secretDeletions = Mockito.mock(SecretDeletionQueue.class);
+    private final UpstreamPing ping = Mockito.mock(UpstreamPing.class);
     private final TrafficPolicyRegistry traffic = Mockito.mock(TrafficPolicyRegistry.class);
     private final AccountRepository accounts = Mockito.mock(AccountRepository.class);
     private final AccessScope scope = Mockito.mock(AccessScope.class);
@@ -59,7 +60,7 @@ class ProviderAdminControllerTest {
 
     private MockMvc mvcValidatingWith(DestinationValidator destinations) {
         var service = new ProviderService(
-                repository, credentials, grants, secretDeletions, destinations, traffic, accounts, scope, audit);
+                repository, credentials, grants, secretDeletions, destinations, ping, traffic, accounts, scope, audit);
         return MockMvcBuilders.standaloneSetup(new ProviderAdminController(service))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
@@ -258,6 +259,48 @@ class ProviderAdminControllerTest {
         mvc.perform(delete("/api/admin/providers/" + provider.getId() + "/cache"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.purged").value(17));
+    }
+
+    // --- is it still there ----------------------------------------------------
+
+    /**
+     * The probe reports what the destination answered, and a refusal is still an answer: an API that
+     * says 401 to an unauthenticated HEAD is running, which is exactly what the question was.
+     */
+    @Test
+    void reportsWhatTheDestinationAnswered() throws Exception {
+        var provider = existing();
+        when(ping.reach("https://api.spotify.com")).thenReturn(ProviderPing.answered(401, 42));
+
+        mvc.perform(post("/api/admin/providers/" + provider.getId() + "/ping"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reachable").value(true))
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.reason").value("ANSWERED"));
+    }
+
+    /** A destination that cannot be reached names its cause rather than failing the request. */
+    @Test
+    void namesWhyADestinationCouldNotBeReached() throws Exception {
+        var provider = existing();
+        when(ping.reach("https://api.spotify.com"))
+                .thenReturn(ProviderPing.failed(ProviderPing.Reason.TIMED_OUT, 5000));
+
+        mvc.perform(post("/api/admin/providers/" + provider.getId() + "/ping"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reachable").value(false))
+                .andExpect(jsonPath("$.status").value(0))
+                .andExpect(jsonPath("$.reason").value("TIMED_OUT"));
+    }
+
+    /** Nothing leaves the process for an identifier that names no catalogue entry. */
+    @Test
+    void doesNotProbeADestinationThatDoesNotExist() throws Exception {
+        var id = UUID.randomUUID();
+        when(repository.findById(id)).thenReturn(Optional.empty());
+
+        mvc.perform(post("/api/admin/providers/" + id + "/ping")).andExpect(status().isNotFound());
+        verify(ping, never()).reach(any());
     }
 
     // --- the shared catalogue -------------------------------------------------

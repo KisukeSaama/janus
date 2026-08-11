@@ -12,8 +12,17 @@ import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.*;
 import tools.jackson.databind.ObjectMapper;
 
+import io.janus.openbao.OpenBaoClient;
+
 /**
- * Turns {@code client_id:client_secret} into a bearer token, and holds it so it is asked for once.
+ * Turns whatever a credential stores into a bearer token, and holds it so it is asked for once.
+ *
+ * <p>Two strategies end here, and they differ only in what they present to get the token: a client
+ * secret, for an application speaking as itself, or a refresh token, for an application speaking for
+ * a person who agreed to it.
+ *
+ * <p>What comes back is the same in both cases, which is the point: a client service asks Janus for a
+ * resource and never learns which of these was involved, nor when the token behind it changed.
  *
  * <p>The exchange deliberately does not go through {@code GatewayTrafficService}: it is a control
  * call, not a proxied one. It must not consume a caller's allowance, must not be answered from the
@@ -35,12 +44,15 @@ public class UpstreamTokenProvider {
     private final WebClient web;
     private final UpstreamTokenCache cache;
     private final ObjectMapper mapper;
+    private final OpenBaoClient bao;
     private final ConcurrentMap<UUID, CompletableFuture<String>> inFlight = new ConcurrentHashMap<>();
 
-    public UpstreamTokenProvider(WebClient gatewayWebClient, UpstreamTokenCache cache, ObjectMapper mapper) {
+    public UpstreamTokenProvider(
+            WebClient gatewayWebClient, UpstreamTokenCache cache, ObjectMapper mapper, OpenBaoClient bao) {
         this.web = gatewayWebClient;
         this.cache = cache;
         this.mapper = mapper;
+        this.bao = bao;
     }
 
     /**
@@ -52,6 +64,11 @@ public class UpstreamTokenProvider {
     public String tokenFor(Credential credential, String storedSecret) {
         var held = cache.lookup(credential.getId());
         if (held.isPresent()) return held.get();
+
+        // Nobody has agreed yet, so there is nothing to refresh. Said plainly, because the fix is an
+        // action in the console rather than anything about this request.
+        if (credential.awaitingAuthorization())
+            throw new TokenExchangeException("This connection has not been authorised yet");
 
         var recent = cache.recentFailure(credential.getId());
         if (recent.isPresent())
@@ -92,18 +109,27 @@ public class UpstreamTokenProvider {
     }
 
     private String exchange(Credential credential, String storedSecret) {
-        int separator = storedSecret.indexOf(':');
-        if (separator < 0)
-            throw new TokenExchangeException("The stored secret is not in the form client_id:client_secret");
-        String clientId = storedSecret.substring(0, separator);
-        String clientSecret = storedSecret.substring(separator + 1);
-
         var form = new LinkedMultiValueMap<String, String>();
-        form.add("grant_type", "client_credentials");
-        if (credential.getTokenScopes() != null) form.add("scope", credential.getTokenScopes());
+        String[] client = split(storedSecret);
+
+        switch (credential.getAuthType()) {
+            case OAUTH2_CLIENT_CREDENTIALS -> {
+                form.add("grant_type", "client_credentials");
+                if (credential.getTokenScopes() != null) form.add("scope", credential.getTokenScopes());
+            }
+            case OAUTH2_AUTHORIZATION_CODE -> {
+                form.add("grant_type", "refresh_token");
+                form.add("refresh_token", refreshToken(credential));
+                // No scope: a refresh may narrow what was granted but never widen it, and providers
+                // differ on whether restating it is accepted or refused.
+            }
+            default -> throw new IllegalStateException(
+                    credential.getAuthType() + " does not exchange anything for a token");
+        }
+
         if (credential.getTokenClientAuth() == TokenClientAuth.POST) {
-            form.add("client_id", clientId);
-            form.add("client_secret", clientSecret);
+            form.add("client_id", client[0]);
+            form.add("client_secret", client[1]);
         }
 
         ResponseEntity<byte[]> response;
@@ -115,7 +141,7 @@ public class UpstreamTokenProvider {
                         headers.setAccept(List.of(MediaType.APPLICATION_JSON));
                         if (credential.getTokenClientAuth() != TokenClientAuth.POST)
                             headers.setBasicAuth(Base64.getEncoder()
-                                    .encodeToString((clientId + ":" + clientSecret).getBytes(StandardCharsets.UTF_8)));
+                                    .encodeToString((client[0] + ":" + client[1]).getBytes(StandardCharsets.UTF_8)));
                     })
                     .body(BodyInserters.fromFormData(form))
                     .exchangeToMono(result -> result.toEntity(byte[].class))
@@ -136,6 +162,29 @@ public class UpstreamTokenProvider {
         return read(credential, response.getBody());
     }
 
+    /** The pair a credential stores as one string, refused rather than guessed at when it is not one. */
+    private static String[] split(String storedSecret) {
+        int separator = storedSecret == null ? -1 : storedSecret.indexOf(':');
+        if (separator < 0)
+            throw new TokenExchangeException("The stored secret is not in the form client_id:client_secret");
+        return new String[] {storedSecret.substring(0, separator), storedSecret.substring(separator + 1)};
+    }
+
+    /**
+     * The refresh token a person's consent produced, held beside the client secret rather than inside
+     * it: the two arrive from different people at different times, and the provider may replace this
+     * one on every use while the other stays as it was.
+     */
+    private String refreshToken(Credential credential) {
+        try {
+            return bao.read(credential.refreshTokenPath());
+        } catch (RuntimeException ex) {
+            // Either nobody agreed, or what they agreed to was revoked and swept. Both are fixed the
+            // same way, and neither is worth an upstream call to confirm.
+            throw new TokenExchangeException("This connection needs to be authorised again");
+        }
+    }
+
     /** Remembers the refusal for a moment, so the next request does not repeat it. */
     private String refuse(Credential credential, int status) {
         cache.storeFailure(credential.getId(), status);
@@ -150,12 +199,33 @@ public class UpstreamTokenProvider {
             String token = json.path("access_token").asString(null);
             if (token == null || token.isBlank()) return refuse(credential, 200);
 
+            // Providers that rotate refresh tokens hand back a new one here, and the old one stops
+            // working the moment it is used. Storing it before returning the access token is what
+            // keeps a rotation from ending the connection at the next renewal.
+            String rotated = json.path("refresh_token").asString(null);
+            if (rotated != null
+                    && !rotated.isBlank()
+                    && credential.getAuthType().consented()) store(credential, rotated);
+
             var expires = json.path("expires_in");
             cache.store(credential.getId(), token, expires.isNumber() ? expires.asLong() : null);
             return token;
+        } catch (TokenExchangeException ex) {
+            throw ex;
         } catch (RuntimeException ex) {
             // Whatever came back was not the answer RFC 6749 describes. Saying so is all that is safe.
             return refuse(credential, 200);
+        }
+    }
+
+    private void store(Credential credential, String rotated) {
+        try {
+            bao.write(credential.refreshTokenPath(), rotated);
+        } catch (RuntimeException ex) {
+            // The access token in hand is still good, so this request will succeed; the next renewal
+            // is the one that will fail, and it will say so plainly. Losing the request over a store
+            // that may well succeed on the next pass would help nobody.
+            log.error("Could not store the rotated refresh token for credential {}", credential.getId());
         }
     }
 }

@@ -22,6 +22,12 @@ public enum AuditAction {
     CREDENTIAL_EXPIRY_NOTICE,
     CREDENTIAL_EXPIRY_WARNING,
     CREDENTIAL_EXPIRED,
+    // A person was sent to a provider to agree, came back having agreed, or withdrew it afterwards.
+    // Recorded separately from an ordinary edit because the subject of the record is somebody's
+    // consent rather than an administrator's configuration.
+    CREDENTIAL_AUTHORIZATION_STARTED,
+    CREDENTIAL_AUTHORIZED,
+    CREDENTIAL_AUTHORIZATION_REVOKED,
 
     GRANT_CREATED,
     GRANT_UPDATED,

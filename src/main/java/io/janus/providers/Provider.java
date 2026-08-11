@@ -6,8 +6,7 @@ import java.util.UUID;
 import jakarta.persistence.*;
 
 import io.janus.accounts.Account;
-import io.janus.credentials.AuthType;
-import io.janus.credentials.TokenClientAuth;
+import io.janus.credentials.*;
 
 /**
  * Fixed upstream destination. Gateway callers never supply a URL; they name a provider slug.
@@ -60,6 +59,9 @@ public class Provider {
     @Column(name = "auth_type", nullable = false, length = 32)
     private AuthType authType;
 
+    /**
+     * The header a key travels in — and, for a signed request, the header identifying who signed it.
+     */
     @Column(name = "header_name", length = 100)
     private String headerName;
 
@@ -75,6 +77,33 @@ public class Provider {
     @Enumerated(EnumType.STRING)
     @Column(name = "token_client_auth", length = 16)
     private TokenClientAuth tokenClientAuth;
+
+    /** Where a person is sent to agree, for an authorisation-code destination. */
+    @Column(name = "authorization_url", length = 500)
+    private String authorizationUrl;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "signature_algorithm", length = 16)
+    private SignatureAlgorithm signatureAlgorithm;
+
+    @Column(name = "signature_template", length = 500)
+    private String signatureTemplate;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "signature_encoding", length = 16)
+    private SignatureEncoding signatureEncoding;
+
+    @Column(name = "signature_header", length = 100)
+    private String signatureHeader;
+
+    @Column(name = "signature_parameter", length = 100)
+    private String signatureParameter;
+
+    @Column(name = "timestamp_header", length = 100)
+    private String timestampHeader;
+
+    @Column(name = "timestamp_parameter", length = 100)
+    private String timestampParameter;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
@@ -115,13 +144,31 @@ public class Provider {
         }
     }
 
+    /**
+     * The authentication contract, which belongs to the API rather than to any one account: every
+     * caller of a destination presents in the same way, and only the value differs between them.
+     */
     public record Auth(
             AuthType type,
             String headerName,
             String queryParameter,
             String tokenUrl,
             String tokenScopes,
-            TokenClientAuth tokenClientAuth) {
+            TokenClientAuth tokenClientAuth,
+            String authorizationUrl,
+            SignatureSettings signature) {
+
+        /** For the strategies that were the whole vocabulary before consent and signing were added. */
+        public Auth(
+                AuthType type,
+                String headerName,
+                String queryParameter,
+                String tokenUrl,
+                String tokenScopes,
+                TokenClientAuth tokenClientAuth) {
+            this(type, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, null, null);
+        }
+
         public static Auth none() {
             return new Auth(AuthType.NONE, null, null, null, null, null);
         }
@@ -146,15 +193,33 @@ public class Provider {
         this.rateLimitBurst = traffic.burst();
     }
 
+    /**
+     * Applies the contract, clearing every setting that belongs to another strategy. Stated once here
+     * and again in the database's constraints, so a row written by anything else means what it says.
+     */
     public void applyAuth(Auth auth) {
-        this.authType = auth.type();
-        this.headerName = auth.type() == AuthType.API_KEY_HEADER ? auth.headerName() : null;
-        this.queryParameter = auth.type() == AuthType.API_KEY_QUERY ? auth.queryParameter() : null;
-        this.tokenUrl = auth.type().exchanged() ? auth.tokenUrl() : null;
-        this.tokenScopes = auth.type().exchanged() ? blankToNull(auth.tokenScopes()) : null;
-        this.tokenClientAuth = auth.type().exchanged()
+        var type = auth.type();
+        this.authType = type;
+        this.headerName = type == AuthType.API_KEY_HEADER || type == AuthType.HMAC_SIGNATURE ? auth.headerName() : null;
+        this.queryParameter = type == AuthType.API_KEY_QUERY ? auth.queryParameter() : null;
+        this.tokenUrl = type.exchanged() ? auth.tokenUrl() : null;
+        this.tokenScopes = type.exchanged() ? blankToNull(auth.tokenScopes()) : null;
+        this.tokenClientAuth = type.exchanged()
                 ? java.util.Objects.requireNonNullElse(auth.tokenClientAuth(), TokenClientAuth.BASIC)
                 : null;
+        this.authorizationUrl = type.consented() ? auth.authorizationUrl() : null;
+        applySignature(type, auth.signature());
+    }
+
+    private void applySignature(AuthType type, SignatureSettings signature) {
+        boolean applies = type.signs() && signature != null;
+        this.signatureAlgorithm = applies ? signature.algorithm() : null;
+        this.signatureTemplate = applies ? signature.template().pattern() : null;
+        this.signatureEncoding = applies ? signature.encoding() : null;
+        this.signatureHeader = applies ? signature.signatureHeader() : null;
+        this.signatureParameter = applies ? signature.signatureParameter() : null;
+        this.timestampHeader = applies ? signature.timestampHeader() : null;
+        this.timestampParameter = applies ? signature.timestampParameter() : null;
     }
 
     private static String blankToNull(String value) {
@@ -229,6 +294,27 @@ public class Provider {
 
     public TokenClientAuth getTokenClientAuth() {
         return tokenClientAuth;
+    }
+
+    public String getAuthorizationUrl() {
+        return authorizationUrl;
+    }
+
+    public SignatureAlgorithm getSignatureAlgorithm() {
+        return signatureAlgorithm;
+    }
+
+    /** The recipe this destination expects requests to be signed with, or null when it expects none. */
+    public SignatureSettings signatureSettings() {
+        if (!authType.signs() || signatureTemplate == null) return null;
+        return new SignatureSettings(
+                signatureAlgorithm,
+                new SignatureTemplate(signatureTemplate),
+                signatureEncoding,
+                signatureHeader,
+                signatureParameter,
+                timestampHeader,
+                timestampParameter);
     }
 
     public Instant getCreatedAt() {

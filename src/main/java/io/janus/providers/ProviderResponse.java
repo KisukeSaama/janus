@@ -3,8 +3,7 @@ package io.janus.providers;
 import java.time.Instant;
 import java.util.UUID;
 
-import io.janus.credentials.AuthType;
-import io.janus.credentials.TokenClientAuth;
+import io.janus.credentials.*;
 
 /** A destination as the console sees it. */
 public record ProviderResponse(
@@ -23,6 +22,14 @@ public record ProviderResponse(
         String tokenUrl,
         String tokenScopes,
         TokenClientAuth tokenClientAuth,
+        String authorizationUrl,
+        SignatureAlgorithm signatureAlgorithm,
+        String signatureTemplate,
+        SignatureEncoding signatureEncoding,
+        String signatureHeader,
+        String signatureParameter,
+        String timestampHeader,
+        String timestampParameter,
         boolean activated,
         Instant createdAt,
         Instant updatedAt) {
@@ -32,6 +39,7 @@ public record ProviderResponse(
     }
 
     public static ProviderResponse of(Provider provider, boolean activated) {
+        var signature = provider.signatureSettings();
         return new ProviderResponse(
                 provider.getId(),
                 provider.getName(),
@@ -48,6 +56,14 @@ public record ProviderResponse(
                 provider.getTokenUrl(),
                 provider.getTokenScopes(),
                 provider.getTokenClientAuth(),
+                provider.getAuthorizationUrl(),
+                provider.getSignatureAlgorithm(),
+                signature == null ? null : signature.template().pattern(),
+                signature == null ? null : signature.encoding(),
+                signature == null ? null : signature.signatureHeader(),
+                signature == null ? null : signature.signatureParameter(),
+                signature == null ? null : signature.timestampHeader(),
+                signature == null ? null : signature.timestampParameter(),
                 activated,
                 provider.getCreatedAt(),
                 provider.getUpdatedAt());

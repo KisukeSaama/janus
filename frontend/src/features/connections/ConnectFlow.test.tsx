@@ -10,15 +10,38 @@ import { ConnectFlow } from './ConnectFlow';
 /**
  * Registering an API writes a catalogue entry for the whole deployment; activating it writes a
  * credential for one account. The flow may do both, but the second is asked for, never assumed.
+ *
+ * Neither of them is a connection. Admitting a service to a destination belongs to the flow that
+ * registers a service, and is tested with it.
  */
 
 const fetchMock = vi.fn();
 
 beforeEach(() => {
   fetchMock.mockReset();
-  fetchMock.mockResolvedValue(answer(200, { id: 'p1' }));
+  // Routed by path rather than by call order: the screens read what they need to display, and a
+  // queue of responses would hand a provider to whichever request happened to go out first.
+  fetchMock.mockImplementation((path: string, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'GET')
+      return Promise.resolve(
+        String(path).includes('/oauth/callback')
+          ? answer(200, { url: 'https://janus.example.com/oauth/callback', configured: true })
+          : answer(200, []),
+      );
+    return Promise.resolve(answer(200, { id: 'p1', application: { id: 'a1' }, apiKey: 'jnt_x' }));
+  });
   vi.stubGlobal('fetch', fetchMock);
 });
+
+/** Makes one write fail, whatever else the flow reads before reaching it. */
+function refuse(path: string) {
+  const inner = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation((called: string, init?: RequestInit) =>
+    String(called).endsWith(path) && (init?.method ?? 'GET') !== 'GET'
+      ? Promise.resolve(answer(400, { detail: 'nope' }))
+      : inner(called, init),
+  );
+}
 
 function answer(status: number, body: unknown = {}) {
   return {
@@ -38,19 +61,35 @@ function Wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-/** Everything the first step needs, up to the screen where activation is decided. */
+/**
+ * Everything the first step needs, up to the screen where activation is decided.
+ *
+ * The flow opens on the list of ready-made APIs, so describing one by hand starts by declining it.
+ * That is the path these tests are about: what a preset fills in is asserted separately, and the
+ * behaviour below has to hold for an API nobody preconfigured.
+ */
 async function describeApi() {
   const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: /another API|une autre API/i }));
   await user.type(screen.getByLabelText(/what is this API called|comment s.appelle cette API/i), 'Payments');
   await user.type(screen.getByLabelText(/HTTPS/i), 'https://api.example.com');
   await user.click(screen.getByRole('button', { name: /continue|continuer/i }));
   return user;
 }
 
-const paths = () => fetchMock.mock.calls.map(([path]) => String(path));
+/**
+ * The calls that create something, in order.
+ *
+ * The screens also read what they need to display — the redirect address to declare at the provider,
+ * among others — and a test about which records get created should not have to be rewritten every
+ * time a screen shows one more thing.
+ */
+const writes = () => fetchMock.mock.calls.filter(([, init]) => (init?.method ?? 'GET') !== 'GET');
+
+const paths = () => writes().map(([path]) => String(path));
 
 const renderFlow = (onDone = vi.fn()) =>
-  render(<ConnectFlow onClose={vi.fn()} onDone={onDone} />, { wrapper: Wrapper });
+  render(<ConnectFlow onClose={vi.fn()} onHome={vi.fn()} onDone={onDone} />, { wrapper: Wrapper });
 
 describe('ConnectFlow', () => {
   it('does not ask for a secret until the operator activates the API for their account', async () => {
@@ -83,12 +122,33 @@ describe('ConnectFlow', () => {
     await user.type(screen.getByLabelText(/the secret itself|le secret lui-m.me/i), 'sk-live-1');
     await user.click(screen.getByRole('button', { name: /register the API|enregistrer l.API/i }));
 
+    // Two records and no third: which service may call this destination is the service's decision,
+    // taken in the flow that registers one. Nothing here admits anybody to anything.
     await waitFor(() => expect(paths()).toEqual(['/api/admin/providers', '/api/admin/credentials']));
-    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ providerId: 'p1', secret: 'sk-live-1' });
+    expect(JSON.parse(writes()[1][1].body)).toMatchObject({ providerId: 'p1', secret: 'sk-live-1' });
+  });
+
+  it('answers the whole contract from a preset, including what only a person can grant', async () => {
+    renderFlow();
+    const user = userEvent.setup();
+
+    // The point of the list: one click replaces a destination, a strategy and two endpoints that
+    // would otherwise have been looked up in Spotify's documentation and typed by hand.
+    await user.click(screen.getByRole('button', { name: /spotify.*compte|spotify.*account/is }));
+    await user.click(screen.getByRole('button', { name: /continue|continuer/i }));
+    await user.click(screen.getByRole('button', { name: /register the API|enregistrer l.API/i }));
+
+    await waitFor(() => expect(paths()).toEqual(['/api/admin/providers']));
+    expect(JSON.parse(writes()[0][1].body)).toMatchObject({
+      baseUrl: 'https://api.spotify.com/v1',
+      authType: 'OAUTH2_AUTHORIZATION_CODE',
+      tokenUrl: 'https://accounts.spotify.com/api/token',
+      authorizationUrl: 'https://accounts.spotify.com/authorize',
+    });
   });
 
   it('unwinds the catalogue entry when the credential is refused', async () => {
-    fetchMock.mockResolvedValueOnce(answer(200, { id: 'p1' })).mockResolvedValueOnce(answer(400, { detail: 'nope' }));
+    refuse('/credentials');
     renderFlow();
     const user = await describeApi();
 
@@ -97,6 +157,6 @@ describe('ConnectFlow', () => {
     await user.click(screen.getByRole('button', { name: /register the API|enregistrer l.API/i }));
 
     await waitFor(() => expect(paths()).toContain('/api/admin/providers/p1'));
-    expect(fetchMock.mock.calls[2][1].method).toBe('DELETE');
+    expect(writes().at(-1)?.[1].method).toBe('DELETE');
   });
 });

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 
-import { useI18n } from '../i18n';
+import type { PingReason, ProviderPing } from '../api';
+import { useI18n, type MessageKey } from '../i18n';
 import { daysRemaining, stageOf, STAGE_TONE } from '../lib/expiry';
 
 export function EnabledState({ enabled }: { enabled: boolean }) {
@@ -29,6 +30,55 @@ export function LiveState({ live, paused }: { live: boolean; paused: boolean }) 
     <span className={`inline-flex items-center gap-2 whitespace-nowrap text-xs ${tone}`}>
       <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 ${mark}`} />
       {label}
+    </span>
+  );
+}
+
+/** Each failure names a different thing to go and look at, so each keeps its own sentence. */
+const PING_REASON: Record<PingReason, MessageKey> = {
+  ANSWERED: 'providers.pingAnswered',
+  TIMED_OUT: 'providers.pingTimedOut',
+  UNRESOLVED: 'providers.pingUnresolved',
+  TLS_FAILED: 'providers.pingTlsFailed',
+  BLOCKED: 'providers.pingBlocked',
+  UNREACHABLE: 'providers.pingUnreachable',
+};
+
+/**
+ * What a destination answered when it was last asked, if it was.
+ *
+ * A refusal counts as reached: the probe presents no credential, so 401 and 404 both mean somebody
+ * is listening, and that is the question. Only a server error is drawn as a fault while still
+ * counting as alive — the address is fine and the API is not, which is somebody else's incident.
+ */
+export function PingState({
+  result,
+  pending,
+  /** The probe itself did not get through — an ended session, a refused role, Janus unreachable. */
+  failed,
+}: {
+  result?: ProviderPing;
+  pending?: boolean;
+  failed?: boolean;
+}) {
+  const { t } = useI18n();
+  if (pending) return <span className="text-xs text-text-3">{t('providers.pinging')}</span>;
+  if (failed) return <span className="text-xs text-bad">{t('providers.pingRefused')}</span>;
+  if (!result) return <span className="text-xs text-text-3">{t('providers.pingNone')}</span>;
+
+  const failing = result.reachable && result.status >= 500;
+  const [mark, tone] = result.reachable
+    ? failing
+      ? ['bg-warn', 'text-warn']
+      : ['bg-ok', 'text-text-2']
+    : ['bg-bad', 'text-bad'];
+
+  return (
+    <span className={`inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${tone}`}>
+      <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 ${mark}`} />
+      <span>{t(PING_REASON[result.reason])}</span>
+      {result.reachable && <span className="data">{result.status}</span>}
+      <span className="data text-text-3">{t('providers.pingMillis', { millis: result.millis })}</span>
     </span>
   );
 }

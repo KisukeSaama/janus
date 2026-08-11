@@ -102,10 +102,13 @@ export function DashboardPage({
     });
   }
 
+  // A connection starts from the service that needs one, so this opens the service flow and says so.
+  // Registering an API on its own is a catalogue chore, and lives on the page that holds the
+  // catalogue.
   const connectButton = (
     <button className="btn btn-primary w-full sm:w-auto" onClick={onConnect}>
       <Plus size={15} strokeWidth={2.25} />
-      {t('connect.action')}
+      {t('applications.new')}
     </button>
   );
 

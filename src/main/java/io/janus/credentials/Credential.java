@@ -34,6 +34,11 @@ public class Credential {
     @Column(name = "auth_type", nullable = false, length = 32)
     private AuthType authType;
 
+    /**
+     * The header a key travels in, for {@link AuthType#API_KEY_HEADER} — and, for a signed request,
+     * the header identifying who signed it, which is what lets the upstream pick a secret to verify
+     * against.
+     */
     @Column(name = "header_name", length = 100)
     private String headerName;
 
@@ -41,7 +46,7 @@ public class Credential {
     @Column(name = "query_parameter", length = 100)
     private String queryParameter;
 
-    /** Where client credentials are exchanged, for {@link AuthType#OAUTH2_CLIENT_CREDENTIALS}. */
+    /** Where credentials are exchanged, for the two strategies that exchange anything. */
     @Column(name = "token_url", length = 500)
     private String tokenUrl;
 
@@ -51,6 +56,47 @@ public class Credential {
     @Enumerated(EnumType.STRING)
     @Column(name = "token_client_auth", length = 16)
     private TokenClientAuth tokenClientAuth;
+
+    /** Where a person is sent to agree, for {@link AuthType#OAUTH2_AUTHORIZATION_CODE}. */
+    @Column(name = "authorization_url", length = 500)
+    private String authorizationUrl;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "signature_algorithm", length = 16)
+    private SignatureAlgorithm signatureAlgorithm;
+
+    @Column(name = "signature_template", length = 500)
+    private String signatureTemplate;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "signature_encoding", length = 16)
+    private SignatureEncoding signatureEncoding;
+
+    @Column(name = "signature_header", length = 100)
+    private String signatureHeader;
+
+    @Column(name = "signature_parameter", length = 100)
+    private String signatureParameter;
+
+    @Column(name = "timestamp_header", length = 100)
+    private String timestampHeader;
+
+    @Column(name = "timestamp_parameter", length = 100)
+    private String timestampParameter;
+
+    /**
+     * When somebody last agreed at the provider's own site, for an authorisation-code credential.
+     *
+     * <p>Null means nobody has, which is a different state from a credential that is merely disabled:
+     * there is a client secret stored and no refresh token to go with it, so the console can offer the
+     * one action that fixes it rather than reporting a failure.
+     */
+    @Column(name = "authorized_at")
+    private Instant authorizedAt;
+
+    /** Whom the stored refresh token speaks for, as the provider named them. Displayed, never sent. */
+    @Column(name = "authorized_subject", length = 255)
+    private String authorizedSubject;
 
     @Column(name = "secret_path", nullable = false, unique = true, length = 500)
     private String secretPath;
@@ -102,7 +148,9 @@ public class Credential {
                 provider.getQueryParameter(),
                 provider.getTokenUrl(),
                 provider.getTokenScopes(),
-                provider.getTokenClientAuth());
+                provider.getTokenClientAuth(),
+                provider.getAuthorizationUrl(),
+                provider.signatureSettings());
     }
 
     /** Keeps personal credential metadata aligned with the administrator-owned API contract. */
@@ -111,16 +159,22 @@ public class Credential {
         if (previousType != provider.getAuthType()) {
             enabled = false;
             requiresReprovision = !provider.getAuthType().anonymous();
+            // Consent was given for the old contract. Whatever it authorised, it did not authorise
+            // this, so the credential goes back to unauthorised rather than carrying a stale approval.
+            forgetAuthorization();
         }
     }
 
     /**
      * How a secret is presented, and the settings that belong to that one way of presenting it.
      *
-     * <p>Grouped into a record rather than passed as five loose parameters, for the same reason the
+     * <p>Grouped into a record rather than passed as eight loose parameters, for the same reason the
      * traffic policy is: they are only meaningful together, and only one combination at a time is
      * valid. {@code describe} clears the ones the chosen type does not use, which is what keeps the
      * database's check constraints satisfiable across a change of type.
+     *
+     * <p>The one strategy with a shape of its own carries it as a record rather than as six more loose
+     * components, because it is validated as a whole and means nothing in pieces.
      */
     public record Strategy(
             AuthType authType,
@@ -128,9 +182,22 @@ public class Credential {
             String queryParameter,
             String tokenUrl,
             String tokenScopes,
-            TokenClientAuth tokenClientAuth) {
+            TokenClientAuth tokenClientAuth,
+            String authorizationUrl,
+            SignatureSettings signature) {
 
-        /** For the three types that need nothing beyond the stored value. */
+        /** For the strategies that were the whole vocabulary before consent and signing were added. */
+        public Strategy(
+                AuthType authType,
+                String headerName,
+                String queryParameter,
+                String tokenUrl,
+                String tokenScopes,
+                TokenClientAuth tokenClientAuth) {
+            this(authType, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, null, null);
+        }
+
+        /** For the types that need nothing beyond the stored value. */
         public static Strategy of(AuthType authType) {
             return new Strategy(authType, null, null, null, null, null);
         }
@@ -155,14 +222,29 @@ public class Credential {
         var type = strategy.authType();
         this.name = name;
         this.authType = type;
-        this.headerName = type == AuthType.API_KEY_HEADER ? strategy.headerName() : null;
+        this.headerName =
+                type == AuthType.API_KEY_HEADER || type == AuthType.HMAC_SIGNATURE ? strategy.headerName() : null;
         this.queryParameter = type == AuthType.API_KEY_QUERY ? strategy.queryParameter() : null;
         this.tokenUrl = type.exchanged() ? strategy.tokenUrl() : null;
         this.tokenScopes = type.exchanged() ? blankToNull(strategy.tokenScopes()) : null;
         this.tokenClientAuth =
                 type.exchanged() ? Objects.requireNonNullElse(strategy.tokenClientAuth(), TokenClientAuth.BASIC) : null;
+        this.authorizationUrl = type.consented() ? strategy.authorizationUrl() : null;
+        applySignature(type, strategy.signature());
+
         this.enabled = enabled;
         setExpiresAt(type.anonymous() ? null : expiresAt);
+    }
+
+    private void applySignature(AuthType type, SignatureSettings signature) {
+        boolean applies = type.signs() && signature != null;
+        this.signatureAlgorithm = applies ? signature.algorithm() : null;
+        this.signatureTemplate = applies ? signature.template().pattern() : null;
+        this.signatureEncoding = applies ? signature.encoding() : null;
+        this.signatureHeader = applies ? signature.signatureHeader() : null;
+        this.signatureParameter = applies ? signature.signatureParameter() : null;
+        this.timestampHeader = applies ? signature.timestampHeader() : null;
+        this.timestampParameter = applies ? signature.timestampParameter() : null;
     }
 
     private static String blankToNull(String value) {
@@ -213,8 +295,39 @@ public class Credential {
         return tokenClientAuth;
     }
 
+    public String getAuthorizationUrl() {
+        return authorizationUrl;
+    }
+
+    public SignatureAlgorithm getSignatureAlgorithm() {
+        return signatureAlgorithm;
+    }
+
+    /** The recipe for signing a request, or null when this credential does not sign one. */
+    public SignatureSettings signatureSettings() {
+        if (!authType.signs() || signatureTemplate == null) return null;
+        return new SignatureSettings(
+                signatureAlgorithm,
+                new SignatureTemplate(signatureTemplate),
+                signatureEncoding,
+                signatureHeader,
+                signatureParameter,
+                timestampHeader,
+                timestampParameter);
+    }
+
     public String getSecretPath() {
         return secretPath;
+    }
+
+    /**
+     * Where the refresh token for this credential lives, which is beside the client secret rather than
+     * inside it: the two arrive at different times, from different people, and are replaced
+     * independently — a provider may rotate the refresh token on every use while the client secret
+     * stays as it was for years.
+     */
+    public String refreshTokenPath() {
+        return secretPath + "/refresh";
     }
 
     public boolean isEnabled() {
@@ -227,6 +340,34 @@ public class Credential {
 
     public void markProvisioned() {
         requiresReprovision = false;
+    }
+
+    public Instant getAuthorizedAt() {
+        return authorizedAt;
+    }
+
+    public String getAuthorizedSubject() {
+        return authorizedSubject;
+    }
+
+    /**
+     * Whether this credential still needs somebody to agree at the provider before it can be used.
+     * Only ever true for the one strategy that asks a person rather than an administrator.
+     */
+    public boolean awaitingAuthorization() {
+        return authType.consented() && authorizedAt == null;
+    }
+
+    /** Records that consent was given, and whom the provider says it was given by. */
+    public void authorized(String subject) {
+        this.authorizedAt = Instant.now();
+        this.authorizedSubject = blankToNull(subject);
+    }
+
+    /** Drops the consent, which is what a revoked or replaced authorisation leaves behind. */
+    public void forgetAuthorization() {
+        this.authorizedAt = null;
+        this.authorizedSubject = null;
     }
 
     public Instant getExpiresAt() {

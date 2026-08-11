@@ -36,6 +36,10 @@ import {
   type Column,
   type RowAction,
 } from '../../components';
+import { useLocation } from '../../app/routes';
+import { useApiActivation } from '../connections/activation';
+import { ApiRow } from '../connections/ApiRow';
+import { ServiceFlow } from '../connections/ServiceFlow';
 import { useI18n } from '../../i18n';
 import { isKeyStale } from '../../lib/attention';
 import { useErrorMessage } from '../../lib/errors';
@@ -51,6 +55,7 @@ import { useErrorMessage } from '../../lib/errors';
 export function ApplicationsPage() {
   const { t, formatAge, formatDate } = useI18n();
   const describe = useErrorMessage();
+  const [, navigate] = useLocation();
 
   const applications = useApplications();
   const grants = useGrants();
@@ -65,34 +70,44 @@ export function ApplicationsPage() {
   const remove = useDeleteApplication();
 
   const [panel, setPanel] = useState<'closed' | 'new' | Application>('closed');
+  const [creating, setCreating] = useState(false);
   const [access, setAccess] = useState<Application | null>(null);
   const [formError, setFormError] = useState('');
   const [error, setError] = useState('');
   const [issuedKey, setIssuedKey] = useState('');
+  /** Supplying what a row is missing, so an API can be activated without leaving this form. */
+  const activation = useApiActivation();
+  // Which rows this panel activated, since the boxes are the browser's and a default cannot be
+  // changed after the fact. Cleared with the panel: the next service edited is a different answer.
+  const [justActivated, setJustActivated] = useState<string[]>([]);
 
   const rows = applications.data ?? [];
   const editing = typeof panel === 'object' ? panel : null;
 
   // A grant is unique per application and destination. The API list therefore has one choice per
   // provider, backed by the credential already registered for it (including NONE for open APIs).
+  //
+  // Every registered API is listed, including those nobody holds a credential for yet. A grant needs
+  // one and those rows cannot be ticked, but leaving them out is what made an API registered a minute
+  // earlier answer "register an API first": the reason it is unavailable belongs on its own row.
   const apiOptions = useMemo(() => {
-    const providerById = new Map((providers.data ?? []).map((provider) => [provider.id, provider]));
     const preferredCredentials = new Set(
       (grants.data ?? [])
         .filter((grant) => grant.applicationId === editing?.id)
         .map((grant) => grant.credentialId),
     );
     const credentialByProvider = new Map<string, Credential>();
-    for (const credential of credentials.data ?? []) {
+    // Credentials written from this panel come first, so the row one of them unlocks is tickable on
+    // the click rather than once a refetch has come back.
+    for (const credential of [...activation.minted, ...(credentials.data ?? [])]) {
       if (!credentialByProvider.has(credential.providerId) || preferredCredentials.has(credential.id)) {
         credentialByProvider.set(credential.providerId, credential);
       }
     }
-    return [...credentialByProvider.entries()]
-      .map(([providerId, credential]) => ({ provider: providerById.get(providerId), credential }))
-      .filter((option) => option.provider)
-      .sort((a, b) => a.provider!.name.localeCompare(b.provider!.name));
-  }, [credentials.data, editing?.id, grants.data, providers.data]);
+    return (providers.data ?? [])
+      .map((provider) => ({ provider, credential: credentialByProvider.get(provider.id) }))
+      .sort((a, b) => a.provider.name.localeCompare(b.provider.name));
+  }, [activation.minted, credentials.data, editing?.id, grants.data, providers.data]);
 
   /**
    * Which of our APIs each application is allowed to reach, read off the grants. The name of the
@@ -111,8 +126,14 @@ export function ApplicationsPage() {
     return byApp;
   }, [grants.data, providers.data]);
 
+  function open(application: Application) {
+    setJustActivated([]);
+    setPanel(application);
+  }
+
   function close() {
     setPanel('closed');
+    setJustActivated([]);
     setFormError('');
   }
 
@@ -145,25 +166,34 @@ export function ApplicationsPage() {
 
       const current = (grants.data ?? []).filter((grant) => grant.applicationId === applicationId);
       const currentByProvider = new Map(current.map((grant) => [grant.providerId, grant]));
-      const desired = apiOptions.filter((option) => selectedProviders.has(option.provider!.id));
+      // An API with no credential cannot be granted, and its checkbox is disabled. Filtered again
+      // here because a disabled control is a statement about the form, not a guarantee.
+      const desired = apiOptions.filter(
+        (option) => option.credential && selectedProviders.has(option.provider.id),
+      );
+
+      // Only the rows this form could actually speak for. A destination whose credential is gone
+      // shows a disabled checkbox, which submits nothing, and a subscription must not be dropped
+      // because the control that represents it could not be ticked.
+      const answerable = new Set(apiOptions.filter((o) => o.credential).map((o) => o.provider.id));
 
       try {
         await Promise.all([
           ...current
-            .filter((grant) => !selectedProviders.has(grant.providerId))
+            .filter((grant) => answerable.has(grant.providerId) && !selectedProviders.has(grant.providerId))
             .map((grant) => deleteGrant.mutateAsync(grant.id)),
           ...desired.map(({ provider, credential }) => {
-            const existing = currentByProvider.get(provider!.id);
+            const existing = currentByProvider.get(provider.id);
             const grantInput = {
               applicationId,
-              providerId: provider!.id,
-              credentialId: credential.id,
+              providerId: provider.id,
+              credentialId: credential!.id,
               enabled: true,
               rateLimitPerMinute: existing?.rateLimitPerMinute ?? 0,
               rateLimitBurst: existing?.rateLimitBurst ?? 0,
             };
             if (!existing) return createGrant.mutateAsync(grantInput);
-            if (existing.credentialId !== credential.id || !existing.enabled) {
+            if (existing.credentialId !== credential!.id || !existing.enabled) {
               return updateGrant.mutateAsync({ id: existing.id, input: grantInput });
             }
             return Promise.resolve();
@@ -193,8 +223,11 @@ export function ApplicationsPage() {
     }
   }
 
+  // Registering a service is the flow that ends on a key, a call and a request that goes through, so
+  // it takes the whole window. The panel below still edits one: an edit answers one question and has
+  // no ending to arrive at.
   const newButton = (
-    <button className="btn btn-primary w-full sm:w-auto" onClick={() => setPanel('new')}>
+    <button className="btn btn-primary w-full sm:w-auto" onClick={() => setCreating(true)}>
       <Plus size={15} strokeWidth={2.25} />
       {t('applications.new')}
     </button>
@@ -286,7 +319,7 @@ export function ApplicationsPage() {
                 setIssuedKey(issued.apiKey);
               });
             const menu: RowAction[] = [
-              { key: 'edit', label: t('common.edit'), onSelect: () => setPanel(r) },
+              { key: 'edit', label: t('common.edit'), onSelect: () => open(r) },
               ...(stale
                 ? []
                 : [
@@ -375,27 +408,46 @@ export function ApplicationsPage() {
                 </p>
               ) : (
                 <div className="divide-y divide-line rounded-control border border-line bg-sunk px-3">
-                  {apiOptions.map(({ provider }) => {
-                    const checked = !!editing && (grants.data ?? []).some(
-                      (grant) => grant.applicationId === editing.id && grant.providerId === provider!.id,
-                    );
+                  {apiOptions.map(({ provider, credential }) => {
+                    const checked =
+                      justActivated.includes(provider.id) ||
+                      (!!editing &&
+                        (grants.data ?? []).some(
+                          (grant) => grant.applicationId === editing.id && grant.providerId === provider.id,
+                        ));
                     return (
-                      <label key={provider!.id} className="flex cursor-pointer items-start gap-3 py-3">
+                      <ApiRow
+                        key={provider.id}
+                        provider={provider}
+                        credential={credential}
+                        path={`/${provider.slug}/**`}
+                        activation={activation}
+                        // Activating an API here is only ever done to subscribe to it, so the tick is
+                        // not a second question. It stays a tick: the reader can still take it back.
+                        onActivated={({ id }) => setJustActivated((current) => [...current, id])}
+                      >
+                        {/* Keyed on the credential so the box is remounted when one appears: this
+                            form is the browser's, and a default cannot be changed after the fact. */}
                         <input
+                          key={credential?.id ?? 'none'}
                           type="checkbox"
                           name="apiProviderIds"
-                          value={provider!.id}
+                          value={provider.id}
                           defaultChecked={checked}
+                          disabled={!credential}
                           className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--c-accent)]"
                         />
-                        <span className="min-w-0">
-                          <span className="block text-sm">{provider!.name}</span>
-                          <span className="data mt-0.5 block truncate text-xs text-text-2">/{provider!.slug}/**</span>
-                        </span>
-                      </label>
+                      </ApiRow>
                     );
                   })}
                 </div>
+              )}
+              {/* An open API is activated on the click, with no field to report into, so its refusal
+                  is reported under the list it came from. */}
+              {activation.error && activation.activating === null && (
+                <p role="alert" className="mt-1.5 text-sm text-bad">
+                  {activation.error}
+                </p>
               )}
               <p className="mt-1.5 text-xs text-text-2">{t('applications.fieldApisHint')}</p>
             </fieldset>
@@ -451,6 +503,17 @@ export function ApplicationsPage() {
             </div>
           </div>
         </SidePanel>
+      )}
+      {creating && (
+        <ServiceFlow
+          onClose={() => setCreating(false)}
+          onHome={() => {
+            setCreating(false);
+            navigate({ page: 'dashboard' });
+          }}
+          // Raised from the list it writes to, which the flow's own queries have already refreshed.
+          onDone={() => setCreating(false)}
+        />
       )}
       {issuedKey && <KeyIssued value={issuedKey} onDismiss={() => setIssuedKey('')} />}
     </>

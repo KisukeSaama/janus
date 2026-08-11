@@ -3,8 +3,8 @@ import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { Menu, RefreshCw } from 'lucide-react';
 
 import { useApplications, useCredentials, useSignOut, type Identity } from '../api';
-import { PageSkeleton, Wordmark } from '../components';
-import { ConnectFlow } from '../features/connections/ConnectFlow';
+import { HomeLink, PageSkeleton } from '../components';
+import { ServiceFlow } from '../features/connections/ServiceFlow';
 import { NotificationsMenu } from '../features/notifications/NotificationsMenu';
 import { useMediaQuery, WIDE } from '../hooks/useMediaQuery';
 import { useI18n } from '../i18n';
@@ -124,7 +124,7 @@ export function Console({ identity }: { identity: Identity }) {
                 >
                   <Menu size={17} strokeWidth={2} />
                 </button>
-                <Wordmark />
+                <HomeLink onNavigate={() => go('dashboard')} />
               </>
             )}
 
@@ -159,7 +159,9 @@ export function Console({ identity }: { identity: Identity }) {
               ) : (
                 <DashboardPage
                   onOpen={(id) => navigate({ page: 'dashboard', id })}
-                  onConnect={() => (identity.role === 'USER' ? go('credentials') : setConnecting(true))}
+                  // Registering a service and subscribing it to the catalogue is open to everyone;
+                  // only writing the catalogue itself is not, and that button lives inside the flow.
+                  onConnect={() => setConnecting(true)}
                   onNavigate={go}
                 />
               ))}
@@ -174,13 +176,20 @@ export function Console({ identity }: { identity: Identity }) {
         </main>
       </div>
 
-      {connecting && identity.role !== 'USER' && (
+      {connecting && (
         <Suspense fallback={null}>
-          <ConnectFlow
+          <ServiceFlow
             onClose={() => setConnecting(false)}
+            // Closing the flow uncovers whichever page raised it; the wordmark goes home instead,
+            // which is the one exit that says where it leads before it is taken.
+            onHome={() => {
+              setConnecting(false);
+              go('dashboard');
+            }}
+            // What it wrote is one or more connections, and the list of those is the home page.
             onDone={() => {
               setConnecting(false);
-              navigate({ page: 'credentials' });
+              go('dashboard');
             }}
           />
         </Suspense>

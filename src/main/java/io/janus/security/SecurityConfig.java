@@ -26,6 +26,7 @@ import org.springframework.web.cors.*;
 import tools.jackson.databind.ObjectMapper;
 
 import io.janus.audit.AuditService;
+import io.janus.credentials.CredentialAuthorizationService;
 import io.janus.gateway.GatewayCorsConfigurationSource;
 import io.janus.shared.CorrelationIdFilter;
 
@@ -157,6 +158,13 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/admin/session")
                         .permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/admin/session")
+                        .permitAll()
+                        // Where a provider sends somebody back after they have agreed. A cross-site
+                        // navigation carries no session cookie — SameSite=strict is the point of
+                        // SameSite=strict — so this cannot be behind authentication and is not meant
+                        // to be: it is trusted on the single-use state it quotes, which was issued to
+                        // an authenticated operator minutes earlier and is bound to their account.
+                        .requestMatchers(HttpMethod.GET, CredentialAuthorizationService.CALLBACK_PATH)
                         .permitAll()
                         // Process-level operational series, tagged by provider slug, so they describe
                         // every owner's traffic at once. Nobody's registry is anybody else's to read,
