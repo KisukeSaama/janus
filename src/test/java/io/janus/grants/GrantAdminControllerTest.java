@@ -58,7 +58,7 @@ class GrantAdminControllerTest {
         credential = new Credential(provider, "billing-key", Credential.Strategy.of(AuthType.BEARER), null, true);
 
         when(applications.findOwnedBy(application.getId(), owner.getId())).thenReturn(Optional.of(application));
-        when(providers.findOwnedBy(provider.getId(), owner.getId())).thenReturn(Optional.of(provider));
+        when(providers.findById(provider.getId())).thenReturn(Optional.of(provider));
         when(credentials.findOwnedBy(credential.getId(), owner.getId())).thenReturn(Optional.of(credential));
     }
 
@@ -71,7 +71,7 @@ class GrantAdminControllerTest {
         var stranger = TestAccount.owner("stranger");
         var theirs = provider(stranger, "Their API", "theirs");
         var theirCredential = new Credential(theirs, "their-key", Credential.Strategy.of(AuthType.BEARER), null, true);
-        when(providers.findOwnedBy(theirs.getId(), owner.getId())).thenReturn(Optional.of(theirs));
+        when(providers.findById(theirs.getId())).thenReturn(Optional.of(theirs));
         when(credentials.findOwnedBy(theirCredential.getId(), owner.getId())).thenReturn(Optional.of(theirCredential));
 
         mvc.perform(post("/api/admin/grants")

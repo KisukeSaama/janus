@@ -9,6 +9,7 @@ import java.util.*;
 
 import org.junit.jupiter.api.*;
 import org.mockito.Mockito;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -27,8 +28,8 @@ import io.janus.shared.ApiExceptionHandler;
 /**
  * The registry of destinations, exercised through the surface an administrator actually uses.
  *
- * <p>Two rules carry most of the weight here: a destination belongs to somebody, and every write
- * has to reach the running gateway. A policy that takes effect in five minutes is not a policy.
+ * <p>Two rules carry most of the weight here: the catalogue is global, and every write has to reach
+ * the running gateway. A policy that takes effect in five minutes is not a policy.
  */
 class ProviderAdminControllerTest {
     private final ProviderRepository repository = Mockito.mock(ProviderRepository.class);
@@ -51,6 +52,7 @@ class ProviderAdminControllerTest {
         mvc = mvcValidatingWith(new DestinationValidator(true));
 
         when(scope.ownerFilter()).thenReturn(owner.getId());
+        when(scope.accountId()).thenReturn(owner.getId());
         when(accounts.getReferenceById(owner.getId())).thenReturn(owner);
         when(repository.save(any(Provider.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
@@ -65,7 +67,7 @@ class ProviderAdminControllerTest {
 
     private static String body(String name, String slug, String baseUrl) {
         return """
-               {"name":"%s","slug":"%s","baseUrl":"%s","enabled":true}"""
+               {"name":"%s","slug":"%s","baseUrl":"%s","enabled":true,"authType":"NONE"}"""
                 .formatted(name, slug, baseUrl);
     }
 
@@ -77,7 +79,7 @@ class ProviderAdminControllerTest {
                 "https://api.spotify.com",
                 true,
                 new Provider.TrafficPolicy(true, 0, 0, 0));
-        when(repository.findOwnedBy(provider.getId(), owner.getId())).thenReturn(Optional.of(provider));
+        when(repository.findById(provider.getId())).thenReturn(Optional.of(provider));
         return provider;
     }
 
@@ -94,10 +96,10 @@ class ProviderAdminControllerTest {
         verify(audit).recordAdmin(eq(AuditAction.PROVIDER_CREATED), any(), eq("spotify"));
     }
 
-    /** A slug is unique within its owner: two people each registering Spotify is the ordinary case. */
+    /** A slug identifies one shared catalogue entry across the deployment. */
     @Test
     void refusesASlugTheSamePersonAlreadyUses() throws Exception {
-        when(repository.existsBySlugAndOwnerId("spotify", owner.getId())).thenReturn(true);
+        when(repository.existsBySlug("spotify")).thenReturn(true);
 
         mvc.perform(post("/api/admin/providers")
                         .contentType("application/json")
@@ -177,7 +179,7 @@ class ProviderAdminControllerTest {
     @Test
     void anEditThatKeepsTheSameSlugIsNotAConflictWithItself() throws Exception {
         var provider = existing();
-        when(repository.existsBySlugAndOwnerId("spotify", owner.getId())).thenReturn(true);
+        when(repository.existsBySlug("spotify")).thenReturn(true);
 
         mvc.perform(put("/api/admin/providers/" + provider.getId())
                         .contentType("application/json")
@@ -188,7 +190,7 @@ class ProviderAdminControllerTest {
     @Test
     void refusesToRenameOntoASlugAlreadyInUse() throws Exception {
         var provider = existing();
-        when(repository.existsBySlugAndOwnerId("deezer", owner.getId())).thenReturn(true);
+        when(repository.existsBySlug("deezer")).thenReturn(true);
 
         mvc.perform(put("/api/admin/providers/" + provider.getId())
                         .contentType("application/json")
@@ -250,18 +252,21 @@ class ProviderAdminControllerTest {
                 .andExpect(jsonPath("$.purged").value(17));
     }
 
-    // --- whose destinations are visible --------------------------------------
+    // --- the shared catalogue -------------------------------------------------
 
     @Test
-    void listsOnlyTheDestinationsInTheCallersScope() throws Exception {
+    void listsTheSharedCatalogueAsAPage() throws Exception {
         var provider = existing();
-        when(repository.findAllOwnedBy(owner.getId())).thenReturn(List.of(provider));
+        when(repository.search(eq(""), any())).thenReturn(new PageImpl<>(List.of(provider)));
+        when(credentials.findActivatedProviderIds(owner.getId(), List.of(provider.getId())))
+                .thenReturn(Set.of(provider.getId()));
 
         mvc.perform(get("/api/admin/providers"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1));
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].activated").value(true));
 
-        verify(repository).findAllOwnedBy(owner.getId());
+        verify(repository).search(eq(""), any());
     }
 
     /**
@@ -271,7 +276,7 @@ class ProviderAdminControllerTest {
     @Test
     void somebodyElsesDestinationIsNotFoundRatherThanForbidden() throws Exception {
         var id = UUID.randomUUID();
-        when(repository.findOwnedBy(id, owner.getId())).thenReturn(Optional.empty());
+        when(repository.findById(id)).thenReturn(Optional.empty());
 
         mvc.perform(delete("/api/admin/providers/" + id)).andExpect(status().isNotFound());
         mvc.perform(put("/api/admin/providers/" + id)
@@ -287,7 +292,7 @@ class ProviderAdminControllerTest {
                                 .contentType("application/json")
                                 .content(
                                         """
-                                {"name":"Spotify","slug":"spotify","baseUrl":"https://api.spotify.com","enabled":true,"rateLimitBurst":10}"""))
+                                {"name":"Spotify","slug":"spotify","baseUrl":"https://api.spotify.com","enabled":true,"authType":"NONE","rateLimitBurst":10}"""))
                 .andExpect(status().isBadRequest());
         verify(repository, never()).save(any());
     }
@@ -307,7 +312,7 @@ class ProviderAdminControllerTest {
                                 .contentType("application/json")
                                 .content(
                                         """
-                                {"name":"Spotify","slug":"spotify","baseUrl":"https://api.spotify.com","enabled":true,"rateLimitPerMinute":600,"rateLimitBurst":60}"""))
+                                {"name":"Spotify","slug":"spotify","baseUrl":"https://api.spotify.com","enabled":true,"authType":"NONE","rateLimitPerMinute":600,"rateLimitBurst":60}"""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.rateLimitBurst").value(60));
     }

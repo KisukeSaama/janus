@@ -54,7 +54,8 @@ class CredentialServiceTest {
                 scope,
                 audit);
         when(scope.ownerFilter()).thenReturn(owner.getId());
-        when(providers.findOwnedBy(provider.getId(), owner.getId())).thenReturn(Optional.of(provider));
+        when(scope.accountId()).thenReturn(owner.getId());
+        when(providers.findById(provider.getId())).thenReturn(Optional.of(provider));
         when(repository.save(any(Credential.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
@@ -64,6 +65,7 @@ class CredentialServiceTest {
     }
 
     private Credential existing(AuthType authType) {
+        provider.applyAuth(new Provider.Auth(authType, null, null, null, null, null));
         var credential = new Credential(provider, "pokeapi", Credential.Strategy.of(authType), null, true);
         when(repository.findOwnedBy(credential.getId(), owner.getId())).thenReturn(Optional.of(credential));
         return credential;
@@ -81,32 +83,36 @@ class CredentialServiceTest {
 
     @Test
     void everyOtherStrategyStillRefusesToBeCreatedWithoutItsValue() {
+        provider.applyAuth(new Provider.Auth(AuthType.BEARER, null, null, null, null, null));
         assertThatThrownBy(() -> service.create(request(AuthType.BEARER, null)))
                 .isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(openBao);
     }
 
-    /** Nothing was ever stored at this path, so the edit that starts presenting something must say what. */
+    /** The API contract, not a user's credential payload, decides how authentication is presented. */
     @Test
-    void givingAnOpenApiAStrategyNeedsTheValueItWillPresent() {
+    void aCredentialRequestCannotChangeTheApisStrategy() {
         var credential = existing(AuthType.NONE);
 
-        assertThatThrownBy(() -> service.update(credential.getId(), request(AuthType.BEARER, null)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Secret is required");
+        var response = service.update(credential.getId(), request(AuthType.BEARER, null));
 
-        assertThatNoException()
-                .isThrownBy(() -> service.update(credential.getId(), request(AuthType.BEARER, "sk_live_31337")));
-        verify(openBao).write(credential.getSecretPath(), "sk_live_31337");
+        assertThat(response.authType()).isEqualTo(AuthType.NONE);
+        verifyNoInteractions(openBao);
     }
 
-    /** The other crossing: what nothing will read again is destroyed, not left behind in OpenBao. */
+    /** An administrator changing the contract disables the activation until a new value is supplied. */
     @Test
-    void takingTheStrategyAwayDestroysTheValueNothingWillReadAgain() {
-        var credential = existing(AuthType.BEARER);
+    void anAuthenticationChangeRequiresReprovisioning() {
+        var credential = existing(AuthType.NONE);
+        provider.applyAuth(new Provider.Auth(AuthType.BEARER, null, null, null, null, null));
+        credential.adoptProviderStrategy(AuthType.NONE);
 
-        service.update(credential.getId(), request(AuthType.NONE, null));
-        verify(secretDeletions).enqueue(credential.getSecretPath());
+        assertThatThrownBy(() -> service.update(credential.getId(), request(AuthType.NONE, null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("New credentials are required");
+
+        service.update(credential.getId(), request(AuthType.NONE, "sk_live_31337"));
+        verify(openBao).write(credential.getSecretPath(), "sk_live_31337");
     }
 
     @Test
