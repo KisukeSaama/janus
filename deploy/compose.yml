@@ -81,7 +81,7 @@ services:
       - no-new-privileges:true
 
   openbao-dev:
-    image: openbao/openbao:2.3
+    image: openbao/openbao:2.6
     profiles: [dev]
     entrypoint: ["/usr/bin/dumb-init", "--", "/bin/sh", "-ec"]
     command:
@@ -105,8 +105,10 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # Static seal auto-unseal landed in OpenBao 2.4.0; on 2.3 the seal stanza is rejected
+  # outright and the container will not start.
   openbao-prod:
-    image: openbao/openbao:2.3
+    image: openbao/openbao:2.6
     profiles: [prod]
     command: server
     environment:
@@ -116,16 +118,42 @@ services:
     volumes:
       - ./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
       - ${DATA_DIR}/${DEPLOY_ENV}/openbao:/openbao/file
+    secrets:
+      - openbao_seal_key
     networks:
       application:
         aliases:
           - openbao
+    # Exit 2 also covers "not initialised", which is where a brand new volume starts and
+    # openbao-init is what leaves. Sealed is no longer reachable once the seal key is in
+    # place, so this no longer hides a broken deploy.
     healthcheck:
       test: ["CMD-SHELL", "bao status >/dev/null 2>&1 || [ $$? -eq 2 ]"]
       interval: 10s
       timeout: 5s
       retries: 30
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  # Not in the prod profile: the deploy job runs it explicitly so its exit code decides
+  # whether the rollout succeeded, instead of a one-shot container failing quietly
+  # alongside the long-running ones.
+  openbao-init:
+    image: openbao/openbao:2.6
+    profiles: [bootstrap]
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/etc/openbao/bootstrap.sh"]
+    environment:
+      BAO_ADDR: http://openbao:8200
+    volumes:
+      - ./openbao/bootstrap.sh:/etc/openbao/bootstrap.sh:ro
+      - ${DATA_DIR}/${DEPLOY_ENV}/openbao-bootstrap:/bootstrap
+    secrets:
+      - openbao_token
+    networks:
+      - application
+    restart: "no"
     security_opt:
       - no-new-privileges:true
 
@@ -142,5 +170,7 @@ secrets:
     file: ./.secrets/postgres_password
   openbao_token:
     file: ./.secrets/openbao_token
+  openbao_seal_key:
+    file: ./.secrets/openbao_seal_key
   admin_password:
     file: ./.secrets/admin_password
