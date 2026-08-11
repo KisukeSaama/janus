@@ -55,7 +55,7 @@ Every item below was fixed in this milestone. Severity is stated in terms of thi
   throttled per client, and every rejection is audited.
 - **A placeholder administrator password was accepted in production.** A production profile now
   refuses to start on a known placeholder, a value under 8 characters, one that does not span upper
-  case, lower case, digits and special characters, or a password equal to the username.
+  case, lower case and digits, or a password equal to the username.
 
 ### High
 

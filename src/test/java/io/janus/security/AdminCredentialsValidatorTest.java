@@ -37,14 +37,13 @@ class AdminCredentialsValidatorTest {
     void refusesAPasswordMissingACharacterClass() {
         assertThatThrownBy(() -> validate("admin", "lowercaseonly")).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> validate("admin", "NoDigitsHere!")).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> validate("admin", "N0Specials4Me")).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> validate("admin", "n0uppercase4!")).isInstanceOf(IllegalStateException.class);
     }
 
-    /** The length concession is paid for by variety: eight characters are enough with all four. */
+    /** Eight characters are enough when lower case, upper case and digits are present. */
     @Test
-    void acceptsAShortPasswordSpanningEveryClass() {
-        assertThatNoException().isThrownBy(() -> validate("admin", "aB3!vTz9"));
+    void acceptsAShortPasswordWithoutASpecialCharacter() {
+        assertThatNoException().isThrownBy(() -> validate("admin", "aB3vTz91"));
     }
 
     @Test

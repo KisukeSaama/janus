@@ -648,7 +648,7 @@ export const fr: Translated<Dictionary> = {
     fieldPassword: 'Mot de passe',
     replacementPassword: 'Nouveau mot de passe',
     replacementPlaceholder: 'Vide pour conserver l\u2019actuel',
-    passwordHint: 'Au moins 8 caract\u00e8res, avec majuscule, minuscule, chiffre et caract\u00e8re sp\u00e9cial. Conserv\u00e9 sous forme d\u2019empreinte.',
+    passwordHint: 'Au moins 8 caract\u00e8res, avec majuscule, minuscule et chiffre. Conserv\u00e9 sous forme d\u2019empreinte.',
     activeLabel: 'Actif',
     activeHint: 'Un compte d\u00e9sactiv\u00e9 ne peut plus se connecter. Ses enregistrements continuent.',
     submit: 'Cr\u00e9er le compte',

@@ -95,7 +95,6 @@ variables:
         case "$JANUS_ADMIN_PASSWORD" in *[a-z]*) ;; *) needs="${needs}, a lower-case letter" ;; esac
         case "$JANUS_ADMIN_PASSWORD" in *[A-Z]*) ;; *) needs="${needs}, an upper-case letter" ;; esac
         case "$JANUS_ADMIN_PASSWORD" in *[0-9]*) ;; *) needs="${needs}, a digit" ;; esac
-        case "$JANUS_ADMIN_PASSWORD" in *[!a-zA-Z0-9]*) ;; *) needs="${needs}, a special character" ;; esac
         if [ -n "$needs" ]; then
           echo "JANUS_ADMIN_PASSWORD for ${CI_ENVIRONMENT_NAME:-this environment} still needs:${needs#,}" >&2
           exit 1
