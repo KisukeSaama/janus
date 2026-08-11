@@ -5,8 +5,6 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import io.janus.accounts.AccessScope;
 import io.janus.audit.AuditAction;
@@ -14,6 +12,7 @@ import io.janus.audit.AuditService;
 import io.janus.gateway.TrafficPolicyRegistry;
 import io.janus.grants.GrantRepository;
 import io.janus.openbao.OpenBaoClient;
+import io.janus.openbao.SecretDeletionQueue;
 import io.janus.providers.DestinationValidator;
 import io.janus.providers.Provider;
 import io.janus.providers.ProviderRepository;
@@ -29,6 +28,7 @@ public class CredentialService {
     private final ProviderRepository providers;
     private final GrantRepository grants;
     private final OpenBaoClient openBao;
+    private final SecretDeletionQueue secretDeletions;
     private final TrafficPolicyRegistry traffic;
     private final DestinationValidator destinations;
     private final AccessScope scope;
@@ -39,6 +39,7 @@ public class CredentialService {
             ProviderRepository providers,
             GrantRepository grants,
             OpenBaoClient openBao,
+            SecretDeletionQueue secretDeletions,
             TrafficPolicyRegistry traffic,
             DestinationValidator destinations,
             AccessScope scope,
@@ -47,6 +48,7 @@ public class CredentialService {
         this.providers = providers;
         this.grants = grants;
         this.openBao = openBao;
+        this.secretDeletions = secretDeletions;
         this.traffic = traffic;
         this.destinations = destinations;
         this.scope = scope;
@@ -97,7 +99,7 @@ public class CredentialService {
         // Crossing the other way leaves a value nothing will ever read again. It is destroyed for the
         // same reason a deleted credential's is: a secret Janus no longer uses is a secret Janus has
         // no business keeping.
-        if (abandonsSecret) destroyAfterCommit(credential.getSecretPath());
+        if (abandonsSecret) secretDeletions.enqueue(credential.getSecretPath());
         // Stored responses are addressed by credential. A rotated secret can mean a different
         // identity upstream, so nothing fetched with the old one may be served after it.
         traffic.forgetCredential(id);
@@ -118,21 +120,8 @@ public class CredentialService {
         boolean stored = !credential.getAuthType().anonymous();
         repository.delete(credential);
         traffic.forgetCredential(id);
-        if (stored) destroyAfterCommit(secretPath);
+        if (stored) secretDeletions.enqueue(secretPath);
         audit.recordAdmin(AuditAction.CREDENTIAL_DELETED, providerId, id.toString());
-    }
-
-    /**
-     * Destroys a stored value once the metadata that pointed at it is durably gone. Never before: an
-     * orphaned OpenBao entry is recoverable, a credential row pointing at a destroyed secret is not.
-     */
-    private void destroyAfterCommit(String secretPath) {
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                openBao.delete(secretPath);
-            }
-        });
     }
 
     /**

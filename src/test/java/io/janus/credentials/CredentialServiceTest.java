@@ -8,13 +8,13 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.*;
 import org.mockito.Mockito;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import io.janus.accounts.*;
 import io.janus.audit.AuditService;
 import io.janus.gateway.TrafficPolicyRegistry;
 import io.janus.grants.GrantRepository;
 import io.janus.openbao.OpenBaoClient;
+import io.janus.openbao.SecretDeletionQueue;
 import io.janus.providers.*;
 
 /**
@@ -30,6 +30,7 @@ class CredentialServiceTest {
     private final ProviderRepository providers = Mockito.mock(ProviderRepository.class);
     private final GrantRepository grants = Mockito.mock(GrantRepository.class);
     private final OpenBaoClient openBao = Mockito.mock(OpenBaoClient.class);
+    private final SecretDeletionQueue secretDeletions = Mockito.mock(SecretDeletionQueue.class);
     private final TrafficPolicyRegistry traffic = Mockito.mock(TrafficPolicyRegistry.class);
     private final AccessScope scope = Mockito.mock(AccessScope.class);
     private final AuditService audit = Mockito.mock(AuditService.class);
@@ -43,22 +44,18 @@ class CredentialServiceTest {
     @BeforeEach
     void setUp() {
         service = new CredentialService(
-                repository, providers, grants, openBao, traffic, new DestinationValidator(false), scope, audit);
+                repository,
+                providers,
+                grants,
+                openBao,
+                secretDeletions,
+                traffic,
+                new DestinationValidator(false),
+                scope,
+                audit);
         when(scope.ownerFilter()).thenReturn(owner.getId());
         when(providers.findOwnedBy(provider.getId(), owner.getId())).thenReturn(Optional.of(provider));
         when(repository.save(any(Credential.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        // The service defers destruction to after the commit; nothing here runs in a transaction, so
-        // the synchronizations it registers are collected by hand and run by runCommit below.
-        TransactionSynchronizationManager.initSynchronization();
-    }
-
-    @AfterEach
-    void tearDown() {
-        TransactionSynchronizationManager.clearSynchronization();
-    }
-
-    private static void runCommit() {
-        TransactionSynchronizationManager.getSynchronizations().forEach(sync -> sync.afterCommit());
     }
 
     private CredentialRequest request(AuthType authType, String secret) {
@@ -109,10 +106,7 @@ class CredentialServiceTest {
         var credential = existing(AuthType.BEARER);
 
         service.update(credential.getId(), request(AuthType.NONE, null));
-        verify(openBao, never()).delete(any());
-
-        runCommit();
-        verify(openBao).delete(credential.getSecretPath());
+        verify(secretDeletions).enqueue(credential.getSecretPath());
     }
 
     @Test
@@ -120,9 +114,19 @@ class CredentialServiceTest {
         var credential = existing(AuthType.NONE);
 
         service.delete(credential.getId());
-        runCommit();
 
         verify(repository).delete(credential);
         verifyNoInteractions(openBao);
+        verifyNoInteractions(secretDeletions);
+    }
+
+    @Test
+    void deletingAStoredCredentialQueuesItsValueForDestruction() {
+        var credential = existing(AuthType.BEARER);
+
+        service.delete(credential.getId());
+
+        verify(repository).delete(credential);
+        verify(secretDeletions).enqueue(credential.getSecretPath());
     }
 }

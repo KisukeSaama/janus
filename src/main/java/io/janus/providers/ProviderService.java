@@ -5,8 +5,6 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import io.janus.accounts.AccessScope;
 import io.janus.accounts.AccountRepository;
@@ -15,7 +13,7 @@ import io.janus.audit.AuditService;
 import io.janus.credentials.CredentialRepository;
 import io.janus.gateway.TrafficPolicyRegistry;
 import io.janus.grants.GrantRepository;
-import io.janus.openbao.OpenBaoClient;
+import io.janus.openbao.SecretDeletionQueue;
 import io.janus.shared.NotFoundException;
 
 /**
@@ -30,7 +28,7 @@ public class ProviderService {
     private final ProviderRepository repository;
     private final CredentialRepository credentials;
     private final GrantRepository grants;
-    private final OpenBaoClient openBao;
+    private final SecretDeletionQueue secretDeletions;
     private final DestinationValidator destinations;
     private final TrafficPolicyRegistry traffic;
     private final AccountRepository accounts;
@@ -41,7 +39,7 @@ public class ProviderService {
             ProviderRepository repository,
             CredentialRepository credentials,
             GrantRepository grants,
-            OpenBaoClient openBao,
+            SecretDeletionQueue secretDeletions,
             DestinationValidator destinations,
             TrafficPolicyRegistry traffic,
             AccountRepository accounts,
@@ -50,7 +48,7 @@ public class ProviderService {
         this.repository = repository;
         this.credentials = credentials;
         this.grants = grants;
-        this.openBao = openBao;
+        this.secretDeletions = secretDeletions;
         this.destinations = destinations;
         this.traffic = traffic;
         this.accounts = accounts;
@@ -117,19 +115,8 @@ public class ProviderService {
 
         repository.delete(provider);
         traffic.forgetProvider(id);
-        destroyAfterCommit(storedPaths);
+        secretDeletions.enqueueAll(storedPaths);
         audit.recordAdmin(AuditAction.PROVIDER_DELETED, id, provider.getSlug());
-    }
-
-    /** OpenBao changes only after PostgreSQL accepted the whole aggregate deletion. */
-    private void destroyAfterCommit(List<String> secretPaths) {
-        if (secretPaths.isEmpty()) return;
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                for (String path : secretPaths) openBao.delete(path);
-            }
-        });
     }
 
     /** Drops every response Janus is holding for this destination, without changing its policy. */

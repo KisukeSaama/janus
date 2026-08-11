@@ -161,18 +161,6 @@
     scrollbar-color: var(--c-line-strong) transparent;
   }
 
-  /*
-   * On the wide shell, reserve the gutter so centred content does not shift between destinations.
-   * Below the rail breakpoint that reservation leaves an empty native strip beside the full-width
-   * top bar on short pages. Compact layouts therefore use the whole viewport and let the platform
-   * scrollbar occupy space only when there is something to scroll.
-   */
-  @media (min-width: 60rem) {
-    html {
-      scrollbar-gutter: stable;
-    }
-  }
-
   body {
     margin: 0;
     min-width: 320px;

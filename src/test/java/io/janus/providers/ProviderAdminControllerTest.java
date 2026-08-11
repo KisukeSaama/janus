@@ -21,7 +21,7 @@ import io.janus.audit.AuditService;
 import io.janus.credentials.CredentialRepository;
 import io.janus.gateway.TrafficPolicyRegistry;
 import io.janus.grants.GrantRepository;
-import io.janus.openbao.OpenBaoClient;
+import io.janus.openbao.SecretDeletionQueue;
 import io.janus.shared.ApiExceptionHandler;
 
 /**
@@ -34,7 +34,7 @@ class ProviderAdminControllerTest {
     private final ProviderRepository repository = Mockito.mock(ProviderRepository.class);
     private final CredentialRepository credentials = Mockito.mock(CredentialRepository.class);
     private final GrantRepository grants = Mockito.mock(GrantRepository.class);
-    private final OpenBaoClient openBao = Mockito.mock(OpenBaoClient.class);
+    private final SecretDeletionQueue secretDeletions = Mockito.mock(SecretDeletionQueue.class);
     private final TrafficPolicyRegistry traffic = Mockito.mock(TrafficPolicyRegistry.class);
     private final AccountRepository accounts = Mockito.mock(AccountRepository.class);
     private final AccessScope scope = Mockito.mock(AccessScope.class);
@@ -57,7 +57,7 @@ class ProviderAdminControllerTest {
 
     private MockMvc mvcValidatingWith(DestinationValidator destinations) {
         var service = new ProviderService(
-                repository, credentials, grants, openBao, destinations, traffic, accounts, scope, audit);
+                repository, credentials, grants, secretDeletions, destinations, traffic, accounts, scope, audit);
         return MockMvcBuilders.standaloneSetup(new ProviderAdminController(service))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
@@ -223,6 +223,21 @@ class ProviderAdminControllerTest {
         verify(grants).deleteAllInBatch(List.of(grant));
         verify(credentials).deleteAllInBatch(List.of(credential));
         verify(repository).delete(provider);
+    }
+
+    /** The durable cleanup request is committed with the metadata deletion. */
+    @Test
+    void queuesStoredValuesForDestructionWhenRemovingAnApi() throws Exception {
+        var provider = existing();
+        var credential = Mockito.mock(io.janus.credentials.Credential.class);
+        when(credential.getId()).thenReturn(UUID.randomUUID());
+        when(credential.getAuthType()).thenReturn(io.janus.credentials.AuthType.BEARER);
+        when(credential.getSecretPath()).thenReturn("janus/tmdb/credential");
+        when(credentials.findAllByProviderId(provider.getId())).thenReturn(List.of(credential));
+
+        mvc.perform(delete("/api/admin/providers/" + provider.getId())).andExpect(status().isOk());
+
+        verify(secretDeletions).enqueueAll(List.of("janus/tmdb/credential"));
     }
 
     @Test
