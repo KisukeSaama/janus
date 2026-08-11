@@ -86,15 +86,12 @@ variables:
         : "${JANUS_ADMIN_PASSWORD:?Set JANUS_ADMIN_PASSWORD for ${CI_ENVIRONMENT_NAME:-this environment}}"
         : "${JANUS_OPENBAO_TOKEN:?Set JANUS_OPENBAO_TOKEN for ${CI_ENVIRONMENT_NAME:-this environment}}"
 
-        # DEV throws its vault away on every restart. PROD keeps file storage, which starts
-        # sealed and would need someone on the server to unseal it by hand after every
-        # restart; this key is what lets it come back on its own.
-        if [ "${DEPLOY_ENV}" = prod ]; then
-          : "${JANUS_OPENBAO_SEAL_KEY:?Set JANUS_OPENBAO_SEAL_KEY for ${CI_ENVIRONMENT_NAME:-this environment}: openssl rand -base64 32}"
-          if [ "$(printf '%s' "${JANUS_OPENBAO_SEAL_KEY}" | base64 -d 2>/dev/null | wc -c)" -ne 32 ]; then
-            echo "JANUS_OPENBAO_SEAL_KEY must be 32 random bytes in base64: openssl rand -base64 32" >&2
-            exit 1
-          fi
+        # Both environments keep file-backed OpenBao storage. The seal key lets the vault return
+        # after a container or host restart without a manual unseal.
+        : "${JANUS_OPENBAO_SEAL_KEY:?Set JANUS_OPENBAO_SEAL_KEY for ${CI_ENVIRONMENT_NAME:-this environment}: openssl rand -base64 32}"
+        if [ "$(printf '%s' "${JANUS_OPENBAO_SEAL_KEY}" | base64 -d 2>/dev/null | wc -c)" -ne 32 ]; then
+          echo "JANUS_OPENBAO_SEAL_KEY must be 32 random bytes in base64: openssl rand -base64 32" >&2
+          exit 1
         fi
 
         # Deployed instances run the production profile, whose PasswordPolicy refuses a weak
@@ -128,9 +125,7 @@ variables:
         (umask 077; printf '%s' "${JANUS_POSTGRES_PASSWORD}" > "${target}/.secrets/postgres_password")
         (umask 077; printf '%s' "${JANUS_ADMIN_PASSWORD}" > "${target}/.secrets/admin_password")
         (umask 077; printf '%s' "${JANUS_OPENBAO_TOKEN}" > "${target}/.secrets/openbao_token")
-        # Empty under DEV, whose OpenBao runs in -dev mode and never reads it. Written
-        # anyway so the path a top-level secret points at exists under either profile.
-        (umask 077; printf '%s' "${JANUS_OPENBAO_SEAL_KEY:-}" > "${target}/.secrets/openbao_seal_key")
+        (umask 077; printf '%s' "${JANUS_OPENBAO_SEAL_KEY}" > "${target}/.secrets/openbao_seal_key")
       }
 
       stage_on_host() {
@@ -181,11 +176,10 @@ variables:
       # start": why it failed is in the container's own log, on a host the runner
       # cannot open a shell on. Print it here, or every failure costs a trip to the
       # server before anyone even knows which service refused to come up.
-      # PROD's vault is persistent and starts knowing nothing: no KV mount, no policy, and
+      # A fresh persistent vault starts knowing nothing: no KV mount, no policy, and
       # no idea about the token the backend was handed. Reconciling on every deploy is what
       # makes a fresh server work on the first pipeline; it is a no-op once it matches.
       bootstrap_openbao() {
-        [ "${DEPLOY_ENV}" = prod ] || return 0
         compose --profile bootstrap run --rm openbao-init
       }
 
