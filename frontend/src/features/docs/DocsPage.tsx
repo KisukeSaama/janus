@@ -34,7 +34,7 @@ import {
 const SECTIONS = ['flow', 'need', 'first', 'code', 'call', 'token', 'handled', 'fail', 'sound'] as const;
 type Section = (typeof SECTIONS)[number];
 
-export function DocsPage({ username }: { username: string }) {
+export function DocsPage() {
   const { t } = useI18n();
 
   // The same four queries every other page reads, so the guide costs no request of its own.
@@ -57,14 +57,13 @@ export function DocsPage({ username }: { username: string }) {
   const ctx: SampleContext = connection?.provider
     ? {
         origin: window.location.origin,
-        username,
         slug: connection.provider.slug,
         applicationId: connection.grant.applicationId,
         // Any path reaches the destination, so the examples keep the placeholder rather than pretend
         // to know which one this API answers on.
         path: PLACEHOLDER.path,
       }
-    : { ...PLACEHOLDER, username };
+    : PLACEHOLDER;
 
   const active = useActiveSection();
 
@@ -138,7 +137,7 @@ export function DocsPage({ username }: { username: string }) {
                 items={[
                   {
                     term: t('docs.call.pathTerm'),
-                    note: t('docs.call.pathNote', { gateway: `/${ctx.username}/gateway/${ctx.slug}` }),
+                    note: t('docs.call.pathNote', { gateway: `/gateway/${ctx.slug}` }),
                   },
                   { term: t('docs.call.reachTerm'), note: t('docs.call.reachNote') },
                   { term: t('docs.call.methodTerm'), note: t('docs.call.methodNote') },
@@ -309,7 +308,7 @@ function Tabs({ ctx }: { ctx: SampleContext }) {
             key={s.id}
             onClick={() => setChosen(s.id)}
             aria-pressed={s.id === sample.id}
-            className={`stamp flex min-h-7 shrink-0 items-center justify-center rounded-[3px] px-2.5 transition-colors duration-150 pointer-coarse:min-h-9 ${
+            className={`stamp flex min-h-7 shrink-0 items-center justify-center rounded-[3px] px-2.5 transition-colors pointer-coarse:min-h-9 ${
               s.id === sample.id ? 'bg-accent text-on-accent' : 'text-text-2 hover:bg-sunk hover:text-text'
             }`}
           >
@@ -340,7 +339,7 @@ function Contents({ active }: { active: Section }) {
             <a
               href={`#${anchor(id)}`}
               aria-current={id === active ? 'location' : undefined}
-              className={`-ml-px block border-l py-1 pl-3 text-sm transition-colors duration-150 ${
+              className={`-ml-px block border-l py-1 pl-3 text-sm transition-colors ${
                 id === active
                   ? 'border-accent text-accent-text'
                   : 'border-transparent text-text-2 hover:border-line-strong hover:text-text'

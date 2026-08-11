@@ -67,12 +67,11 @@ public abstract class IntegrationTest {
     static void janusProperties(DynamicPropertyRegistry registry) {
         registry.add("janus.openbao.address", () -> "http://127.0.0.1:1");
         registry.add("janus.openbao.token", () -> "test-token");
-        registry.add("janus.admin.username", () -> "root");
         registry.add("janus.admin.password", () -> ADMIN_PASSWORD);
-        registry.add("janus.admin.email", () -> "root@example.com");
+        registry.add("janus.admin.email", () -> "kisuke@example.com");
     }
 
-    protected static final String ADMIN_USERNAME = "root";
+    protected static final String ADMIN_USERNAME = "kisuke";
     protected static final String ADMIN_PASSWORD = "7Qb!vTz2LmXe4RpA9dWf";
 
     /**

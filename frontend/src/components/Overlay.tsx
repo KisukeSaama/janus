@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, type ReactNode, type RefObject } from 'react';
-import { Check, Copy, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { AlertTriangle, Check, Copy, X } from 'lucide-react';
 
 import { useI18n } from '../i18n';
 import { useCopy } from '../hooks/useCopy';
@@ -23,14 +24,6 @@ function useDismissable(onClose: () => void, ref: RefObject<HTMLElement | null>,
     };
   }, [onClose, ref, autofocus]);
 }
-
-/**
- * A surface that takes the whole window for the length of one task.
- *
- * Setting up the first connection is not an edit beside the console, it is the reason the console
- * exists, and a 480px rail is the wrong shape for a decision taken in three steps. Everything else
- * still goes in the side panel: this is reserved for the flow that has a beginning and an end.
- */
 
 /**
  * A surface that takes the whole window for the length of one task.
@@ -91,8 +84,6 @@ export function Sheet({
 }
 
 /** A right-hand panel on wide screens, a bottom sheet on a phone. */
-
-/** A right-hand panel on wide screens, a bottom sheet on a phone. */
 export function SidePanel({
   title,
   intro,
@@ -113,7 +104,7 @@ export function SidePanel({
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-end justify-center bg-[var(--c-scrim)] [animation:fade-in_160ms_var(--ease-out-quint)] lg:items-stretch lg:justify-end"
+      className="fixed inset-0 z-40 flex items-end justify-center bg-scrim [animation:fade-in_160ms_var(--ease-out-quint)] lg:items-stretch lg:justify-end"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -123,7 +114,7 @@ export function SidePanel({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex max-h-[92svh] w-full flex-col rounded-t-[10px] border border-line bg-surface shadow-overlay [animation:slide-in-y_240ms_var(--ease-out-quint)] lg:max-h-none lg:h-full lg:max-w-[31rem] lg:rounded-none lg:border-y-0 lg:border-r-0 lg:[animation:slide-in-x_220ms_var(--ease-out-quint)]"
+        className="flex max-h-[92svh] w-full flex-col rounded-t-[10px] border border-line bg-surface shadow-overlay [animation:slide-in-y_240ms_var(--ease-out-quint)] lg:max-h-none lg:h-full lg:max-w-[30rem] lg:rounded-none lg:border-y-0 lg:border-r-0 lg:[animation:slide-in-x_220ms_var(--ease-out-quint)]"
       >
         <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4 md:px-6">
           <div>
@@ -147,6 +138,133 @@ export function SidePanel({
   );
 }
 
+/**
+ * The stop before a write nobody can take back.
+ *
+ * It takes the middle of the window and dims what is behind it, because the console would rather
+ * interrupt a reader than let a key, a credential, or an entire catalogue entry go on a click that
+ * landed where the eye had not arrived yet. What it asks for is the whole of it: what is about to
+ * happen, to which record, and what will be true afterwards.
+ *
+ * Two details are the point rather than the frame. A destructive dialog opens with the focus on the
+ * way out, so the key that dismisses it and the key that fires it are never the same one. And the
+ * surface is locked while the request is in flight: a confirmation dismissed mid-write leaves the
+ * reader with no idea whether the write happened.
+ *
+ * Portalled, because these are opened from inside table cells that clip and scroll their own
+ * overflow, and a dialog is not part of the row that raised it.
+ */
+export function ConfirmDialog({
+  title,
+  description,
+  confirm,
+  pending,
+  destructive = false,
+  busy,
+  returnFocus,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  description: string;
+  confirm: string;
+  pending: string;
+  destructive?: boolean;
+  busy: boolean;
+  /** Where focus belongs afterwards, read on the way out, for when the opener is already gone. */
+  returnFocus?: () => HTMLElement | null | undefined;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useI18n();
+  const dialogRef = useRef<HTMLElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
+  useFocusTrap(dialogRef);
+
+  // Held in refs: the surface is mounted once and torn down once, and nothing about a keystroke or
+  // a request in flight should be able to re-run either.
+  const dismiss = useRef(onCancel);
+  dismiss.current = onCancel;
+  const locked = useRef(busy);
+  locked.current = busy;
+  const returnTo = useRef(returnFocus);
+  returnTo.current = returnFocus;
+
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !locked.current) dismiss.current();
+    };
+    document.addEventListener('keydown', onKey);
+    // Restored rather than cleared: this dialog can be raised from inside a sheet that is holding
+    // the page still itself, and clearing would hand the scrollbar back under an open surface.
+    const scroll = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = scroll;
+      (returnTo.current?.() ?? opener)?.focus?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    (destructive ? cancelRef : confirmRef).current?.focus();
+  }, [destructive]);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-scrim p-4 [animation:fade-in_160ms_var(--ease-out-quint)]"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget && !busy) onCancel();
+      }}
+    >
+      <section
+        ref={dialogRef}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        className="w-full max-w-[27rem] rounded-panel border border-line bg-surface shadow-overlay [animation:slide-in-y_220ms_var(--ease-out-quint)]"
+      >
+        <div className="flex items-start gap-3.5 px-5 pb-5 pt-5">
+          <span
+            className={`grid h-9 w-9 shrink-0 place-items-center rounded-control ${
+              destructive ? 'bg-bad-wash text-bad' : 'bg-warn-wash text-warn'
+            }`}
+          >
+            <AlertTriangle size={18} aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <h2 id={titleId} className="text-lg font-semibold tracking-title">
+              {title}
+            </h2>
+            <p id={descriptionId} className="mt-1.5 max-w-[46ch] text-sm leading-6 text-text-2">
+              {description}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-col-reverse gap-2 border-t border-line px-5 py-4 sm:flex-row sm:justify-end">
+          <button ref={cancelRef} className="btn btn-secondary" disabled={busy} onClick={onCancel}>
+            {t('common.cancel')}
+          </button>
+          <button
+            ref={confirmRef}
+            className={`btn ${destructive ? 'btn-destructive' : 'btn-primary'}`}
+            disabled={busy}
+            onClick={onConfirm}
+          >
+            {busy ? pending : confirm}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 export function KeyIssued({ value, onDismiss }: { value: string; onDismiss: () => void }) {
   const { t } = useI18n();
   const [copied, copy] = useCopy();
@@ -156,8 +274,19 @@ export function KeyIssued({ value, onDismiss }: { value: string; onDismiss: () =
   useFocusTrap(dialogRef);
   useEffect(() => copyRef.current?.focus(), []);
 
+  // Held still like every other overlay, and restored rather than cleared: this is raised from a
+  // panel that is already holding the page, and clearing would hand the scrollbar back under it.
+  // No Escape here on purpose — the value is shown once, and the way out is the button that says so.
+  useEffect(() => {
+    const scroll = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = scroll;
+    };
+  }, []);
+
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-[var(--c-scrim)] p-4 [animation:fade-in_160ms_var(--ease-out-quint)]">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-scrim p-4 [animation:fade-in_160ms_var(--ease-out-quint)]">
       <section
         ref={dialogRef}
         role="alertdialog"

@@ -61,7 +61,8 @@ class SchemaIT extends IntegrationTest {
                         "grants",
                         "audit_events",
                         "notifications",
-                        "application_refresh_tokens");
+                        "application_refresh_tokens",
+                        "pending_secret_deletions");
     }
 
     /**
@@ -83,7 +84,11 @@ class SchemaIT extends IntegrationTest {
                 jdbc().queryForList("select conname from pg_constraint where contype in ('u','p')", String.class);
 
         assertThat(constraints)
-                .contains("uq_provider_owner_slug", "uq_application_owner_name", "uq_grant_app_provider");
+                .contains(
+                        "uq_provider_slug",
+                        "uq_credential_owner_provider",
+                        "uq_application_owner_name",
+                        "uq_grant_app_provider");
     }
 
     /** A secret is addressed by its path, so two records may never claim the same one. */
@@ -99,5 +104,19 @@ class SchemaIT extends IntegrationTest {
                         String.class);
 
         assertThat(unique).isNotEmpty();
+    }
+
+    /** Removing an API removes its database aggregate; OpenBao cleanup is queued separately. */
+    @Test
+    void credentialMetadataCascadesFromItsApi() {
+        var deleteAction = jdbc().queryForObject(
+                        """
+                select rc.delete_rule
+                  from information_schema.referential_constraints rc
+                 where rc.constraint_name = 'credentials_provider_id_fkey'
+                """,
+                        String.class);
+
+        assertThat(deleteAction).isEqualTo("CASCADE");
     }
 }

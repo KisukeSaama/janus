@@ -33,7 +33,6 @@ services:
       JANUS_DATABASE_URL: jdbc:postgresql://postgres:5432/janus
       JANUS_DATABASE_USERNAME: janus
       OPENBAO_ADDR: http://openbao:8200
-      JANUS_ADMIN_USERNAME: ${JANUS_ADMIN_USERNAME:-admin}
       JANUS_ADMIN_EMAIL: ${JANUS_ADMIN_EMAIL:-admin@localhost}
       JANUS_CORS_ORIGINS: https://${APP_HOST}
     secrets:

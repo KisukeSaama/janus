@@ -1,6 +1,5 @@
 package io.janus.providers;
 
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -19,8 +18,11 @@ public class ProviderAdminController {
     }
 
     @GetMapping
-    public List<ProviderResponse> list() {
-        return providers.list();
+    public ProviderPage list(
+            @RequestParam(defaultValue = "") String q,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return providers.catalog(q, page, size);
     }
 
     @PostMapping

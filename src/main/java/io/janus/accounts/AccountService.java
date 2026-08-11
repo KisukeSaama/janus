@@ -26,6 +26,8 @@ import io.janus.shared.NotFoundException;
  */
 @Service
 public class AccountService {
+    static final int MIN_USERNAME_LENGTH = 6;
+
     private final AccountRepository repository;
     private final PasswordEncoder encoder;
     private final AccessScope scope;
@@ -55,6 +57,8 @@ public class AccountService {
     @Transactional
     public AccountResponse create(AccountRequest request) {
         guardAppointment(request.role());
+        if (request.username().length() < MIN_USERNAME_LENGTH)
+            throw new IllegalArgumentException("A username must be at least " + MIN_USERNAME_LENGTH + " characters");
         if (repository.existsByUsername(request.username()))
             throw new IllegalArgumentException("That username is already taken");
         if (repository.existsByEmail(request.email()))

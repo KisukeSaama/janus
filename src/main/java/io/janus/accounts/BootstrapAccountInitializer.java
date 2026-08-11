@@ -31,19 +31,16 @@ public class BootstrapAccountInitializer implements ApplicationRunner {
 
     private final AccountRepository accounts;
     private final PasswordEncoder encoder;
-    private final String username;
     private final String password;
     private final String email;
 
     public BootstrapAccountInitializer(
             AccountRepository accounts,
             PasswordEncoder encoder,
-            @Value("${janus.admin.username}") String username,
             @Value("${janus.admin.password}") String password,
             @Value("${janus.admin.email}") String email) {
         this.accounts = accounts;
         this.encoder = encoder;
-        this.username = username;
         this.password = password;
         this.email = email == null ? "" : email.trim();
     }
@@ -54,12 +51,13 @@ public class BootstrapAccountInitializer implements ApplicationRunner {
         var account = accounts.findById(Account.BOOTSTRAP_ID).orElse(null);
         if (account == null) return;
         adoptConfiguredEmail(account);
+        adoptFixedUsername(account);
         if (!account.awaitingBootstrap()) return;
 
         // The production profile refuses to start on a weak value long before this runs; elsewhere a
         // placeholder is a development convenience, and saying so once is more useful than refusing.
         try {
-            PasswordPolicy.check(username, password);
+            PasswordPolicy.check(Account.BOOTSTRAP_USERNAME, password);
         } catch (IllegalArgumentException ex) {
             log.warn(
                     "The bootstrap administrator password is weak ({}). Change it from the console before this"
@@ -67,20 +65,18 @@ public class BootstrapAccountInitializer implements ApplicationRunner {
                     ex.getMessage());
         }
 
-        if (!account.getUsername().equals(username)) {
-            if (accounts.existsByUsername(username))
-                log.warn(
-                        "janus.admin.username is '{}', which another account already uses; the bootstrap account"
-                                + " keeps the name '{}'.",
-                        username,
-                        account.getUsername());
-            else account.rename(username);
-        }
-
         account.changePassword(encoder.encode(password));
         log.info(
                 "Bootstrap administrator '{}' is ready; janus.admin.password will not be read again",
                 account.getUsername());
+    }
+
+    private void adoptFixedUsername(Account account) {
+        if (Account.BOOTSTRAP_USERNAME.equals(account.getUsername())) return;
+        if (accounts.existsByUsername(Account.BOOTSTRAP_USERNAME))
+            throw new IllegalStateException("The username '" + Account.BOOTSTRAP_USERNAME
+                    + "' is reserved for the bootstrap super-administrator but another account already uses it");
+        account.rename(Account.BOOTSTRAP_USERNAME);
     }
 
     /**

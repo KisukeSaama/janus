@@ -62,7 +62,7 @@ public class SecurityConfig {
     SecurityFilterChain gateway(
             HttpSecurity http, ApiKeyAuthenticationFilter apiKey, GatewayCorsConfigurationSource gatewayCors)
             throws Exception {
-        return http.securityMatcher("/gateway/**", "/*/gateway/**")
+        return http.securityMatcher("/gateway/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(gatewayCors))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -75,7 +75,7 @@ public class SecurityConfig {
                         // A real preflight never reaches here: CorsFilter sits earlier in the chain
                         // and answers it. What is refused is a bare OPTIONS, which Spring MVC would
                         // otherwise answer with a route's allowed methods without consulting a grant.
-                        .requestMatchers(HttpMethod.OPTIONS, "/gateway/**", "/*/gateway/**")
+                        .requestMatchers(HttpMethod.OPTIONS, "/gateway/**")
                         .denyAll()
                         .anyRequest()
                         .authenticated())
@@ -174,9 +174,16 @@ public class SecurityConfig {
                         // account: an administrator appoints, a super administrator arbitrates.
                         .requestMatchers("/api/admin/accounts/**")
                         .hasAnyRole("SUPER_ADMIN", "ADMIN")
-                        // Everything else is the registry, and every one of its queries is scoped to
-                        // the caller by AccessScope. Authentication is therefore the whole of the
-                        // access decision here: there is nothing a role could widen.
+                        // The API catalogue and its policies are shared by the deployment. Everyone
+                        // may browse it; only administrators may change the contract for everyone.
+                        .requestMatchers(HttpMethod.POST, "/api/admin/providers/**")
+                        .hasAnyRole("SUPER_ADMIN", "ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/admin/providers/**")
+                        .hasAnyRole("SUPER_ADMIN", "ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/admin/providers/**")
+                        .hasAnyRole("SUPER_ADMIN", "ADMIN")
+                        // Remaining reads are either personal records scoped by AccessScope or the
+                        // shared, non-secret API catalogue. Authentication is the common boundary.
                         .requestMatchers("/api/admin/**")
                         .authenticated()
                         .anyRequest()

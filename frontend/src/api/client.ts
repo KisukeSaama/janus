@@ -67,18 +67,48 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     throw new ApiError(AUTH_REQUIRED, 401, undefined, 'AUTH_REQUIRED');
   }
 
-  if (!response.ok) {
-    const problem: Problem | null = await response.json().catch(() => null);
-    throw new ApiError(
-      describe(problem, response.status),
-      response.status,
-      problem?.errors,
-      response.status === 429 ? 'THROTTLED' : undefined,
-    );
-  }
+  if (!response.ok) throw await failure(response);
 
   if (response.status === 204 || response.headers.get('content-length') === '0') return undefined as T;
   return response.json();
+}
+
+/**
+ * A response the browser saves instead of one the console renders. Same session, same failures — the
+ * fetch is what carries the cookie, so the file cannot simply be a link the browser follows on its
+ * own: a refused session would replace the page with a JSON error instead of surfacing it here.
+ */
+export async function download(path: string, filename: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/admin${path}`, { credentials: 'same-origin' });
+  } catch {
+    throw new ApiError('Janus is unreachable. Check that the backend is running.', 0, undefined, 'OFFLINE');
+  }
+
+  if (response.status === 401) throw new ApiError(AUTH_REQUIRED, 401, undefined, 'AUTH_REQUIRED');
+  if (!response.ok) throw await failure(response);
+
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  // In the document rather than detached: a link that was never in the tree is ignored by some
+  // browsers, and the click has to have happened before the object URL is handed back.
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function failure(response: Response): Promise<ApiError> {
+  const problem: Problem | null = await response.json().catch(() => null);
+  return new ApiError(
+    describe(problem, response.status),
+    response.status,
+    problem?.errors,
+    response.status === 429 ? 'THROTTLED' : undefined,
+  );
 }
 
 /** Convenience for the three verbs that always carry a JSON body. */

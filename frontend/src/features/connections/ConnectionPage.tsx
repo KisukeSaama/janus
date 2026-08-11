@@ -13,12 +13,13 @@ import {
   useUpdateGrant,
   useUpdateProvider,
   type Grant,
+  type Identity,
   type Provider,
 } from '../../api';
 import {
-  ArmedAction,
   Block,
   CheckField,
+  ConfirmAction,
   CopyField,
   DeleteAction,
   ExpiryState,
@@ -28,8 +29,8 @@ import {
   LiveState,
   Notice,
   PageHead,
+  PageSkeleton,
   SidePanel,
-  SkeletonRows,
 } from '../../components';
 import { useI18n } from '../../i18n';
 import { buildConnections, curlFor, gatewayUrl, type Connection } from '../../lib/connections';
@@ -52,15 +53,15 @@ const FIX_TARGET: Record<'application' | 'credential', 'applications' | 'credent
 };
 
 export function ConnectionPage({
-  username,
   id,
   onBack,
   onFix,
+  identity,
 }: {
-  username: string;
   id: string;
   onBack: () => void;
   onFix: (to: 'applications' | 'credentials') => void;
+  identity: Identity;
 }) {
   const { t, tEnum, formatAge, formatDate } = useI18n();
   const describe = useErrorMessage();
@@ -88,9 +89,8 @@ export function ConnectionPage({
         applications.data ?? [],
         providers.data ?? [],
         credentials.data ?? [],
-        username,
       ).find((c) => c.id === id),
-    [grants.data, applications.data, providers.data, credentials.data, id, username],
+    [grants.data, applications.data, providers.data, credentials.data, id],
   );
 
   // Deleted from its own page, or opened from a link that no longer resolves. Navigating is an
@@ -99,14 +99,14 @@ export function ConnectionPage({
     if (!loading && !connection) onBack();
   }, [loading, connection, onBack]);
 
-  if (loading || !connection) return <SkeletonRows rows={5} cols={3} />;
+  if (loading || !connection) return <PageSkeleton rows={5} cols={3} />;
 
   const { grant, provider, credential } = connection;
   const application = connection.application;
-  const endpoint = `${gatewayUrl(username, provider?.slug ?? '')}/`;
+  const endpoint = `${gatewayUrl(provider?.slug ?? '')}/`;
   // Any path reaches the destination now, so the sample states the one nobody can get wrong and
   // leaves the reader to replace it with whatever the API actually exposes.
-  const curl = curlFor(username, provider?.slug ?? '', '/', grant.applicationId, '$JANUS_API_KEY');
+  const curl = curlFor(provider?.slug ?? '', '/', grant.applicationId, '$JANUS_API_KEY');
 
   /** Every grant write sends the whole record: the endpoint replaces, it does not patch. */
   const writeGrant = (changes: Partial<{ enabled: boolean; perMinute: number; burst: number }>) =>
@@ -139,7 +139,7 @@ export function ConnectionPage({
        * the title lands on the same pixel it did a click earlier.
        */}
       <PageHead
-        back={{ label: t('connections.title'), onClick: onBack }}
+        back={{ label: t('dashboard.title'), onClick: onBack }}
         title={
           <>
             {grant.applicationName}
@@ -154,7 +154,11 @@ export function ConnectionPage({
         action={<LiveState live={connection.live} paused={connection.blockedBy === 'grant'} />}
       />
 
-      <Diagnosis connection={connection} onFix={onFix} onFixDestination={() => setPanel('destination')} />
+      <Diagnosis
+        connection={connection}
+        onFix={onFix}
+        onFixDestination={identity.role === 'USER' ? undefined : () => setPanel('destination')}
+      />
 
       {error && <Notice>{error}</Notice>}
 
@@ -173,8 +177,8 @@ export function ConnectionPage({
             lead={t('detail.destinationLead')}
             aside={
               <span className="flex items-center gap-1">
-                {provider.cacheEnabled && (
-                  <ArmedAction
+                {identity.role !== 'USER' && provider.cacheEnabled && (
+                  <ConfirmAction
                     trigger={t('providers.purge')}
                     confirm={t('providers.purgeConfirm')}
                     pending={t('providers.purging')}
@@ -182,9 +186,11 @@ export function ConnectionPage({
                     onConfirm={() => guard(() => purgeCache.mutateAsync(provider.id))}
                   />
                 )}
-                <button className="btn btn-sm btn-secondary" onClick={() => setPanel('destination')}>
-                  {t('detail.destinationEdit')}
-                </button>
+                {identity.role !== 'USER' && (
+                  <button className="btn btn-sm btn-secondary" onClick={() => setPanel('destination')}>
+                    {t('detail.destinationEdit')}
+                  </button>
+                )}
               </span>
             }
           >
@@ -268,7 +274,7 @@ export function ConnectionPage({
               <p className="text-sm text-text-2" title={formatDate(application.apiKeyRotatedAt)}>
                 {t('detail.keyIssued', { age: formatAge(application.apiKeyRotatedAt) })}
               </p>
-              <ArmedAction
+              <ConfirmAction
                 trigger={t('detail.keyRotate')}
                 confirm={t('detail.keyRotateConfirm')}
                 pending={t('detail.keyRotating')}
@@ -290,7 +296,7 @@ export function ConnectionPage({
               {grant.enabled ? t('detail.pauseDescription') : t('detail.resumeDescription')}
             </p>
             <span className="flex items-center gap-1">
-              <ArmedAction
+              <ConfirmAction
                 trigger={grant.enabled ? t('detail.pause') : t('detail.resume')}
                 confirm={grant.enabled ? t('detail.pauseConfirm') : t('detail.resumeConfirm')}
                 pending={grant.enabled ? t('detail.pausing') : t('detail.resuming')}
@@ -313,7 +319,7 @@ export function ConnectionPage({
         </Block>
       </div>
 
-      {panel === 'destination' && provider && (
+      {panel === 'destination' && provider && identity.role !== 'USER' && (
         <DestinationPanel
           provider={provider}
           onClose={() => setPanel('closed')}
@@ -370,7 +376,7 @@ function Diagnosis({
   connection: Connection;
   onFix: (to: 'applications' | 'credentials') => void;
   /** The destination is edited here rather than elsewhere, so its fix opens a panel instead. */
-  onFixDestination: () => void;
+  onFixDestination?: () => void;
 }) {
   const { t } = useI18n();
   const { grant, blockedBy } = connection;
@@ -397,10 +403,13 @@ function Diagnosis({
     <div className="mb-7 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-panel border border-warn/45 bg-warn-wash px-3.5 py-3">
       <AlertTriangle size={16} strokeWidth={2.25} className="shrink-0 text-warn" />
       <p className="min-w-0 flex-1 text-sm">{message}</p>
-      {blockedBy !== 'grant' && (
+      {blockedBy !== 'grant' && (blockedBy !== 'provider' || onFixDestination) && (
         <button
           className="btn btn-sm btn-secondary"
-          onClick={() => (blockedBy === 'provider' ? onFixDestination() : onFix(FIX_TARGET[blockedBy]))}
+          onClick={() => {
+            if (blockedBy === 'provider') onFixDestination?.();
+            else onFix(FIX_TARGET[blockedBy]);
+          }}
         >
           {t('detail.fix')}
         </button>
@@ -432,6 +441,12 @@ function DestinationPanel({
     cacheTtlSeconds: number;
     rateLimitPerMinute: number;
     rateLimitBurst: number;
+    authType: Provider['authType'];
+    headerName?: string;
+    queryParameter?: string;
+    tokenUrl?: string;
+    tokenScopes?: string;
+    tokenClientAuth?: Provider['tokenClientAuth'];
   }) => Promise<void>;
 }) {
   const { t } = useI18n();
@@ -451,6 +466,12 @@ function DestinationPanel({
         cacheTtlSeconds: Number(form.get('cacheTtlSeconds') || 0),
         rateLimitPerMinute: Number(form.get('rateLimitPerMinute') || 0),
         rateLimitBurst: Number(form.get('rateLimitBurst') || 0),
+        authType: provider.authType,
+        headerName: provider.headerName,
+        queryParameter: provider.queryParameter,
+        tokenUrl: provider.tokenUrl,
+        tokenScopes: provider.tokenScopes,
+        tokenClientAuth: provider.tokenClientAuth,
       });
     } catch (x) {
       setError(describe(x));

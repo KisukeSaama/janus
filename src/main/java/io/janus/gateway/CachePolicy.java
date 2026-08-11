@@ -112,6 +112,46 @@ final class CachePolicy {
     }
 
     /**
+     * True when the only condition the caller set is "unless it still has this tag".
+     *
+     * <p>This one question Janus can answer itself, and should: a client that keeps an ETag is the
+     * well-behaved one, and forwarding its request was leaving it the only caller that never
+     * benefited from the store. The other conditions — a date, a precondition on a write, a range —
+     * are still forwarded untouched, because answering them from a stored copy would mean deciding
+     * something the caller asked the upstream.
+     */
+    static boolean callerRevalidatesOnly(HttpHeaders request) {
+        return request.containsHeader(HttpHeaders.IF_NONE_MATCH)
+                && !request.containsHeader(HttpHeaders.IF_MODIFIED_SINCE)
+                && !request.containsHeader(HttpHeaders.IF_MATCH)
+                && !request.containsHeader(HttpHeaders.IF_UNMODIFIED_SINCE)
+                && !request.containsHeader(HttpHeaders.RANGE);
+    }
+
+    /**
+     * True when one of the tags the caller listed is the one this representation carries.
+     *
+     * <p>The weak comparison function, as RFC 9110 §8.8.3.2 requires for {@code If-None-Match}: two
+     * tags match when their opaque parts are equal, whether or not either was marked weak. {@code *}
+     * matches anything stored.
+     */
+    static boolean matchesEtag(String ifNoneMatch, String etag) {
+        if (ifNoneMatch == null || etag == null) return false;
+        String stored = opaque(etag);
+        for (String candidate : ifNoneMatch.split(",")) {
+            String tag = candidate.trim();
+            if (tag.equals("*")) return true;
+            if (!tag.isEmpty() && opaque(tag).equals(stored)) return true;
+        }
+        return false;
+    }
+
+    private static String opaque(String etag) {
+        String tag = etag.trim();
+        return tag.regionMatches(true, 0, "W/", 0, 2) ? tag.substring(2) : tag;
+    }
+
+    /**
      * @param storable     whether the response may be stored at all
      * @param freshSeconds freshness lifetime; zero means storable but revalidated on every use
      * @param staleSeconds how long after expiry it may still answer while the upstream is failing
@@ -223,7 +263,8 @@ final class CachePolicy {
         }
     }
 
-    private static String digest(String value) {
+    /** Package-private: the store derives its secondary keys with the same function. */
+    static String digest(String value) {
         try {
             var sha256 = MessageDigest.getInstance("SHA-256");
             return HexFormat.of().formatHex(sha256.digest(value.getBytes(StandardCharsets.UTF_8)));

@@ -43,6 +43,13 @@ class GatewayControllerTest {
     private final ProviderRepository providers = Mockito.mock(ProviderRepository.class);
     private final GrantRepository grants = Mockito.mock(GrantRepository.class);
     private final GatewayTrafficService traffic = Mockito.mock(GatewayTrafficService.class);
+    /** Configured as production is: what the registry answers is held for a few seconds. */
+    private final AuthorizationCache authorizations = new AuthorizationCache(new GatewayTrafficProperties(
+            new GatewayTrafficProperties.Cache(true, 100, 1_000_000, 10_000_000, 300),
+            new GatewayTrafficProperties.Throttle(1, 300),
+            new GatewayTrafficProperties.Retry(2, 1, 1),
+            new GatewayTrafficProperties.Authorization(true, 10, 100)));
+
     private final AuditService audit = Mockito.mock(AuditService.class);
     private final GatewayMetrics metrics = Mockito.mock(GatewayMetrics.class);
 
@@ -61,15 +68,21 @@ class GatewayControllerTest {
     @BeforeEach
     void setUp() {
         controller = new GatewayController(
-                providers, grants, new DestinationValidator(false), traffic, audit, metrics, new ObjectMapper());
+                providers,
+                grants,
+                authorizations,
+                new DestinationValidator(false),
+                traffic,
+                audit,
+                metrics,
+                new ObjectMapper());
         mvc = MockMvcBuilders.standaloneSetup(controller)
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .build();
 
         SecurityContextHolder.getContext()
                 .setAuthentication(new UsernamePasswordAuthenticationToken(principal, null, List.of()));
-        when(providers.findBySlugAndOwnerIdAndEnabledTrue("spotify", owner.getId()))
-                .thenReturn(Optional.of(provider));
+        when(providers.findBySlugAndEnabledTrue("spotify")).thenReturn(Optional.of(provider));
         when(grants.findActive(application.getId(), provider.getId())).thenReturn(Optional.of(grant));
         when(traffic.forward(any())).thenReturn(anOutcome());
     }
@@ -104,18 +117,43 @@ class GatewayControllerTest {
         assertThat(recordedEvent().outcome()).isEqualTo(AuditOutcome.SUCCESS);
     }
 
+    /**
+     * The registry is asked once, not once per call. A served response used to cost three round trips
+     * to the database whatever else happened — including a cache hit, where nothing else left the
+     * process at all — and with a pool sized for a proxy that only reads a grant, that was the
+     * ceiling on how much traffic one instance could carry.
+     */
     @Test
-    void relaysAUsernameScopedGatewayCall() throws Exception {
-        mvc.perform(get("/owner/gateway/spotify/v1/tracks"))
-                .andExpect(status().isOk())
-                .andExpect(content().string("{\"ok\":true}"));
+    void doesNotAskTheRegistryAgainForACallItJustAuthorised() throws Exception {
+        mvc.perform(get("/gateway/spotify/v1/tracks")).andExpect(status().isOk());
+        mvc.perform(get("/gateway/spotify/v1/albums")).andExpect(status().isOk());
+
+        verify(providers, times(1)).findBySlugAndEnabledTrue("spotify");
+        verify(grants, times(1)).findActive(application.getId(), provider.getId());
+    }
+
+    /** Held is not the same as settled: what an administrator changes is dropped, not waited out. */
+    @Test
+    void readsTheRegistryAgainOnceAChangeHasDroppedWhatWasHeld() throws Exception {
+        mvc.perform(get("/gateway/spotify/v1/tracks")).andExpect(status().isOk());
+
+        authorizations.forgetProvider(provider.getId());
+        mvc.perform(get("/gateway/spotify/v1/tracks")).andExpect(status().isOk());
+
+        verify(providers, times(2)).findBySlugAndEnabledTrue("spotify");
+        verify(grants, times(2)).findActive(application.getId(), provider.getId());
+    }
+
+    @Test
+    void noLongerExposesAUsernameScopedGatewayCall() throws Exception {
+        mvc.perform(get("/owner/gateway/spotify/v1/tracks")).andExpect(status().isNotFound());
     }
 
     @Test
     void refusesAUsernameNamespaceThatDoesNotOwnThePresentedKey() throws Exception {
         mvc.perform(get("/somebody-else/gateway/spotify/v1/tracks")).andExpect(status().isNotFound());
 
-        verify(providers, never()).findBySlugAndOwnerIdAndEnabledTrue(any(), any());
+        verify(providers, never()).findBySlugAndEnabledTrue(any());
         verify(traffic, never()).forward(any());
     }
 
@@ -165,8 +203,7 @@ class GatewayControllerTest {
      */
     @Test
     void aSlugBelongingToSomebodyElseIsNotFound() throws Exception {
-        when(providers.findBySlugAndOwnerIdAndEnabledTrue("spotify", owner.getId()))
-                .thenReturn(Optional.empty());
+        when(providers.findBySlugAndEnabledTrue("spotify")).thenReturn(Optional.empty());
 
         mvc.perform(get("/gateway/spotify/v1/tracks")).andExpect(status().isNotFound());
         verify(traffic, never()).forward(any());
@@ -192,8 +229,7 @@ class GatewayControllerTest {
                 null,
                 false);
         var grantOnDisabled = Fixtures.grant(application, withdrawn, disabled);
-        when(providers.findBySlugAndOwnerIdAndEnabledTrue("disabled", owner.getId()))
-                .thenReturn(Optional.of(withdrawn));
+        when(providers.findBySlugAndEnabledTrue("disabled")).thenReturn(Optional.of(withdrawn));
         when(grants.findActive(application.getId(), withdrawn.getId())).thenReturn(Optional.of(grantOnDisabled));
 
         mvc.perform(get("/gateway/disabled/v1/tracks")).andExpect(status().isForbidden());
@@ -225,10 +261,10 @@ class GatewayControllerTest {
     void aMethodTheGatewayDoesNotProxyIsRefusedBeforeAnythingIsLookedUp() {
         var request = new org.springframework.mock.web.MockHttpServletRequest("TRACE", "/gateway/spotify/v1/tracks");
 
-        var response = controller.proxy(null, "spotify", principal, request, null);
+        var response = controller.proxy("spotify", principal, request, null);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
-        verify(providers, never()).findBySlugAndOwnerIdAndEnabledTrue(any(), any());
+        verify(providers, never()).findBySlugAndEnabledTrue(any());
         verify(traffic, never()).forward(any());
     }
 
@@ -327,8 +363,7 @@ class GatewayControllerTest {
      */
     @Test
     void doesNotTagMetricsWithASlugThatWasNeverResolved() throws Exception {
-        when(providers.findBySlugAndOwnerIdAndEnabledTrue("invented", owner.getId()))
-                .thenReturn(Optional.empty());
+        when(providers.findBySlugAndEnabledTrue("invented")).thenReturn(Optional.empty());
 
         mvc.perform(get("/gateway/invented/v1/tracks"));
 

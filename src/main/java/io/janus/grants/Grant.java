@@ -97,8 +97,8 @@ public class Grant {
     public void bind(Application application, Provider provider, Credential credential) {
         if (!credential.getProvider().getId().equals(provider.getId()))
             throw new IllegalArgumentException("Credential belongs to a different provider");
-        if (!application.getOwner().getId().equals(provider.getOwner().getId()))
-            throw new IllegalArgumentException("Service and API belong to different owners");
+        if (!application.getOwner().getId().equals(credential.getOwnerId()))
+            throw new IllegalArgumentException("Service and API activation belong to different owners");
         this.application = application;
         this.provider = provider;
         this.credential = credential;

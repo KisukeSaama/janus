@@ -114,9 +114,7 @@ public class GrantService {
     }
 
     private Provider provider(UUID id) {
-        return providers
-                .findOwnedBy(id, scope.ownerFilter())
-                .orElseThrow(() -> new NotFoundException("Provider not found"));
+        return providers.findById(id).orElseThrow(() -> new NotFoundException("Provider not found"));
     }
 
     private Credential credential(UUID id) {

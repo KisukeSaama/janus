@@ -4,17 +4,17 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-import java.util.Optional;
+import java.util.*;
 
 import org.junit.jupiter.api.*;
 import org.mockito.Mockito;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import io.janus.accounts.*;
 import io.janus.audit.AuditService;
 import io.janus.gateway.TrafficPolicyRegistry;
 import io.janus.grants.GrantRepository;
 import io.janus.openbao.OpenBaoClient;
+import io.janus.openbao.SecretDeletionQueue;
 import io.janus.providers.*;
 
 /**
@@ -30,6 +30,7 @@ class CredentialServiceTest {
     private final ProviderRepository providers = Mockito.mock(ProviderRepository.class);
     private final GrantRepository grants = Mockito.mock(GrantRepository.class);
     private final OpenBaoClient openBao = Mockito.mock(OpenBaoClient.class);
+    private final SecretDeletionQueue secretDeletions = Mockito.mock(SecretDeletionQueue.class);
     private final TrafficPolicyRegistry traffic = Mockito.mock(TrafficPolicyRegistry.class);
     private final AccessScope scope = Mockito.mock(AccessScope.class);
     private final AuditService audit = Mockito.mock(AuditService.class);
@@ -43,22 +44,19 @@ class CredentialServiceTest {
     @BeforeEach
     void setUp() {
         service = new CredentialService(
-                repository, providers, grants, openBao, traffic, new DestinationValidator(false), scope, audit);
+                repository,
+                providers,
+                grants,
+                openBao,
+                secretDeletions,
+                traffic,
+                new DestinationValidator(false),
+                scope,
+                audit);
         when(scope.ownerFilter()).thenReturn(owner.getId());
-        when(providers.findOwnedBy(provider.getId(), owner.getId())).thenReturn(Optional.of(provider));
+        when(scope.accountId()).thenReturn(owner.getId());
+        when(providers.findById(provider.getId())).thenReturn(Optional.of(provider));
         when(repository.save(any(Credential.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        // The service defers destruction to after the commit; nothing here runs in a transaction, so
-        // the synchronizations it registers are collected by hand and run by runCommit below.
-        TransactionSynchronizationManager.initSynchronization();
-    }
-
-    @AfterEach
-    void tearDown() {
-        TransactionSynchronizationManager.clearSynchronization();
-    }
-
-    private static void runCommit() {
-        TransactionSynchronizationManager.getSynchronizations().forEach(sync -> sync.afterCommit());
     }
 
     private CredentialRequest request(AuthType authType, String secret) {
@@ -67,6 +65,7 @@ class CredentialServiceTest {
     }
 
     private Credential existing(AuthType authType) {
+        provider.applyAuth(new Provider.Auth(authType, null, null, null, null, null));
         var credential = new Credential(provider, "pokeapi", Credential.Strategy.of(authType), null, true);
         when(repository.findOwnedBy(credential.getId(), owner.getId())).thenReturn(Optional.of(credential));
         return credential;
@@ -84,35 +83,36 @@ class CredentialServiceTest {
 
     @Test
     void everyOtherStrategyStillRefusesToBeCreatedWithoutItsValue() {
+        provider.applyAuth(new Provider.Auth(AuthType.BEARER, null, null, null, null, null));
         assertThatThrownBy(() -> service.create(request(AuthType.BEARER, null)))
                 .isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(openBao);
     }
 
-    /** Nothing was ever stored at this path, so the edit that starts presenting something must say what. */
+    /** The API contract, not a user's credential payload, decides how authentication is presented. */
     @Test
-    void givingAnOpenApiAStrategyNeedsTheValueItWillPresent() {
+    void aCredentialRequestCannotChangeTheApisStrategy() {
         var credential = existing(AuthType.NONE);
 
-        assertThatThrownBy(() -> service.update(credential.getId(), request(AuthType.BEARER, null)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Secret is required");
+        var response = service.update(credential.getId(), request(AuthType.BEARER, null));
 
-        assertThatNoException()
-                .isThrownBy(() -> service.update(credential.getId(), request(AuthType.BEARER, "sk_live_31337")));
-        verify(openBao).write(credential.getSecretPath(), "sk_live_31337");
+        assertThat(response.authType()).isEqualTo(AuthType.NONE);
+        verifyNoInteractions(openBao);
     }
 
-    /** The other crossing: what nothing will read again is destroyed, not left behind in OpenBao. */
+    /** An administrator changing the contract disables the activation until a new value is supplied. */
     @Test
-    void takingTheStrategyAwayDestroysTheValueNothingWillReadAgain() {
-        var credential = existing(AuthType.BEARER);
+    void anAuthenticationChangeRequiresReprovisioning() {
+        var credential = existing(AuthType.NONE);
+        provider.applyAuth(new Provider.Auth(AuthType.BEARER, null, null, null, null, null));
+        credential.adoptProviderStrategy(AuthType.NONE);
 
-        service.update(credential.getId(), request(AuthType.NONE, null));
-        verify(openBao, never()).delete(any());
+        assertThatThrownBy(() -> service.update(credential.getId(), request(AuthType.NONE, null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("New credentials are required");
 
-        runCommit();
-        verify(openBao).delete(credential.getSecretPath());
+        service.update(credential.getId(), request(AuthType.NONE, "sk_live_31337"));
+        verify(openBao).write(credential.getSecretPath(), "sk_live_31337");
     }
 
     @Test
@@ -120,9 +120,39 @@ class CredentialServiceTest {
         var credential = existing(AuthType.NONE);
 
         service.delete(credential.getId());
-        runCommit();
 
         verify(repository).delete(credential);
         verifyNoInteractions(openBao);
+        verifyNoInteractions(secretDeletions);
+    }
+
+    @Test
+    void deletingAStoredCredentialQueuesItsValueForDestruction() {
+        var credential = existing(AuthType.BEARER);
+
+        service.delete(credential.getId());
+
+        verify(repository).delete(credential);
+        verify(secretDeletions).enqueue(credential.getSecretPath());
+    }
+
+    /**
+     * The connections go through the session, not in one bulk statement. A batch delete leaves them
+     * managed and still pointing at the credential removed right after, and the flush at commit
+     * refuses that as an HTTP 500 the console can say nothing useful about.
+     */
+    @Test
+    void deletingACredentialRemovesItsConnectionsBeforeItself() {
+        var credential = existing(AuthType.BEARER);
+        var grant = Mockito.mock(io.janus.grants.Grant.class);
+        when(grant.getId()).thenReturn(UUID.randomUUID());
+        when(grants.findAllByCredentialId(credential.getId())).thenReturn(List.of(grant));
+
+        service.delete(credential.getId());
+
+        var order = inOrder(grants, repository);
+        order.verify(grants).deleteAll(List.of(grant));
+        order.verify(repository).delete(credential);
+        verify(grants, never()).deleteAllInBatch(any());
     }
 }

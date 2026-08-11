@@ -67,7 +67,7 @@ public class Notification {
         notification.providerName = credential.getProvider().getName();
         // The owner is copied; their address is not. What is being talked about is a fact of the
         // moment, but where to write is a fact of now — an address changed since is the one to use.
-        notification.ownerId = credential.getProvider().getOwner().getId();
+        notification.ownerId = credential.getOwnerId();
         notification.expiresAt = credential.getExpiresAt();
         notification.createdAt = raisedAt;
         return notification;

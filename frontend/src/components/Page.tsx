@@ -35,7 +35,7 @@ export function PageHead({
         {back ? (
           <button
             onClick={back.onClick}
-            className="stamp -ml-1 inline-flex items-center gap-1.5 rounded-[3px] px-1 py-0.5 text-text-2 transition-colors duration-150 hover:text-text"
+            className="stamp -ml-1 inline-flex items-center gap-1.5 rounded-[3px] px-1 py-0.5 text-text-2 transition-colors hover:text-text"
           >
             <ArrowLeft size={13} strokeWidth={2.5} />
             {back.label}
@@ -67,14 +67,8 @@ export function SectionHead({ children, aside }: { children: ReactNode; aside?: 
 
 /**
  * A titled band inside a page. Panels stack under it, so a long record reads as a sequence of
- * questions rather than one wall.
+ * questions rather than one wall. Children are optional: some blocks are their own statement.
  */
-
-/**
- * A titled band inside a page. Panels stack under it, so a long record reads as a sequence of
- * questions rather than one wall.
- */
-/** A section of a detail page. Children are optional: some blocks are their own statement. */
 export function Block({
   title,
   lead,
@@ -110,6 +104,18 @@ export function Notice({ children, tone = 'bad' }: { children: ReactNode; tone?:
   );
 }
 
+/**
+ * A section of a page with nothing in it, said in one line.
+ *
+ * `Empty` is for a collection: it takes the height of the table it stands in for and offers the way
+ * to fill it. A band on the dashboard has neither, and three of them were each drawing the same
+ * centred sentence at a different height, which is what makes a page read as assembled rather than
+ * composed.
+ */
+export function Blank({ children }: { children: string }) {
+  return <p className="panel px-4 py-6 text-center text-sm text-text-2">{children}</p>;
+}
+
 export function Empty({ headline, hint, action }: { headline: string; hint: string; action?: ReactNode }) {
   return (
     <div className="panel px-6 py-12 text-center md:py-14">
@@ -125,6 +131,33 @@ export function Empty({ headline, hint, action }: { headline: string; hint: stri
  * A placeholder shorter than what replaces it makes the table grow under the reader's eyes, which
  * is the one thing a loading state is there to prevent.
  */
+/**
+ * A whole page, at the height a whole page is.
+ *
+ * Pages are code-split, so the first visit to one draws nothing at all while its chunk arrives. A
+ * placeholder that is only a table lets the head appear late and pushes the rows down the moment it
+ * does; this reserves the head as well, at the geometry {@link PageHead} reserves for itself, so the
+ * title lands on the pixel the placeholder's title was on.
+ */
+export function PageSkeleton({ rows = 6, cols = 4 }: { rows?: number; cols?: number }) {
+  return (
+    <div aria-hidden="true">
+      <div className="mb-7 border-b border-line pb-5">
+        <div className="mb-2 flex h-5 items-center">
+          <div className="skeleton h-2.5 w-20" />
+        </div>
+        <div>
+          <div className="skeleton h-[1.6875rem] w-56" />
+          <div className="mt-2 min-h-10">
+            <div className="skeleton h-4 w-full max-w-[42rem]" />
+          </div>
+        </div>
+      </div>
+      <SkeletonRows rows={rows} cols={cols} />
+    </div>
+  );
+}
+
 export function SkeletonRows({ rows = 5, cols = 4 }: { rows?: number; cols?: number }) {
   const wide = useMediaQuery(WIDE);
   return (

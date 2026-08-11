@@ -35,10 +35,6 @@ public record GatewayPath(String rawPath, String decodedPath, String rawQuery) {
         return parseWithPrefix(requestUri, "/gateway/" + slug, queryString);
     }
 
-    public static GatewayPath parse(String requestUri, String username, String slug, String queryString) {
-        return parseWithPrefix(requestUri, "/" + username + "/gateway/" + slug, queryString);
-    }
-
     private static GatewayPath parseWithPrefix(String requestUri, String prefix, String queryString) {
         if (!requestUri.startsWith(prefix))
             throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, "Unsafe gateway path");

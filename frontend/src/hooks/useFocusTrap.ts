@@ -4,8 +4,6 @@ const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /** Keeps Tab inside an aria-modal surface, which axe cannot verify for us. */
-
-/** Keeps Tab inside an aria-modal surface, which axe cannot verify for us. */
 export function useFocusTrap(ref: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const node = ref.current;

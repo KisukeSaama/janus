@@ -10,6 +10,7 @@ import org.mockito.Mockito;
 import org.springframework.http.HttpHeaders;
 
 import io.janus.credentials.UpstreamTokenCache;
+import io.janus.testing.Fixtures;
 
 /**
  * The seam between administration and the running gateway. Every test here is really the same
@@ -19,14 +20,17 @@ class TrafficPolicyRegistryTest {
     private final GatewayTrafficProperties properties = new GatewayTrafficProperties(
             new GatewayTrafficProperties.Cache(true, 100, 1_000_000, 10_000_000, 300),
             new GatewayTrafficProperties.Throttle(1, 300),
-            new GatewayTrafficProperties.Retry(2, 1, 1));
+            new GatewayTrafficProperties.Retry(2, 1, 1),
+            new GatewayTrafficProperties.Authorization(true, 10, 100));
 
     private final ResponseCache cache = new ResponseCache(properties);
+    private final AuthorizationCache authorizations = new AuthorizationCache(properties);
     private final RateLimiter limiter = new RateLimiter();
     private final UpstreamCooldown cooldown = new UpstreamCooldown();
     private final UpstreamTokenCache tokens = Mockito.mock(UpstreamTokenCache.class);
 
-    private final TrafficPolicyRegistry registry = new TrafficPolicyRegistry(cache, limiter, cooldown, tokens);
+    private final TrafficPolicyRegistry registry =
+            new TrafficPolicyRegistry(cache, authorizations, limiter, cooldown, tokens);
 
     private final UUID provider = UUID.randomUUID();
     private final UUID credential = UUID.randomUUID();
@@ -81,6 +85,23 @@ class TrafficPolicyRegistryTest {
 
         assertThat(limiter.tryAcquire("grant:" + grant, 1, 1).allowed()).isTrue();
         assertThat(cache.stats().entries()).isEqualTo(1);
+    }
+
+    /**
+     * The registry reads go with everything else. A grant resolved four seconds ago is what would
+     * carry a withdrawn credential onto the next request, so a change that dropped the responses and
+     * left the grant behind would take the secret back everywhere except on the way out.
+     */
+    @Test
+    void forgettingACredentialAlsoDropsTheGrantsThatWouldPresentIt() {
+        var owner = Fixtures.owner();
+        var destination = Fixtures.provider(owner);
+        var held = Fixtures.grant(Fixtures.application(owner), destination, Fixtures.credential(destination));
+        authorizations.grant(UUID.randomUUID(), provider, () -> Optional.of(held));
+
+        registry.forgetCredential(held.getCredential().getId());
+
+        assertThat(authorizations.stats().grants()).isZero();
     }
 
     @Test

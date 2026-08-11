@@ -1,5 +1,5 @@
 import { usePurgeGatewayCache, useTraffic } from '../../api';
-import { ArmedAction, PageHead, SectionHead } from '../../components';
+import { Blank, ConfirmAction, PageHead, SectionHead } from '../../components';
 import { useI18n } from '../../i18n';
 
 import { AuditLog } from './AuditLog';
@@ -58,7 +58,7 @@ function TrafficBand() {
       <SectionHead
         aside={
           cache.enabled && cache.entries > 0 ? (
-            <ArmedAction
+            <ConfirmAction
               trigger={t('traffic.purgeAll')}
               confirm={t('traffic.purgeAllConfirm')}
               pending={t('traffic.purgeAllPending')}
@@ -74,7 +74,7 @@ function TrafficBand() {
       </SectionHead>
 
       {!cache.enabled ? (
-        <p className="panel px-4 py-5 text-center text-sm text-text-2">{t('traffic.disabled')}</p>
+        <Blank>{t('traffic.disabled')}</Blank>
       ) : (
         <div className="panel">
           <dl className="grid divide-line sm:grid-cols-2 sm:divide-x">

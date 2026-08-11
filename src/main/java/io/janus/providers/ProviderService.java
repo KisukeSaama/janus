@@ -3,20 +3,21 @@ package io.janus.providers;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import io.janus.accounts.AccessScope;
 import io.janus.accounts.AccountRepository;
-import io.janus.applications.ApplicationService;
+import io.janus.accounts.AccountRole;
 import io.janus.audit.AuditAction;
 import io.janus.audit.AuditService;
+import io.janus.credentials.Credential;
 import io.janus.credentials.CredentialRepository;
 import io.janus.gateway.TrafficPolicyRegistry;
 import io.janus.grants.GrantRepository;
-import io.janus.openbao.OpenBaoClient;
+import io.janus.openbao.SecretDeletionQueue;
 import io.janus.shared.NotFoundException;
 
 /**
@@ -31,8 +32,7 @@ public class ProviderService {
     private final ProviderRepository repository;
     private final CredentialRepository credentials;
     private final GrantRepository grants;
-    private final OpenBaoClient openBao;
-    private final ApplicationService applications;
+    private final SecretDeletionQueue secretDeletions;
     private final DestinationValidator destinations;
     private final TrafficPolicyRegistry traffic;
     private final AccountRepository accounts;
@@ -43,8 +43,7 @@ public class ProviderService {
             ProviderRepository repository,
             CredentialRepository credentials,
             GrantRepository grants,
-            OpenBaoClient openBao,
-            ApplicationService applications,
+            SecretDeletionQueue secretDeletions,
             DestinationValidator destinations,
             TrafficPolicyRegistry traffic,
             AccountRepository accounts,
@@ -53,8 +52,7 @@ public class ProviderService {
         this.repository = repository;
         this.credentials = credentials;
         this.grants = grants;
-        this.openBao = openBao;
-        this.applications = applications;
+        this.secretDeletions = secretDeletions;
         this.destinations = destinations;
         this.traffic = traffic;
         this.accounts = accounts;
@@ -64,24 +62,38 @@ public class ProviderService {
 
     @Transactional(readOnly = true)
     public List<ProviderResponse> list() {
-        return repository.findAllOwnedBy(scope.ownerFilter()).stream()
+        return repository.findAll(Sort.by("name")).stream()
                 .map(ProviderResponse::of)
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public ProviderPage catalog(String query, int page, int size) {
+        int safeSize = Math.min(Math.max(size, 1), 100);
+        var result = repository.search(
+                query == null ? "" : query.trim(), PageRequest.of(Math.max(page, 0), safeSize, Sort.by("name")));
+        var ids = result.getContent().stream().map(Provider::getId).toList();
+        var active =
+                ids.isEmpty() ? java.util.Set.<UUID>of() : credentials.findActivatedProviderIds(scope.accountId(), ids);
+        var content = result.getContent().stream()
+                .map(provider -> ProviderResponse.of(provider, active.contains(provider.getId())))
+                .toList();
+        return new ProviderPage(
+                content, result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages());
+    }
+
     @Transactional
     public ProviderResponse create(ProviderRequest request) {
-        UUID owner = scope.ownerFilter();
-        // Within one person's namespace. Somebody else's `spotify` is not a conflict with this one.
-        if (repository.existsBySlugAndOwnerId(request.slug(), owner))
-            throw new IllegalArgumentException("You already have an API with that slug");
+        requireAdministrator();
+        if (repository.existsBySlug(request.slug()))
+            throw new IllegalArgumentException("An API with that slug already exists");
         var provider = new Provider(
-                accounts.getReferenceById(owner),
                 request.name(),
                 request.slug(),
                 destination(request),
                 request.enabled(),
-                request.trafficPolicy());
+                request.trafficPolicy(),
+                auth(request));
         repository.save(provider);
         audit.recordAdmin(AuditAction.PROVIDER_CREATED, provider.getId(), provider.getSlug());
         return ProviderResponse.of(provider);
@@ -89,12 +101,19 @@ public class ProviderService {
 
     @Transactional
     public ProviderResponse update(UUID id, ProviderRequest request) {
+        requireAdministrator();
         var provider = require(id);
-        if (!provider.getSlug().equals(request.slug())
-                && repository.existsBySlugAndOwnerId(request.slug(), scope.ownerFilter()))
-            throw new IllegalArgumentException("You already have an API with that slug");
+        if (!provider.getSlug().equals(request.slug()) && repository.existsBySlug(request.slug()))
+            throw new IllegalArgumentException("An API with that slug already exists");
+        var previousAuth = provider.getAuthType();
         provider.describe(request.name(), request.slug(), destination(request), request.enabled());
         provider.applyTrafficPolicy(request.trafficPolicy());
+        provider.applyAuth(auth(request));
+        var personalCredentials = credentials.findAllByProviderId(id);
+        if (!previousAuth.anonymous() && provider.getAuthType().anonymous())
+            secretDeletions.enqueueAll(
+                    personalCredentials.stream().map(Credential::getSecretPath).toList());
+        personalCredentials.forEach(credential -> credential.adoptProviderStrategy(previousAuth));
         traffic.forgetProvider(id);
         audit.recordAdmin(AuditAction.PROVIDER_UPDATED, provider.getId(), provider.getSlug());
         return ProviderResponse.of(provider);
@@ -102,19 +121,21 @@ public class ProviderService {
 
     @Transactional
     public void delete(UUID id) {
+        requireAdministrator();
         var provider = require(id);
 
         // An API is one operator-facing record even though the gateway stores it as a provider,
         // credential and any number of grants. Remove that aggregate in dependency order so a
         // failed delete cannot leave the slug occupied by an invisible provider.
+        //
+        // Every removal goes through the session rather than a bulk statement, and the database
+        // cascade behind it is only a backstop. Reading a grant here makes it managed, and a managed
+        // grant still points at the provider and the credential it was read with; Hibernate refuses
+        // to flush a live row referencing a removed one, which is the opaque HTTP 500 an operator
+        // used to get for any API a service was connected to.
         var connectedGrants = grants.findAllByProviderId(id);
-        var connectedApplications = connectedGrants.stream()
-                .map(grant -> grant.getApplication().getId())
-                .distinct()
-                .toList();
         for (var grant : connectedGrants) traffic.forgetGrant(grant.getId());
-        grants.deleteAllInBatch(connectedGrants);
-        for (UUID applicationId : connectedApplications) applications.deleteIfUnconnected(applicationId);
+        grants.deleteAll(connectedGrants);
 
         var heldCredentials = credentials.findAllByProviderId(id);
         var storedPaths = heldCredentials.stream()
@@ -122,28 +143,18 @@ public class ProviderService {
                 .map(credential -> credential.getSecretPath())
                 .toList();
         for (var credential : heldCredentials) traffic.forgetCredential(credential.getId());
-        credentials.deleteAllInBatch(heldCredentials);
+        credentials.deleteAll(heldCredentials);
 
         repository.delete(provider);
         traffic.forgetProvider(id);
-        destroyAfterCommit(storedPaths);
+        secretDeletions.enqueueAll(storedPaths);
         audit.recordAdmin(AuditAction.PROVIDER_DELETED, id, provider.getSlug());
-    }
-
-    /** OpenBao changes only after PostgreSQL accepted the whole aggregate deletion. */
-    private void destroyAfterCommit(List<String> secretPaths) {
-        if (secretPaths.isEmpty()) return;
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                for (String path : secretPaths) openBao.delete(path);
-            }
-        });
     }
 
     /** Drops every response Janus is holding for this destination, without changing its policy. */
     @Transactional
     public int purgeCache(UUID id) {
+        requireAdministrator();
         var provider = require(id);
         int dropped = traffic.forgetProvider(id);
         audit.recordAdmin(AuditAction.PROVIDER_CACHE_PURGED, id, provider.getSlug() + " (" + dropped + " entries)");
@@ -156,13 +167,45 @@ public class ProviderService {
         return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }
 
+    private Provider.Auth auth(ProviderRequest request) {
+        var auth = request.auth();
+        switch (auth.type()) {
+            case API_KEY_HEADER -> {
+                if (auth.headerName() == null || !auth.headerName().matches("[A-Za-z0-9-]{1,100}"))
+                    throw new IllegalArgumentException("A valid header name is required for a header API key");
+            }
+            case API_KEY_QUERY -> {
+                if (auth.queryParameter() == null || !auth.queryParameter().matches("[A-Za-z0-9._~-]{1,100}"))
+                    throw new IllegalArgumentException("A valid query parameter name is required");
+            }
+            case OAUTH2_CLIENT_CREDENTIALS -> {
+                if (auth.tokenUrl() == null || auth.tokenUrl().isBlank())
+                    throw new IllegalArgumentException("A token endpoint is required");
+                auth = new Provider.Auth(
+                        auth.type(),
+                        null,
+                        null,
+                        destinations.validate(auth.tokenUrl()).toString(),
+                        auth.tokenScopes(),
+                        auth.tokenClientAuth());
+            }
+            default -> {
+                // No extra configuration belongs to this strategy.
+            }
+        }
+        return auth;
+    }
+
+    private void requireAdministrator() {
+        if (scope.role() == AccountRole.USER)
+            throw new org.springframework.security.access.AccessDeniedException("Only administrators manage APIs");
+    }
+
     /**
      * Scoped, always. A record belonging to somebody else answers "not found" rather than "not
      * allowed": a 403 would confirm that the identifier exists, which is an enumeration oracle.
      */
     private Provider require(UUID id) {
-        return repository
-                .findOwnedBy(id, scope.ownerFilter())
-                .orElseThrow(() -> new NotFoundException("Provider not found"));
+        return repository.findById(id).orElseThrow(() -> new NotFoundException("Provider not found"));
     }
 }

@@ -3,10 +3,8 @@ package io.janus.accounts;
 /**
  * What a person may do in the console.
  *
- * <p>The ladder governs accounts, and only accounts. Owning an API is not something a role
- * overrides: every role sees its own services, APIs, secrets and access rules and nobody else's, an
- * administrator included, and there is no supervising view of somebody else's registry, journal or
- * traffic. What administration buys is the right to say who may sign in. Nothing else.
+ * <p>Every role owns its applications, credentials and grants. Administrators additionally manage
+ * accounts and the shared API catalogue; they still cannot read another account's secret material.
  */
 public enum AccountRole {
     /** Manages every account, administrators included, and is the only role that can. */
@@ -16,7 +14,7 @@ public enum AccountRole {
     /** Holds their own registry. The ordinary account, and what most people are. */
     USER;
 
-    /** Whether this role manages accounts at all. It says nothing about reading anybody's records. */
+    /** Whether this role manages accounts and the shared API catalogue. */
     public boolean administers() {
         return this == SUPER_ADMIN || this == ADMIN;
     }

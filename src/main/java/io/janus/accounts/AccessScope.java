@@ -12,11 +12,9 @@ import org.springframework.stereotype.Component;
  * which one a request gets, and services ask it rather than trusting a controller to pass the right
  * value — a controller that forgets is a controller that leaks somebody else's records.
  *
- * <p>{@link #ownerFilter()} is <em>always</em> the caller's own account, whatever their role. There
- * is no supervising view: an administrator exists to say who may sign in, and that is the whole of
- * the difference. Everything a person did not register — a service, an API, a secret, an access
- * rule, the journal entries about them, the traffic they caused — belongs to somebody else and is
- * not theirs to read.
+ * <p>{@link #ownerFilter()} is <em>always</em> the caller's own account for personal records:
+ * applications, credentials, grants, notifications and audit entries. Providers are the deliberate
+ * exception: they form a global catalogue readable by everyone and writable by administrators.
  *
  * <p><strong>It fails closed.</strong> An unauthenticated caller reaching a scoped query is a bug,
  * and answering it unfiltered would turn the separation into decoration. Janus's own paths — the

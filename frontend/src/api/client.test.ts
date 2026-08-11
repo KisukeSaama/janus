@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { api, ApiError, AUTH_REQUIRED, del, post, put } from './client';
+import { api, ApiError, AUTH_REQUIRED, del, download, post, put } from './client';
 
 /** The shape fetch returns, with only the parts the client actually reads. */
 function answer(status: number, body?: unknown, headers: Record<string, string> = {}) {
@@ -104,6 +104,48 @@ describe('cross-site request forgery', () => {
     await post('/providers', {});
 
     expect(sentHeaders()['X-XSRF-TOKEN']).toBe('token-1');
+  });
+});
+
+/** A file goes through the same session as everything else, and fails the same way. */
+describe('downloading', () => {
+  function file(status: number, body?: unknown) {
+    return { ...answer(status, body), blob: async () => new Blob(['occurred_at\r\n']) } as unknown as Response;
+  }
+
+  // jsdom implements neither half of the object URL API the save goes through.
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => 'blob:janus');
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  it('saves what the endpoint answered under the name it was given', async () => {
+    fetchMock.mockResolvedValue(file(200));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    await download('/audit-events/export?outcome=DENIED', 'janus-activity.csv');
+
+    expect(lastCall()[0]).toBe('/api/admin/audit-events/export?outcome=DENIED');
+    expect(lastCall()[1].credentials).toBe('same-origin');
+    expect(click).toHaveBeenCalledOnce();
+    // Nothing is left behind in the document once the browser has been handed the file.
+    expect(document.querySelector('a')).toBeNull();
+  });
+
+  it('reports a refused session rather than saving the refusal', async () => {
+    fetchMock.mockResolvedValue(file(401));
+
+    await expect(download('/audit-events/export', 'janus-activity.csv')).rejects.toMatchObject({
+      code: 'AUTH_REQUIRED',
+    });
+  });
+
+  it("explains a refusal in the backend's own words", async () => {
+    fetchMock.mockResolvedValue(file(400, { detail: 'The range must start before it ends' }));
+
+    await expect(download('/audit-events/export', 'janus-activity.csv')).rejects.toThrow(
+      'The range must start before it ends',
+    );
   });
 });
 

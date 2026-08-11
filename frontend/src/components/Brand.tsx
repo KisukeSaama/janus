@@ -19,11 +19,6 @@ export function Mark({ size = 16, accent = false }: { size?: number; accent?: bo
  * Set tight rather than spaced out. Wide letterspacing on a name is a lobby sign; this is a tool,
  * and it says its name once at the top of the window.
  */
-
-/**
- * Set tight rather than spaced out. Wide letterspacing on a name is a lobby sign; this is a tool,
- * and it says its name once at the top of the window.
- */
 export function Wordmark({ subtitle, accent = true }: { subtitle?: string; accent?: boolean }) {
   return (
     <span className="flex items-center gap-2.5">
@@ -35,10 +30,3 @@ export function Wordmark({ subtitle, accent = true }: { subtitle?: string; accen
     </span>
   );
 }
-
-/* ── Marks and status ──────────────────────────────────────────────────── */
-
-/**
- * PROD is a filled orange stamp, DEV an outlined neutral one. Fill and weight carry the difference
- * as well as hue, and the word is always spelled out.
- */

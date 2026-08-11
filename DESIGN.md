@@ -69,7 +69,7 @@ Instrument Sans sets a touch tight at display sizes and a touch loose in small c
 
 - Radius `5px` on controls, `8px` on panels.
 - Inputs sit on `sunk`, one step below the panel they live in, and rise to `surface` on focus. A field is a hole in the page, not a rectangle drawn on it.
-- Primary action: filled accent. Secondary: surface with a rule. Quiet: text only. Destructive: `bad` text with a matching hairline, and only after arming.
+- Primary action: filled accent. Secondary: surface with a rule. Quiet: text only. Destructive: `bad` text with a matching hairline, and never without being confirmed first.
 - Elevation comes from hairlines. One shadow level, reserved for overlays.
 - Focus is a 2px accent outline at 2px offset, never a colour that could read as a status.
 - Targets are 38px high, and `@media (pointer: coarse)` lifts them to 44px. The breakpoint is the input device, not the viewport.
@@ -79,7 +79,10 @@ Instrument Sans sets a touch tight at display sizes and a touch loose in small c
 - **Selected states never change font weight.** Bolding the current tab widens it and shoves its neighbours sideways on every switch. The accent fill, the 2px rule, and the text colour say it without moving anything.
 - Segmented controls (the outcome filter) are sized to land on the same baseline as the buttons beside them, and lift to a thumb-sized target under `pointer: coarse` like every other control.
 - Rail destinations are marked by fill, not by weight or by a coloured stripe down their edge: the current one takes the `sunk` ground and an `accent-text` icon, hover takes a 55% wash of the same fill.
-- Consequential actions arm in place instead of opening a modal, and the slot keeps its width so arming never shifts the row.
+- **Consequential actions are confirmed in a dialog, and there is only one of them.** `ConfirmDialog` takes the middle of the window, dims the page behind it, and states what is about to happen, to which record, and what will be true afterwards. Every confirmation in the console arrives on that surface, whether it was raised from a row, from a record, from a menu, or from inside the setup flow: a question asked four different ways is four things to learn, and a note beside a button is easy to answer without having read it. Confirmations were previously armed in place, anchored to their trigger; nothing in the console does that any more.
+- Two details of the dialog are load-bearing. A destructive one opens with focus on the way out, so the key that dismisses it is never the key that fires it. And it is sealed while its request is in flight, because a confirmation dismissed mid-write leaves the reader with no idea whether the write happened.
+- **A row shows one verb.** Past two, the rest go under a `⋯` menu and the row keeps only what the reader came to do. A register is read far more often than it is clicked, and four buttons on every line are four lines of noise for the rows nobody is acting on. The actions column takes exactly what its controls measure and never wraps: given a column that grows, it will otherwise collapse and stack its buttons four high.
+- **Two actions with the same word are two different actions.** The menu names the authority each entry acts under — your account, the whole deployment — because `Delete` beside `Delete` was a personal credential beside every account's access to an API.
 
 ## The unit of work
 
@@ -87,9 +90,9 @@ Janus stores four records to authorize one call: an application, a provider, a c
 
 The console calls that statement a **connection**. It is assembled on the client from the grant and the three records it points at, owns no state of its own, and every edit still goes through the ordinary endpoints, so the registry stays the single source of truth. Three consequences:
 
-- **Connections is the home screen.** One row per statement: who calls what, with which secret, at which gateway address, and whether calls are being forwarded right now. `Live`, `Paused`, and `Not forwarding` are three different states, and the third is the one four separate tables cannot show: a grant that reads active while its provider is disabled.
-- **A connection has a page.** How to call it, where it goes, how often, which secret it presents, how old the caller's key is, and how to stop it. The destination and its traffic policy are edited here rather than in a collection of their own: a registered API and the connection that is its only reason to exist were never read apart. It is the only screen that reads all four `enabled` flags in the order the gateway reads them, so it names the record that would refuse the call instead of saying "inactive".
-- **The registry keeps two collections**, not four. Applications, because a key is revoked and reissued one caller at a time and the reader needs to see which APIs each one may reach; and the APIs themselves, because a stored secret and the date it stops working are maintained on their own schedule. Destinations and grants have no page: both are edited on the connection.
+- **The connections are the home screen.** One row per statement: who calls what, with which secret, at which gateway address, and whether calls are being forwarded right now. `Live`, `Paused`, and `Not forwarding` are three different states, and the third is the one four separate tables cannot show: a grant that reads active while its provider is disabled. The list is a section of the dashboard rather than a destination of its own, under a head that carries how many of them are live.
+- **A connection has a page.** How to call it, where it goes, how often, which personal credential it presents, how old the caller's key is, and how to stop it. The global destination and traffic policy are editable there only for administrators; every account can manage its own credential and grant. It is the only screen that reads all four `enabled` flags in gateway order, so it names the record that would refuse the call instead of saying "inactive".
+- **The registry keeps two collections.** Applications remain personal machine identities. APIs form one searchable, paginated catalogue shared by the deployment: administrators define destinations, authentication strategies, cache policy and limits; each account activates catalogue entries and provisions its own credentials. Grants subscribe that account's applications to its activations.
 
 Vocabulary follows: applications are **applications** — what calls the gateway — and the provider-plus-credential pair is an **API**. Grants have no name in the console at all: they are the connection.
 
@@ -97,7 +100,9 @@ Vocabulary follows: applications are **applications** — what calls the gateway
 
 Setup takes the whole window for the length of one task. It is the reason the console exists, and a 480px rail is the wrong shape for a decision taken in three steps; everything else stays in the side panel.
 
-Two steps, six fields: the API and its address, then the key it expects and who may call it. The gateway path is derived from the API's name and shown as a whole URL, because what a developer recognises later is the address, not the fragment it was built from. Nothing asks which paths the caller may reach — registering an API admits it to all of them — which is what let a third step holding two fields and a summary disappear. The second ends on what is about to be created, in one glance.
+Administrators can register an API and its authentication contract, then provision their own credential. Ordinary users enter through the catalogue: search, activate, and provide only the credential fields required by the administrator-selected strategy.
+
+**Registering is not activating.** The flow writes the catalogue entry, which belongs to the deployment; what makes an API active for somebody is the credential their own account holds for it. The step that would provision the administrator's alongside it is one unticked box, so an entry written on behalf of everyone does not silently make its author a caller of it. Ticked, the secret is asked for and both records are created in the same unwound-on-failure order as before. The public path is global — `/gateway/{slug}` — because the application key and grant already identify who may call it.
 
 The four records are created in dependency order and unwound in reverse if a later one is refused, so a failed attempt never leaves half a connection behind.
 
@@ -115,25 +120,39 @@ Its examples are assembled from a connection that exists in this deployment — 
 
 Prose and machine data meet inside the same sentence more often here than anywhere else in the console, so the dictionary marks the literal parts and the page sets them in the monospace. A status, a header, and a path pattern are not words.
 
-## Needs attention
+## The dashboard
 
-The console leads with the work, not the inventory. Five checks are computed from data already on screen: connections that look active and forward nothing, secrets reaching the date recorded for them, keys older than 90 days, services holding a key they never use, and stored secrets no connection references.
+The home screen is one page read top to bottom the way a day is: what is wrong, what is about to be, what exists, what just happened. `Needs attention`, `Coming due`, the connections, the last decisions from the log. Every section reads records the page already holds, so the whole thing costs the four requests the connections cost on their own.
+
+It is called the dashboard rather than the connections because three of those four sections are not the inventory, and a destination named after its longest table is a destination nobody reads the top of.
+
+### Needs attention
+
+The console leads with the work, not the inventory. Four checks are computed from data already on screen: connections that look active and forward nothing, keys older than 90 days, services holding a key they never use, and stored secrets no connection references.
 
 Each finding states what is wrong, what to do, and names the records concerned. It also carries their identifiers, so `Review` filters the list down to exactly those rows rather than returning the reader to a full table. When nothing is wrong, it says so, quietly.
+
+### Coming due
+
+The deadlines close enough to be work, soonest first, with whatever has already lapsed at the top. Each line is the secret, the API it belongs to, and the recorded date beside how far off it is. Past six the rest are a count and the whole register is one click away, because a section that quietly showed the first six would read as the whole list.
+
+It is a section and not a fifth finding: `two secrets are reaching the dates recorded for them` is the same sentence with the names, the dates and the order taken out. A count is what you write when you have nowhere to put the records; here there is somewhere.
 
 **An expiry date is shown twice, and stated once.** A key issued by another company announces its own end nowhere, so storing a secret records the date it stops working, and Janus is what remembers it. The APIs table shows that date beside how far off it is — the date alone is a fact nobody converts in their head, "in 5 days" alone is a claim you cannot check — and the tone appears only once the deadline is near enough to be work. A key due in nine months is drawn as quietly as one with no date at all.
 
 The announcement itself is made once per stage: quietly at thirty days, insistently at seven, then on the day. Not every morning until someone acts, because a notice that repeats is a notice that gets filtered. It reaches the notification menu in the top bar and, for whoever has not opened the console, one mail per sweep rather than one per key. The menu is deliberately not cleared by being looked at: a badge that disappears on a glance is how a key expires anyway. Marking read and dismissing are both things you choose to do.
 
+The menu and `Coming due` are not the same list, which is why the menu with nothing in it says `No notifications` rather than naming a window of days. An announcement is an event, raised once per stage and answered by being read. A deadline is a state, true until somebody stores a new date. Dismissing the announcement cannot move the date, so dismissing it does not take the secret off the dashboard.
+
 Key age is why `apiKeyRotatedAt` exists in the schema: creation time answers "when was this registered", not "how old is the key in circulation", and the two diverge the first time a key is rotated. The services table shows key age instead of registration date, marks anything past the threshold, and raises its `Rotate key` button from quiet to outlined so the recommended action looks like one.
 
 ## Layout
 
-**A rail, a bar, and one page under them.** The rail is 256px, fixed from the top of the window to the bottom, and it names all seven destinations at once: what an operator does (connections, activity) above what Janus stores (services, APIs, secrets, access rules), with the guide under both. Tabs could only ever show the first tier and kept the four collections one click deep, behind a segmented control that existed on a single page; as a nav group they are addressed directly, and the tier they used to occupy inside the page is gone.
+**A rail, a bar, and one page under them.** The rail is 256px, fixed from the top of the window to the bottom, and it names all seven destinations at once: what an operator does (the dashboard, activity) above what Janus stores (services, APIs, secrets, access rules), with the guide under both. Tabs could only ever show the first tier and kept the four collections one click deep, behind a segmented control that existed on a single page; as a nav group they are addressed directly, and the tier they used to occupy inside the page is gone.
 
-Each destination carries how many records it currently holds, withheld until the first load lands rather than counting to zero and correcting itself. The guide carries no figure at all, because it holds nothing. The current one is marked by a filled ground and an accent icon, never a heavier word.
+Each collection carries how many records it currently holds, withheld until the first load lands rather than counting to zero and correcting itself. The dashboard, the log and the guide carry no figure at all, because none of them is a collection: what the dashboard counts is on the head of the section it counts. The current one is marked by a filled ground and an accent icon, never a heavier word.
 
-The bar above the content holds only what is true of every page: what is coming due, refresh, and settings. Below 60rem the rail becomes a drawer behind one button and the wordmark moves into the bar.
+The bar above the content holds only what is true of every page: what Janus has announced, refresh, and settings. Below 60rem the rail becomes a drawer behind one button and the wordmark moves into the bar.
 
 Content is capped at 1360px inside the rail, with 24px desktop and 16px mobile gutters.
 
@@ -147,7 +166,7 @@ Forms live in a right-hand panel at 480px, and become a bottom sheet below 60rem
 
 ## Where you are is in the address bar
 
-Every destination has a URL — `/connections`, `/connections/{id}`, `/activity`, `/registry/{record}` — so a page can be linked to, reloaded, and reached with the back button. Position used to live in component state, which meant none of that worked and a refresh always landed on the home page. nginx serves `index.html` on any unmatched path, so a deep link survives a cold load.
+Every destination has a URL — `/dashboard`, `/connections/{id}`, `/activity`, `/registry/{record}` — so a page can be linked to, reloaded, and reached with the back button. A connection keeps an address of its own rather than one under the dashboard, because it is a record and not a state of the page that lists it; `/connections` on its own, which was the home before the dashboard was, lands on the dashboard. Position used to live in component state, which meant none of that worked and a refresh always landed on the home page. nginx serves `index.html` on any unmatched path, so a deep link survives a cold load.
 
 Seven destinations do not justify a routing library. The History API and one parser do it, in one file that knows the shape of every URL.
 

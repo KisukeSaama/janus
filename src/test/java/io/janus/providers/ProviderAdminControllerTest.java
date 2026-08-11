@@ -9,6 +9,7 @@ import java.util.*;
 
 import org.junit.jupiter.api.*;
 import org.mockito.Mockito;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -16,28 +17,25 @@ import io.janus.accounts.AccessScope;
 import io.janus.accounts.Account;
 import io.janus.accounts.AccountRepository;
 import io.janus.accounts.TestAccount;
-import io.janus.applications.Application;
-import io.janus.applications.ApplicationService;
 import io.janus.audit.AuditAction;
 import io.janus.audit.AuditService;
 import io.janus.credentials.CredentialRepository;
 import io.janus.gateway.TrafficPolicyRegistry;
 import io.janus.grants.GrantRepository;
-import io.janus.openbao.OpenBaoClient;
+import io.janus.openbao.SecretDeletionQueue;
 import io.janus.shared.ApiExceptionHandler;
 
 /**
  * The registry of destinations, exercised through the surface an administrator actually uses.
  *
- * <p>Two rules carry most of the weight here: a destination belongs to somebody, and every write
- * has to reach the running gateway. A policy that takes effect in five minutes is not a policy.
+ * <p>Two rules carry most of the weight here: the catalogue is global, and every write has to reach
+ * the running gateway. A policy that takes effect in five minutes is not a policy.
  */
 class ProviderAdminControllerTest {
     private final ProviderRepository repository = Mockito.mock(ProviderRepository.class);
     private final CredentialRepository credentials = Mockito.mock(CredentialRepository.class);
     private final GrantRepository grants = Mockito.mock(GrantRepository.class);
-    private final OpenBaoClient openBao = Mockito.mock(OpenBaoClient.class);
-    private final ApplicationService applications = Mockito.mock(ApplicationService.class);
+    private final SecretDeletionQueue secretDeletions = Mockito.mock(SecretDeletionQueue.class);
     private final TrafficPolicyRegistry traffic = Mockito.mock(TrafficPolicyRegistry.class);
     private final AccountRepository accounts = Mockito.mock(AccountRepository.class);
     private final AccessScope scope = Mockito.mock(AccessScope.class);
@@ -54,13 +52,14 @@ class ProviderAdminControllerTest {
         mvc = mvcValidatingWith(new DestinationValidator(true));
 
         when(scope.ownerFilter()).thenReturn(owner.getId());
+        when(scope.accountId()).thenReturn(owner.getId());
         when(accounts.getReferenceById(owner.getId())).thenReturn(owner);
         when(repository.save(any(Provider.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     private MockMvc mvcValidatingWith(DestinationValidator destinations) {
         var service = new ProviderService(
-                repository, credentials, grants, openBao, applications, destinations, traffic, accounts, scope, audit);
+                repository, credentials, grants, secretDeletions, destinations, traffic, accounts, scope, audit);
         return MockMvcBuilders.standaloneSetup(new ProviderAdminController(service))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
@@ -68,7 +67,7 @@ class ProviderAdminControllerTest {
 
     private static String body(String name, String slug, String baseUrl) {
         return """
-               {"name":"%s","slug":"%s","baseUrl":"%s","enabled":true}"""
+               {"name":"%s","slug":"%s","baseUrl":"%s","enabled":true,"authType":"NONE"}"""
                 .formatted(name, slug, baseUrl);
     }
 
@@ -80,7 +79,7 @@ class ProviderAdminControllerTest {
                 "https://api.spotify.com",
                 true,
                 new Provider.TrafficPolicy(true, 0, 0, 0));
-        when(repository.findOwnedBy(provider.getId(), owner.getId())).thenReturn(Optional.of(provider));
+        when(repository.findById(provider.getId())).thenReturn(Optional.of(provider));
         return provider;
     }
 
@@ -97,10 +96,10 @@ class ProviderAdminControllerTest {
         verify(audit).recordAdmin(eq(AuditAction.PROVIDER_CREATED), any(), eq("spotify"));
     }
 
-    /** A slug is unique within its owner: two people each registering Spotify is the ordinary case. */
+    /** A slug identifies one shared catalogue entry across the deployment. */
     @Test
     void refusesASlugTheSamePersonAlreadyUses() throws Exception {
-        when(repository.existsBySlugAndOwnerId("spotify", owner.getId())).thenReturn(true);
+        when(repository.existsBySlug("spotify")).thenReturn(true);
 
         mvc.perform(post("/api/admin/providers")
                         .contentType("application/json")
@@ -180,7 +179,7 @@ class ProviderAdminControllerTest {
     @Test
     void anEditThatKeepsTheSameSlugIsNotAConflictWithItself() throws Exception {
         var provider = existing();
-        when(repository.existsBySlugAndOwnerId("spotify", owner.getId())).thenReturn(true);
+        when(repository.existsBySlug("spotify")).thenReturn(true);
 
         mvc.perform(put("/api/admin/providers/" + provider.getId())
                         .contentType("application/json")
@@ -191,7 +190,7 @@ class ProviderAdminControllerTest {
     @Test
     void refusesToRenameOntoASlugAlreadyInUse() throws Exception {
         var provider = existing();
-        when(repository.existsBySlugAndOwnerId("deezer", owner.getId())).thenReturn(true);
+        when(repository.existsBySlug("deezer")).thenReturn(true);
 
         mvc.perform(put("/api/admin/providers/" + provider.getId())
                         .contentType("application/json")
@@ -209,16 +208,18 @@ class ProviderAdminControllerTest {
         verify(traffic).forgetProvider(provider.getId());
     }
 
-    /** Removing an API removes its dependent records instead of leaving its slug occupied. */
+    /**
+     * Removing an API removes its dependent records instead of leaving its slug occupied — and
+     * removes them through the session, in dependency order. A bulk statement would leave the grants
+     * this method just read still managed and still pointing at a removed provider, which Hibernate
+     * refuses at commit rather than at the call, so it reaches the operator as an opaque HTTP 500.
+     */
     @Test
     void removesConnectionsAndCredentialMetadataWithTheDestination() throws Exception {
         var provider = existing();
         var grant = Mockito.mock(io.janus.grants.Grant.class);
-        var application = Mockito.mock(Application.class);
         var credential = Mockito.mock(io.janus.credentials.Credential.class);
         when(grant.getId()).thenReturn(UUID.randomUUID());
-        when(grant.getApplication()).thenReturn(application);
-        when(application.getId()).thenReturn(UUID.randomUUID());
         when(credential.getId()).thenReturn(UUID.randomUUID());
         when(credential.getAuthType()).thenReturn(io.janus.credentials.AuthType.NONE);
         when(grants.findAllByProviderId(provider.getId())).thenReturn(List.of(grant));
@@ -226,10 +227,27 @@ class ProviderAdminControllerTest {
 
         mvc.perform(delete("/api/admin/providers/" + provider.getId())).andExpect(status().isOk());
 
-        verify(grants).deleteAllInBatch(List.of(grant));
-        verify(applications).deleteIfUnconnected(application.getId());
-        verify(credentials).deleteAllInBatch(List.of(credential));
-        verify(repository).delete(provider);
+        var order = inOrder(grants, credentials, repository);
+        order.verify(grants).deleteAll(List.of(grant));
+        order.verify(credentials).deleteAll(List.of(credential));
+        order.verify(repository).delete(provider);
+        verify(grants, never()).deleteAllInBatch(any());
+        verify(credentials, never()).deleteAllInBatch(any());
+    }
+
+    /** The durable cleanup request is committed with the metadata deletion. */
+    @Test
+    void queuesStoredValuesForDestructionWhenRemovingAnApi() throws Exception {
+        var provider = existing();
+        var credential = Mockito.mock(io.janus.credentials.Credential.class);
+        when(credential.getId()).thenReturn(UUID.randomUUID());
+        when(credential.getAuthType()).thenReturn(io.janus.credentials.AuthType.BEARER);
+        when(credential.getSecretPath()).thenReturn("janus/tmdb/credential");
+        when(credentials.findAllByProviderId(provider.getId())).thenReturn(List.of(credential));
+
+        mvc.perform(delete("/api/admin/providers/" + provider.getId())).andExpect(status().isOk());
+
+        verify(secretDeletions).enqueueAll(List.of("janus/tmdb/credential"));
     }
 
     @Test
@@ -242,18 +260,21 @@ class ProviderAdminControllerTest {
                 .andExpect(jsonPath("$.purged").value(17));
     }
 
-    // --- whose destinations are visible --------------------------------------
+    // --- the shared catalogue -------------------------------------------------
 
     @Test
-    void listsOnlyTheDestinationsInTheCallersScope() throws Exception {
+    void listsTheSharedCatalogueAsAPage() throws Exception {
         var provider = existing();
-        when(repository.findAllOwnedBy(owner.getId())).thenReturn(List.of(provider));
+        when(repository.search(eq(""), any())).thenReturn(new PageImpl<>(List.of(provider)));
+        when(credentials.findActivatedProviderIds(owner.getId(), List.of(provider.getId())))
+                .thenReturn(Set.of(provider.getId()));
 
         mvc.perform(get("/api/admin/providers"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1));
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].activated").value(true));
 
-        verify(repository).findAllOwnedBy(owner.getId());
+        verify(repository).search(eq(""), any());
     }
 
     /**
@@ -263,7 +284,7 @@ class ProviderAdminControllerTest {
     @Test
     void somebodyElsesDestinationIsNotFoundRatherThanForbidden() throws Exception {
         var id = UUID.randomUUID();
-        when(repository.findOwnedBy(id, owner.getId())).thenReturn(Optional.empty());
+        when(repository.findById(id)).thenReturn(Optional.empty());
 
         mvc.perform(delete("/api/admin/providers/" + id)).andExpect(status().isNotFound());
         mvc.perform(put("/api/admin/providers/" + id)
@@ -279,7 +300,7 @@ class ProviderAdminControllerTest {
                                 .contentType("application/json")
                                 .content(
                                         """
-                                {"name":"Spotify","slug":"spotify","baseUrl":"https://api.spotify.com","enabled":true,"rateLimitBurst":10}"""))
+                                {"name":"Spotify","slug":"spotify","baseUrl":"https://api.spotify.com","enabled":true,"authType":"NONE","rateLimitBurst":10}"""))
                 .andExpect(status().isBadRequest());
         verify(repository, never()).save(any());
     }
@@ -299,7 +320,7 @@ class ProviderAdminControllerTest {
                                 .contentType("application/json")
                                 .content(
                                         """
-                                {"name":"Spotify","slug":"spotify","baseUrl":"https://api.spotify.com","enabled":true,"rateLimitPerMinute":600,"rateLimitBurst":60}"""))
+                                {"name":"Spotify","slug":"spotify","baseUrl":"https://api.spotify.com","enabled":true,"authType":"NONE","rateLimitPerMinute":600,"rateLimitBurst":60}"""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.rateLimitBurst").value(60));
     }

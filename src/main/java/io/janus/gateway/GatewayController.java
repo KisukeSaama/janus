@@ -34,7 +34,7 @@ import io.janus.shared.CorrelationIdFilter;
  * asking, and none of it can run before authorisation has.
  */
 @RestController
-@RequestMapping({"/{username}/gateway", "/gateway"})
+@RequestMapping("/gateway")
 public class GatewayController {
     private static final Logger log = LoggerFactory.getLogger(GatewayController.class);
 
@@ -43,6 +43,7 @@ public class GatewayController {
 
     private final ProviderRepository providers;
     private final GrantRepository grants;
+    private final AuthorizationCache authorizations;
     private final DestinationValidator destinations;
     private final GatewayTrafficService traffic;
     private final AuditService audit;
@@ -52,6 +53,7 @@ public class GatewayController {
     public GatewayController(
             ProviderRepository providers,
             GrantRepository grants,
+            AuthorizationCache authorizations,
             DestinationValidator destinations,
             GatewayTrafficService traffic,
             AuditService audit,
@@ -59,6 +61,7 @@ public class GatewayController {
             ObjectMapper mapper) {
         this.providers = providers;
         this.grants = grants;
+        this.authorizations = authorizations;
         this.destinations = destinations;
         this.traffic = traffic;
         this.audit = audit;
@@ -68,34 +71,33 @@ public class GatewayController {
 
     @RequestMapping("/{slug}/**")
     public ResponseEntity<byte[]> proxy(
-            @PathVariable(required = false) String username,
             @PathVariable String slug,
             @AuthenticationPrincipal GatewayPrincipal principal,
             HttpServletRequest request,
             @RequestBody(required = false) byte[] body) {
         var call = new Call(request, principal);
         try {
-            if (username != null && !username.equals(principal.ownerUsername()))
-                throw new Denied(HttpStatus.NOT_FOUND, "Provider is not available");
-            var route = username == null
-                    ? GatewayPath.parse(request.getRequestURI(), slug, request.getQueryString())
-                    : GatewayPath.parse(request.getRequestURI(), username, slug, request.getQueryString());
+            var route = GatewayPath.parse(request.getRequestURI(), slug, request.getQueryString());
             call.routed(route.decodedPath());
 
             var method = HttpMethod.valueOf(request.getMethod());
             if (!SUPPORTED_METHODS.contains(method))
                 throw new Denied(HttpStatus.METHOD_NOT_ALLOWED, "HTTP method is not supported by the gateway");
 
-            // A slug is resolved inside the calling application's owner's namespace: two people may
-            // each have registered `spotify`, and the caller decides which one it meant by which key
-            // it presented. Somebody else's slug is simply not a destination here.
-            var provider = providers
-                    .findBySlugAndOwnerIdAndEnabledTrue(slug, principal.ownerId())
+            // Both reads go through the short-lived registry cache. What it holds is what an
+            // administrative change invalidates, so an authorisation decision is never older than
+            // the change that should have altered it — see AuthorizationCache.
+            var provider = authorizations
+                    .provider(slug, () -> providers.findBySlugAndEnabledTrue(slug))
                     .orElseThrow(() -> new Denied(HttpStatus.NOT_FOUND, "Provider is not available"));
             call.reached(provider);
             destinations.validateShape(provider.getBaseUrl());
 
-            var grant = grants.findActive(principal.applicationId(), provider.getId())
+            var grant = authorizations
+                    .grant(
+                            principal.applicationId(),
+                            provider.getId(),
+                            () -> grants.findActive(principal.applicationId(), provider.getId()))
                     .orElseThrow(() -> new Denied(HttpStatus.FORBIDDEN, "No active grant for this provider"));
             if (!grant.getCredential().isEnabled()) throw new Denied(HttpStatus.FORBIDDEN, "Credential is disabled");
 

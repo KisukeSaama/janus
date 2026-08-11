@@ -15,7 +15,8 @@ class ResponseCacheTest {
         return new ResponseCache(new GatewayTrafficProperties(
                 new GatewayTrafficProperties.Cache(true, maxEntries, maxEntryBytes, maxTotalBytes, 300),
                 new GatewayTrafficProperties.Throttle(2000, 300),
-                new GatewayTrafficProperties.Retry(2, 200, 2000)));
+                new GatewayTrafficProperties.Retry(2, 200, 2000),
+                new GatewayTrafficProperties.Authorization(true, 10, 100)));
     }
 
     private static ResponseCache.Entry entry(long freshForMillis, byte[] body, Map<String, String> vary) {
@@ -78,11 +79,55 @@ class ResponseCacheTest {
         assertTrue(cache.lookup(key("/v1/orders"), new HttpHeaders()).isEmpty());
     }
 
+    /**
+     * Two representations of one resource, held at once. Keyed on the resource alone they evicted
+     * each other on every request, and the store answered nothing while reporting a healthy entry
+     * count — the one failure here that is invisible from the outside.
+     */
+    @Test
+    void holdsOneEntryPerRepresentationOfAResourceThatVaries() {
+        var cache = cache(10, 1024, 8192);
+        var english = new HttpHeaders();
+        english.add(HttpHeaders.ACCEPT_LANGUAGE, "en");
+        var french = new HttpHeaders();
+        french.add(HttpHeaders.ACCEPT_LANGUAGE, "fr");
+
+        cache.store(key("/v1/orders"), entry(60_000, "en".getBytes(), Map.of("accept-language", "en")));
+        cache.store(key("/v1/orders"), entry(60_000, "fr".getBytes(), Map.of("accept-language", "fr")));
+
+        assertArrayEquals(
+                "en".getBytes(),
+                cache.lookup(key("/v1/orders"), english).orElseThrow().body());
+        assertArrayEquals(
+                "fr".getBytes(),
+                cache.lookup(key("/v1/orders"), french).orElseThrow().body());
+        assertEquals(2, cache.stats().entries());
+        assertEquals(1, cache.stats().variants());
+    }
+
+    /** Dropping a resource drops every representation of it, and the names it varied by with them. */
+    @Test
+    void invalidatingAResourceTakesAllOfItsRepresentations() {
+        var cache = cache(10, 1024, 8192);
+        var english = new HttpHeaders();
+        english.add(HttpHeaders.ACCEPT_LANGUAGE, "en");
+        cache.store(key("/v1/orders"), entry(60_000, "en".getBytes(), Map.of("accept-language", "en")));
+        cache.store(key("/v1/orders"), entry(60_000, "fr".getBytes(), Map.of("accept-language", "fr")));
+
+        assertEquals(2, cache.invalidateResource(PROVIDER, CREDENTIAL, "/v1/orders"));
+        assertTrue(cache.lookup(key("/v1/orders"), english).isEmpty());
+        assertEquals(0, cache.stats().entries());
+        assertEquals(0, cache.stats().variants());
+    }
+
     @Test
     void aBodyLargerThanTheLimitIsNeverStored() {
         var cache = cache(10, 8, 8192);
         cache.store(key("/v1/orders"), entry(60_000, new byte[64], Map.of()));
         assertTrue(cache.lookup(key("/v1/orders"), new HttpHeaders()).isEmpty());
+        // Counted, or a provider whose responses are all too large looks exactly like one nobody
+        // calls: no entries, no hits, and no way to tell the two apart.
+        assertEquals(1, cache.stats().oversized());
     }
 
     @Test
@@ -153,7 +198,8 @@ class ResponseCacheTest {
         var disabled = new ResponseCache(new GatewayTrafficProperties(
                 new GatewayTrafficProperties.Cache(false, 10, 1024, 8192, 300),
                 new GatewayTrafficProperties.Throttle(2000, 300),
-                new GatewayTrafficProperties.Retry(2, 200, 2000)));
+                new GatewayTrafficProperties.Retry(2, 200, 2000),
+                new GatewayTrafficProperties.Authorization(true, 10, 100)));
         assertFalse(disabled.isEnabled());
         disabled.store(key("/v1/orders"), entry(60_000, "a".getBytes(), Map.of()));
         assertTrue(disabled.lookup(key("/v1/orders"), new HttpHeaders()).isEmpty());

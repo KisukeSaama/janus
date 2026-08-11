@@ -48,6 +48,10 @@
   --color-warn-wash: var(--c-warn-wash);
   --color-bad-wash: var(--c-bad-wash);
 
+  /* The dimming behind an overlay is a colour of the system like any other, so it is named here
+     rather than reached for as a raw variable by the four surfaces that dim the page. */
+  --color-scrim: var(--c-scrim);
+
   --radius-control: 5px;
   --radius-panel: 8px;
 
@@ -75,6 +79,15 @@
 
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
   --shadow-overlay: 0 24px 60px -20px var(--c-shadow), 0 2px 6px -2px var(--c-shadow);
+
+  /*
+   * The console's one motion setting, made the default for every `transition-*` utility rather than
+   * repeated beside each of them. Left to the framework, a hover was 150ms on an ease-in-out curve
+   * while the button under it was 160ms on the exponential one, which is two different consoles
+   * animating the same row. Stated once, nothing has to remember it.
+   */
+  --default-transition-duration: 160ms;
+  --default-transition-timing-function: var(--ease-out-quint);
 }
 
 /* Dark is the product default: the console is read beside a terminal and an editor, not on paper. */
@@ -91,8 +104,13 @@
   --c-surface: oklch(0.203 0.009 268);
   --c-sunk: oklch(0.246 0.01 268);
   --c-line: oklch(0.3 0.011 268);
-  /* Control borders, not decorative rules: held at 3:1 against the surface for WCAG 1.4.11. */
-  --c-line-strong: oklch(0.505 0.014 268);
+  /*
+   * Control borders, not decorative rules: held at 3:1 for WCAG 1.4.11 against every ground a
+   * control actually sits on, which is `sunk` as well as `surface`. Measured only against the panel
+   * it reached 2.75:1 on the lightest of the three, so a field inside a sunk block — the gateway
+   * address in the setup flow — drew its own edge below the threshold the rule was written for.
+   */
+  --c-line-strong: oklch(0.535 0.0145 268);
 
   --c-text: oklch(0.963 0.003 268);
   --c-text-2: oklch(0.79 0.008 268);
@@ -124,7 +142,7 @@
   --c-surface: oklch(0.998 0.002 268);
   --c-sunk: oklch(0.945 0.006 268);
   --c-line: oklch(0.892 0.008 268);
-  --c-line-strong: oklch(0.66 0.012 268);
+  --c-line-strong: oklch(0.62 0.0125 268);
 
   --c-text: oklch(0.225 0.012 268);
   --c-text-2: oklch(0.44 0.012 268);
@@ -160,10 +178,9 @@
     /* The platform scrollbar is drawn light by default and punches a hole in a dark console. */
     scrollbar-color: var(--c-line-strong) transparent;
     /*
-     * The gutter is reserved whether or not the page scrolls. Without it, moving from a page that
-     * overflows to one that does not takes the scrollbar away, widens the viewport by its width, and
-     * slides every centred thing on the page sideways. That shift is read as the interface being
-     * loose, and it is the one layout bug no component can fix on its own.
+     * The gutter is reserved whether or not the page is long enough to need it. Without it, moving
+     * from the log to a short record takes the scrollbar away and slides the whole console sideways
+     * by its width, which reads as the layout having changed rather than the page.
      */
     scrollbar-gutter: stable;
   }
@@ -200,8 +217,14 @@
     cursor: not-allowed;
   }
 
+  /*
+   * The ring is drawn in `accent-edge` rather than `accent`. In dark the two are the same colour, so
+   * nothing changes; in light the fill is a bright orange that only reached 2.6:1 against the page
+   * behind it, and a focus ring nobody can see on a white ground is the one indicator that has to be
+   * visible on every ground. The edge tone clears 3:1 on canvas, surface and sunk alike.
+   */
   :focus-visible {
-    outline: 2px solid var(--c-accent);
+    outline: 2px solid var(--c-accent-edge);
     outline-offset: 2px;
     border-radius: 2px;
   }
@@ -439,9 +462,10 @@
     color: var(--c-accent-text);
   }
 
+  /* The rail is what a phone touches most, so it takes the same floor every other control does. */
   @media (pointer: coarse) {
     .nav-item {
-      min-height: 42px;
+      min-height: 44px;
     }
   }
 

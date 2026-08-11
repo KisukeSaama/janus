@@ -10,7 +10,24 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  */
 @ConfigurationProperties("janus.gateway")
 public record GatewayTrafficProperties(
-        @DefaultValue Cache cache, @DefaultValue Throttle throttle, @DefaultValue Retry retry) {
+        @DefaultValue Cache cache,
+        @DefaultValue Throttle throttle,
+        @DefaultValue Retry retry,
+        @DefaultValue Authorization authorization) {
+
+    /**
+     * How long the registry reads behind an authorised call are held. Short by design: an
+     * administrative change drops these entries explicitly, so the lifetime only bounds how long a
+     * change made on another instance goes unnoticed by this one.
+     *
+     * @param enabled    master switch; when false every proxied call reads the registry again
+     * @param ttlSeconds how long a resolved destination or grant is reused
+     * @param maxEntries destinations, and separately grants, held before the least recently used goes
+     */
+    public record Authorization(
+            @DefaultValue("true") boolean enabled,
+            @DefaultValue("10") long ttlSeconds,
+            @DefaultValue("5000") int maxEntries) {}
 
     /**
      * @param enabled             master switch; when false no response is ever stored, whatever a provider says

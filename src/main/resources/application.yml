@@ -71,7 +71,6 @@ server.servlet.session:
 
 janus:
   admin:
-    username: ${JANUS_ADMIN_USERNAME:admin}
     password: ${JANUS_ADMIN_PASSWORD:change-me-in-production}
     # Where this account's own expiry notices go. Applied while the account still carries the address
     # the migration wrote; once a real one is set, here or from the console, that one stands.
@@ -113,6 +112,13 @@ janus:
       max-entry-bytes: ${JANUS_CACHE_MAX_ENTRY_BYTES:1048576}
       max-total-bytes: ${JANUS_CACHE_MAX_TOTAL_BYTES:67108864}
       stale-if-error-seconds: ${JANUS_CACHE_STALE_IF_ERROR_SECONDS:300}
+    # The registry reads behind an authorised call — the destination and the grant — held briefly so
+    # a proxied request does not pay for them every time. Administrative changes drop these entries
+    # explicitly; the lifetime only bounds a change made on another instance.
+    authorization:
+      enabled: ${JANUS_AUTHORIZATION_CACHE_ENABLED:true}
+      ttl-seconds: ${JANUS_AUTHORIZATION_CACHE_TTL_SECONDS:10}
+      max-entries: ${JANUS_AUTHORIZATION_CACHE_MAX_ENTRIES:5000}
     throttle:
       max-wait-millis: ${JANUS_THROTTLE_MAX_WAIT_MILLIS:2000}
       max-cooldown-seconds: ${JANUS_THROTTLE_MAX_COOLDOWN_SECONDS:300}

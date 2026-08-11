@@ -10,8 +10,7 @@ image: docker:27
 #   JANUS_ADMIN_PASSWORD
 #   JANUS_OPENBAO_TOKEN
 # Optional variables:
-#   JANUS_ADMIN_USERNAME (defaults to admin)
-#   JANUS_ADMIN_EMAIL    (defaults to admin@localhost)
+#   JANUS_ADMIN_EMAIL (defaults to admin@localhost)
 
 stages:
   - test
@@ -118,7 +117,6 @@ variables:
           "APP_HOST=${APP_HOST}" \
           "CI_REGISTRY_IMAGE=${CI_REGISTRY_IMAGE}" \
           "IMAGE_TAG=${IMAGE_TAG}" \
-          "JANUS_ADMIN_USERNAME=${JANUS_ADMIN_USERNAME:-admin}" \
           "JANUS_ADMIN_EMAIL=${JANUS_ADMIN_EMAIL:-admin@localhost}" \
           > "${target}/app.env"
 

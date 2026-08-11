@@ -63,13 +63,14 @@ describe('assess', () => {
     expect(findings[0].severity).toBe('warn');
   });
 
-  it('raises a secret whose recorded deadline is approaching', () => {
+  /** `Coming due` on the dashboard names each secret and its date; a count above it said less. */
+  it('leaves the recorded deadlines to the section that states them', () => {
     const findings = assess(
       { apps: [app()], credentials: [credential({ expiresAt: inDays(3) })], connections: [connection()] },
       NOW,
     );
 
-    expect(kinds(findings)).toContain('expiringCredentials');
+    expect(findings).toEqual([]);
   });
 
   it('raises a key that has been in circulation past the rotation cadence', () => {
@@ -87,6 +88,21 @@ describe('assess', () => {
 
     expect(kinds(findings)).toEqual(expect.arrayContaining(['idleApplications', 'idleCredentials']));
     expect(findings.every((f) => f.severity === 'info')).toBe(true);
+  });
+
+  /**
+   * An open API stores nothing, so "delete it to remove the value from OpenBao" names a value that
+   * was never written. The finding it belongs to asks for the activation to be switched off instead.
+   */
+  it('tells an unused open API apart from an unused secret', () => {
+    const findings = assess(
+      { apps: [], credentials: [credential({ authType: 'NONE', name: 'pokeapi-v2-open' })], connections: [] },
+      NOW,
+    );
+
+    expect(kinds(findings)).toEqual(['idleActivations']);
+    expect(findings[0].names).toEqual(['pokeapi-v2-open']);
+    expect(findings[0].target).toBe('credentials');
   });
 
   /** A connection that is switched off does not count as reaching anything. */
@@ -136,7 +152,7 @@ describe('assess', () => {
     );
 
     expect(kinds(findings)).toEqual(
-      expect.arrayContaining(['expiringCredentials', 'staleKeys', 'idleApplications', 'idleCredentials']),
+      expect.arrayContaining(['staleKeys', 'idleApplications', 'idleCredentials']),
     );
   });
 });

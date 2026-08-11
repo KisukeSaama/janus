@@ -2,6 +2,9 @@ package io.janus.providers;
 
 import jakarta.validation.constraints.*;
 
+import io.janus.credentials.AuthType;
+import io.janus.credentials.TokenClientAuth;
+
 /**
  * What an administrator may state about a destination.
  *
@@ -28,10 +31,43 @@ public record ProviderRequest(
         Boolean cacheEnabled,
         @Min(0) @Max(86400) Integer cacheTtlSeconds,
         @Min(0) @Max(1000000) Integer rateLimitPerMinute,
-        @Min(0) @Max(100000) Integer rateLimitBurst) {
+        @Min(0) @Max(100000) Integer rateLimitBurst,
+        @NotNull AuthType authType,
+        @Size(max = 100) String headerName,
+        @Size(max = 100) String queryParameter,
+        @Size(max = 500) String tokenUrl,
+        @Size(max = 500) String tokenScopes,
+        TokenClientAuth tokenClientAuth) {
 
     public ProviderRequest {
         name = name == null ? null : name.trim();
+    }
+
+    /** Compatibility overload for clients written before authentication moved onto the API. */
+    public ProviderRequest(
+            String name,
+            String slug,
+            String baseUrl,
+            boolean enabled,
+            Boolean cacheEnabled,
+            Integer cacheTtlSeconds,
+            Integer rateLimitPerMinute,
+            Integer rateLimitBurst) {
+        this(
+                name,
+                slug,
+                baseUrl,
+                enabled,
+                cacheEnabled,
+                cacheTtlSeconds,
+                rateLimitPerMinute,
+                rateLimitBurst,
+                AuthType.NONE,
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 
     public Provider.TrafficPolicy trafficPolicy() {
@@ -40,6 +76,10 @@ public record ProviderRequest(
                 orZero(cacheTtlSeconds),
                 orZero(rateLimitPerMinute),
                 orZero(rateLimitBurst));
+    }
+
+    public Provider.Auth auth() {
+        return new Provider.Auth(authType, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth);
     }
 
     private static int orZero(Integer value) {

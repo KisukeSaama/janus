@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { AlertTriangle, Bell, Check, Info, X } from 'lucide-react';
 
 import { useDismissNotification, useMarkNotificationsRead, useNotifications, type Notification } from '../../api';
 import { ExpiryState } from '../../components';
+import { useDismiss } from '../../hooks/useDismiss';
 import { useI18n } from '../../i18n';
-import { NOTICE_DAYS, STAGE_TONE } from '../../lib/expiry';
+import { STAGE_TONE } from '../../lib/expiry';
 
 /**
  * What Janus has to say, for the operator who did open the console.
@@ -12,6 +13,10 @@ import { NOTICE_DAYS, STAGE_TONE } from '../../lib/expiry';
  * The mail reaches whoever did not. This is the same announcements, read where the records are, and
  * it is deliberately not cleared by being looked at: a badge that disappears on a glance is how a
  * key expires anyway. Marking read and dismissing are both things you choose to do.
+ *
+ * It is not the deadline list, which is a section of the dashboard. An announcement is raised once
+ * per stage and is answered by being read; a deadline stays true until a new date is stored. With
+ * nothing announced this says so and points at the page that holds the standing state.
  */
 
 const TONE_TEXT: Record<'bad' | 'warn' | 'info', string> = {
@@ -36,24 +41,7 @@ export function NotificationsMenu({ onNavigate }: { onNavigate?: () => void }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
-    };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
+  useDismiss(open, wrapRef, triggerRef, () => setOpen(false));
 
   // A feed that cannot be read is not worth an error banner over the whole console; the
   // announcements are still in the audit trail and in the mail that carried them.
@@ -111,7 +99,7 @@ export function NotificationsMenu({ onNavigate }: { onNavigate?: () => void }) {
               <Check size={17} strokeWidth={2.25} className="mt-0.5 shrink-0 text-ok" />
               <div>
                 <p className="text-sm font-medium">{t('notifications.empty')}</p>
-                <p className="mt-1 text-xs text-text-2">{t('notifications.emptyHint', { days: NOTICE_DAYS })}</p>
+                <p className="mt-1 text-xs text-text-2">{t('notifications.emptyHint')}</p>
               </div>
             </div>
           ) : (

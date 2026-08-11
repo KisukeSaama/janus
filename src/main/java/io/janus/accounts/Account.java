@@ -76,9 +76,8 @@ public class Account {
 
     /**
      * Package-private, and the only exception to the rule above: the bootstrap row is created by a
-     * migration under the name {@code admin}, and a deployment that configured a different
-     * {@code janus.admin.username} should get the name it asked for. It happens once, before the
-     * account has ever signed in or appeared in the journal.
+     * migration under the name {@code admin}, then the startup reconciler gives it the fixed
+     * bootstrap name. This also lets an existing deployment adopt that name.
      *
      * <p>The display name follows while it is still the login, which is what {@code V14} writes:
      * a shared bootstrap account names nobody, and renaming one of the two would invent a person
@@ -121,6 +120,7 @@ public class Account {
     /** Matches the value inserted by {@code V7__accounts.sql}; not a BCrypt hash, so nothing matches it. */
     static final String BOOTSTRAP_HASH = "!";
 
+    public static final String BOOTSTRAP_USERNAME = "kisuke";
     public static final UUID BOOTSTRAP_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
     public UUID getId() {

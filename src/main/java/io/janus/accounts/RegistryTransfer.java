@@ -8,8 +8,8 @@ import org.springframework.transaction.annotation.Transactional;
 import io.janus.applications.ApplicationRepository;
 import io.janus.audit.AuditAction;
 import io.janus.audit.AuditService;
+import io.janus.credentials.CredentialRepository;
 import io.janus.gateway.TrafficPolicyRegistry;
-import io.janus.providers.ProviderRepository;
 import io.janus.security.ApiKeyCache;
 
 /**
@@ -20,25 +20,25 @@ import io.janus.security.ApiKeyCache;
  * OpenBao, which nothing can then enumerate. Removing somebody therefore has to be preceded by a
  * decision about their records, and this is where that decision is carried out.
  *
- * <p>Only the two roots move. Credentials follow their provider and grants follow their application,
- * because that is where their owner was read from in the first place.
+ * <p>Applications and personal API activations move. The API catalogue itself is global and is
+ * never transferred with an account.
  */
 @Service
 public class RegistryTransfer {
     private final ApplicationRepository applications;
-    private final ProviderRepository providers;
+    private final CredentialRepository credentials;
     private final ApiKeyCache keyCache;
     private final TrafficPolicyRegistry traffic;
     private final AuditService audit;
 
     public RegistryTransfer(
             ApplicationRepository applications,
-            ProviderRepository providers,
+            CredentialRepository credentials,
             ApiKeyCache keyCache,
             TrafficPolicyRegistry traffic,
             AuditService audit) {
         this.applications = applications;
-        this.providers = providers;
+        this.credentials = credentials;
         this.keyCache = keyCache;
         this.traffic = traffic;
         this.audit = audit;
@@ -56,7 +56,7 @@ public class RegistryTransfer {
     }
 
     public Holdings holdings(UUID ownerId) {
-        return new Holdings(applications.countByOwnerId(ownerId), providers.countByOwnerId(ownerId));
+        return new Holdings(applications.countByOwnerId(ownerId), credentials.countByOwnerId(ownerId));
     }
 
     /**
@@ -74,13 +74,21 @@ public class RegistryTransfer {
             throw new IllegalArgumentException("An account cannot be handed its own records");
 
         var moved = holdings(from.getId());
+        var personalCredentials = credentials.findAllByOwnerId(from.getId());
+        personalCredentials.forEach(credential -> {
+            if (credentials
+                    .findByProviderIdAndOwnerId(credential.getProvider().getId(), to.getId())
+                    .isPresent())
+                throw new IllegalArgumentException("The destination account already activated "
+                        + credential.getProvider().getName());
+        });
         applications.findAllByOwnerId(from.getId()).forEach(application -> {
             application.transferTo(to);
             keyCache.invalidate(application.getId());
         });
-        providers.findAllByOwnerId(from.getId()).forEach(provider -> {
-            provider.transferTo(to);
-            traffic.forgetProvider(provider.getId());
+        personalCredentials.forEach(credential -> {
+            credential.transferTo(to.getId());
+            traffic.forgetCredential(credential.getId());
         });
 
         audit.recordAdmin(

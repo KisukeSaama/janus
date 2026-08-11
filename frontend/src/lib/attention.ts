@@ -1,6 +1,5 @@
 import type { Application, Credential } from '../api';
 import type { Connection } from './connections';
-import { stageOf } from './expiry';
 
 /**
  * The console's opinion about what needs doing, computed from data the operator already has.
@@ -14,12 +13,17 @@ export const KEY_MAX_AGE_DAYS = 90;
 
 const DAY = 86_400_000;
 
+/**
+ * Deadlines are not here. `Coming due` on the dashboard names each secret, its API and its date,
+ * which is the same finding said properly; counting them a second line above it was the one thing
+ * the section could not add.
+ */
 export type AttentionKind =
   | 'stalledConnections'
-  | 'expiringCredentials'
   | 'staleKeys'
   | 'idleApplications'
-  | 'idleCredentials';
+  | 'idleCredentials'
+  | 'idleActivations';
 
 /** Where the console sends an operator to act on the finding. */
 export type AttentionTarget = 'connections' | 'applications' | 'credentials';
@@ -61,10 +65,13 @@ export function assess(
   const usedCredentials = new Set(live.map((c) => c.grant.credentialId));
 
   const stalled = connections.filter((c) => c.grant.enabled && !c.live);
-  const expiring = credentials.filter((c) => c.enabled && stageOf(c.expiresAt, now));
   const stale = apps.filter((a) => a.enabled && isKeyStale(a, now));
   const idleApps = apps.filter((a) => a.enabled && !reachedApps.has(a.id));
-  const idleCredentials = credentials.filter((c) => c.enabled && !usedCredentials.has(c.id));
+  const unused = credentials.filter((c) => c.enabled && !usedCredentials.has(c.id));
+  // An open API stores no value, so "delete it to remove the secret" names something that does not
+  // exist. What is left to do about it is switch the activation off, which is a different sentence.
+  const idleCredentials = unused.filter((c) => c.authType !== 'NONE');
+  const idleActivations = unused.filter((c) => c.authType === 'NONE');
 
   const found: Attention[] = [
     {
@@ -75,15 +82,6 @@ export function assess(
       target: 'connections',
       names: stalled.map(label),
       ids: stalled.map((c) => c.id),
-    },
-    {
-      // The deadline the register was asked to remember. Janus announces each stage once, in the
-      // notification feed and by mail; this keeps it in front of whoever never reads either.
-      kind: 'expiringCredentials',
-      severity: 'warn',
-      target: 'credentials',
-      names: expiring.map((c) => c.name),
-      ids: expiring.map((c) => c.id),
     },
     {
       kind: 'staleKeys',
@@ -106,6 +104,13 @@ export function assess(
       target: 'credentials',
       names: idleCredentials.map((c) => c.name),
       ids: idleCredentials.map((c) => c.id),
+    },
+    {
+      kind: 'idleActivations',
+      severity: 'info',
+      target: 'credentials',
+      names: idleActivations.map((c) => c.name),
+      ids: idleActivations.map((c) => c.id),
     },
   ];
 

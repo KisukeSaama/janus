@@ -7,7 +7,7 @@
  * the mail goes out, not what the console calls a key it is looking at.
  */
 
-import type { ExpiryStage } from '../api';
+import type { Credential, ExpiryStage } from '../api';
 
 export const NOTICE_DAYS = 30;
 export const WARNING_DAYS = 7;
@@ -33,6 +33,19 @@ export function stageOf(expiresAt: string | undefined, now = Date.now()): Expiry
 export function daysRemaining(expiresAt: string, now = Date.now()): number {
   const remaining = new Date(expiresAt).getTime() - now;
   return Math.sign(remaining) * Math.ceil(Math.abs(remaining) / DAY);
+}
+
+/**
+ * The deadlines close enough to be work, soonest first, with the ones already passed at the top.
+ *
+ * A secret somebody switched off is not an announcement: whatever date was recorded for it, nothing
+ * presents it any more. Everything further off than the notice window is left out entirely — the
+ * dashboard states what is coming, and a key due in nine months is not.
+ */
+export function upcoming(credentials: Credential[], now = Date.now()): Credential[] {
+  return credentials
+    .filter((credential) => credential.enabled && stageOf(credential.expiresAt, now))
+    .sort((a, b) => new Date(a.expiresAt as string).getTime() - new Date(b.expiresAt as string).getTime());
 }
 
 /** The tone a stage is drawn in. Severity is never hue alone; the callers pair it with a word. */
