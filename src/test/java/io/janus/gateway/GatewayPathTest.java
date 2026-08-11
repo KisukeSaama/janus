@@ -88,6 +88,19 @@ class GatewayPathTest {
     }
 
     @Test
+    void extractsAPathBehindAnOwnerNamespace() {
+        var path = GatewayPath.parse("/kisukesaama/gateway/tmdb/movie/popular", "kisukesaama", "tmdb", null);
+        assertThat(path.decodedPath()).isEqualTo("/movie/popular");
+    }
+
+    @Test
+    void aTrailingSlashOnTheBaseUrlDoesNotCreateAnEmptyPathSegment() {
+        var path = GatewayPath.parse("/gateway/example/movie/popular", "example", null);
+        assertThat(path.toTargetUri("https://api.themoviedb.org/3/").toString())
+                .isEqualTo("https://api.themoviedb.org/3/movie/popular");
+    }
+
+    @Test
     void theTargetIsBuiltWithoutABasePath() {
         var path = GatewayPath.parse("/gateway/example/v1/items", "example", null);
         assertThat(path.toTargetUri("https://api.example.com").toString())

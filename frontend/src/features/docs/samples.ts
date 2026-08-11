@@ -11,6 +11,7 @@
 export type SampleContext = {
   /** Where Janus itself answers, taken from the address the console was opened at. */
   origin: string;
+  username: string;
   slug: string;
   applicationId: string;
   /** A path the connection actually allows, or a plausible one when nothing is registered yet. */
@@ -22,6 +23,7 @@ export type Sample = { id: string; label: string; snippets: Snippet[] };
 
 export const PLACEHOLDER: SampleContext = {
   origin: 'https://janus.example.com',
+  username: 'alice',
   slug: 'payments',
   applicationId: '00000000-0000-0000-0000-000000000000',
   path: '/v1/orders',
@@ -36,8 +38,8 @@ function toCamel(slug: string): string {
     .join('');
 }
 
-export function gatewayUrl({ origin, slug }: SampleContext): string {
-  return `${origin}/gateway/${slug}`;
+export function gatewayUrl({ origin, username, slug }: SampleContext): string {
+  return `${origin}/${encodeURIComponent(username)}/gateway/${slug}`;
 }
 
 /** The three values a caller holds, in the form every runtime already knows how to read. */
@@ -120,7 +122,7 @@ export function samples(ctx: SampleContext): Sample[] {
           file: 'config/services.php',
           code: [
             "'janus' => [",
-            "    'url' => env('JANUS_URL').'/gateway/" + ctx.slug + "',",
+            "    'url' => env('JANUS_URL').'/${ctx.username}/gateway/" + ctx.slug + "',",
             "    'application' => env('JANUS_APPLICATION_ID'),",
             "    'key' => env('JANUS_API_KEY'),",
             '],',
@@ -160,7 +162,7 @@ export function samples(ctx: SampleContext): Sample[] {
         {
           file: 'janus.js',
           code: [
-            `const base = \`\${process.env.JANUS_URL}/gateway/${ctx.slug}\`;`,
+            `const base = \`\${process.env.JANUS_URL}/${ctx.username}/gateway/${ctx.slug}\`;`,
             'const identity = {',
             "  'X-Janus-Application-Id': process.env.JANUS_APPLICATION_ID,",
             "  'X-Janus-Api-Key': process.env.JANUS_API_KEY,",
@@ -201,7 +203,7 @@ export function samples(ctx: SampleContext): Sample[] {
             'import os',
             'import requests',
             '',
-            `BASE = f"{os.environ['JANUS_URL']}/gateway/${ctx.slug}"`,
+            `BASE = f"{os.environ['JANUS_URL']}/${ctx.username}/gateway/${ctx.slug}"`,
             '',
             'session = requests.Session()',
             'session.headers.update({',
@@ -237,7 +239,7 @@ export function samples(ctx: SampleContext): Sample[] {
             'var http = HttpClient.newHttpClient();',
             '',
             'var request = HttpRequest.newBuilder()',
-            `        .uri(URI.create(System.getenv("JANUS_URL") + "/gateway/${ctx.slug}${ctx.path}"))`,
+            `        .uri(URI.create(System.getenv("JANUS_URL") + "/${ctx.username}/gateway/${ctx.slug}${ctx.path}"))`,
             '        .header("X-Janus-Application-Id", System.getenv("JANUS_APPLICATION_ID"))',
             '        .header("X-Janus-Api-Key", System.getenv("JANUS_API_KEY"))',
             '        .timeout(Duration.ofSeconds(35))',

@@ -164,6 +164,7 @@ export const en = {
     tokenScopes: 'Scopes',
     tokenScopesHint: 'Space separated. Leave empty for the default ones.',
     secretValue: 'The secret itself',
+    apiKeyValue: 'The API key',
     secretBasic: 'username:password',
     secretHint: 'Written to OpenBao. Only a reference is kept here.',
     secretExchangeHint: 'Both values, separated by a colon. Written to OpenBao and never read back.',
@@ -354,7 +355,7 @@ export const en = {
     panelIntro: 'Plain HTTP, query strings, and private hosts are refused.',
     fieldName: 'Display name',
     fieldSlug: 'Gateway path',
-    slugHint: 'Callers reach it at /gateway/{slug}/…',
+    slugHint: 'Callers reach it at /<username>/gateway/{slug}/…',
     fieldBaseUrl: 'HTTPS address',
     submit: 'Register the API',
     deleteConsequence: 'Connections pointing here stop.',
@@ -580,7 +581,8 @@ export const en = {
     holds: {
       title: 'What it tells the agent',
       lead: 'What it cannot read from your repository.',
-      gateway: 'Calls go to `/gateway/<api>` with two headers, and this project never holds the API’s own secret.',
+      gateway:
+        'Calls go to `/<username>/gateway/<api>` with two headers, and this project never holds the API’s own secret.',
       routes: 'Which APIs this service may call, and the gateway address each one answers on.',
       handled:
         'What not to build: Janus already caches, retries, throttles, and renews OAuth2 tokens. The agent reads the headers instead of writing that code.',

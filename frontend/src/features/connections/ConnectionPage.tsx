@@ -32,7 +32,7 @@ import {
   SkeletonRows,
 } from '../../components';
 import { useI18n } from '../../i18n';
-import { buildConnections, curlFor, type Connection } from '../../lib/connections';
+import { buildConnections, curlFor, gatewayUrl, type Connection } from '../../lib/connections';
 import { useErrorMessage } from '../../lib/errors';
 
 /**
@@ -52,10 +52,12 @@ const FIX_TARGET: Record<'application' | 'credential', 'applications' | 'credent
 };
 
 export function ConnectionPage({
+  username,
   id,
   onBack,
   onFix,
 }: {
+  username: string;
   id: string;
   onBack: () => void;
   onFix: (to: 'applications' | 'credentials') => void;
@@ -86,8 +88,9 @@ export function ConnectionPage({
         applications.data ?? [],
         providers.data ?? [],
         credentials.data ?? [],
+        username,
       ).find((c) => c.id === id),
-    [grants.data, applications.data, providers.data, credentials.data, id],
+    [grants.data, applications.data, providers.data, credentials.data, id, username],
   );
 
   // Deleted from its own page, or opened from a link that no longer resolves. Navigating is an
@@ -100,10 +103,10 @@ export function ConnectionPage({
 
   const { grant, provider, credential } = connection;
   const application = connection.application;
-  const endpoint = `${window.location.origin}/gateway/${provider?.slug ?? ''}/`;
+  const endpoint = `${gatewayUrl(username, provider?.slug ?? '')}/`;
   // Any path reaches the destination now, so the sample states the one nobody can get wrong and
   // leaves the reader to replace it with whatever the API actually exposes.
-  const curl = curlFor(provider?.slug ?? '', '/', grant.applicationId, '$JANUS_API_KEY');
+  const curl = curlFor(username, provider?.slug ?? '', '/', grant.applicationId, '$JANUS_API_KEY');
 
   /** Every grant write sends the whole record: the endpoint replaces, it does not patch. */
   const writeGrant = (changes: Partial<{ enabled: boolean; perMinute: number; burst: number }>) =>

@@ -83,9 +83,11 @@ services:
   openbao-dev:
     image: openbao/openbao:2.6
     profiles: [dev]
-    entrypoint: ["/usr/bin/dumb-init", "--", "/bin/sh", "-ec"]
+    # Since 2.6 the official image already runs as `openbao`. Bypassing its entrypoint and
+    # attempting a second privilege drop with su-exec makes the dev vault exit before it listens.
+    entrypoint: ["/bin/sh", "-ec"]
     command:
-      - export BAO_DEV_ROOT_TOKEN_ID="$$(cat /run/secrets/openbao_token)"; exec su-exec openbao bao server -dev -dev-no-store-token -dev-listen-address=0.0.0.0:8200
+      - export BAO_DEV_ROOT_TOKEN_ID="$$(cat /run/secrets/openbao_token)"; exec bao server -dev -dev-no-store-token -dev-listen-address=0.0.0.0:8200
     environment:
       BAO_ADDR: http://127.0.0.1:8200
     cap_add:
@@ -101,6 +103,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
+      start_period: 10s
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

@@ -25,6 +25,7 @@ export type AgentApi = { name: string; slug: string };
 export type AgentTarget = {
   /** Where Janus answers, taken from the address the console was opened at. */
   origin: string;
+  username: string;
   /** The calling service this file is written for, and the id it presents. */
   serviceName: string;
   applicationId: string;
@@ -34,12 +35,13 @@ export type AgentTarget = {
 
 export const AGENT_PLACEHOLDER: AgentTarget = {
   origin: 'https://janus.example.com',
+  username: 'alice',
   serviceName: 'your-service',
   applicationId: '00000000-0000-0000-0000-000000000000',
   apis: [],
 };
 
-export function agentFile({ origin, serviceName, applicationId, apis }: AgentTarget): string {
+export function agentFile({ origin, username, serviceName, applicationId, apis }: AgentTarget): string {
   return `# Janus gateway
 
 This project calls third-party APIs through Janus, which holds each API's own secret and adds it on
@@ -54,12 +56,12 @@ the way out. Never hold, request, or hardcode an API secret here.
 ## Calling
 
 Send the request you would have sent to the API, with its address replaced by
-\`$JANUS_URL/gateway/<slug>\` and two headers added:
+\`$JANUS_URL/${username}/gateway/<slug>\` and two headers added:
 
     X-Janus-Application-Id: $JANUS_APPLICATION_ID
     X-Janus-Api-Key: $JANUS_API_KEY
 
-- The path after the slug is forwarded as is: \`/gateway/spotify/v1/me\` reaches the API at \`/v1/me\`.
+- The path after the slug is forwarded as is: \`/${username}/gateway/spotify/v1/me\` reaches the API at \`/v1/me\`.
 - Method, query, body and response are unchanged. No SDK: use the stock HTTP client.
 - Never send \`Authorization\` or cookies (Janus strips them), and never the API's own key.
 - Body limit 10 MiB. Janus waits 30 s upstream, so set the client timeout above 35 s.
@@ -80,7 +82,7 @@ So: no cache layer, no retry or backoff wrapper, no circuit breaker, no token st
 
 ## APIs this service may call
 
-${apiList(apis)}
+${apiList(username, apis)}
 
 Any path and any method under a slug above is forwarded. What the API itself allows for the secret
 Janus presents is the only limit; an API at a slug not listed is not reachable at all.
@@ -122,8 +124,8 @@ rotate**, never recovered.
 }
 
 /** One line per API: the name, and the gateway path every one of its routes hangs off. */
-function apiList(apis: AgentApi[]): string {
+function apiList(username: string, apis: AgentApi[]): string {
   if (apis.length === 0) return 'None yet. Follow the next section before writing any call.';
 
-  return apis.map(({ name, slug }) => `- ${name} — \`/gateway/${slug}/…\``).join('\n');
+  return apis.map(({ name, slug }) => `- ${name} — \`/${username}/gateway/${slug}/…\``).join('\n');
 }

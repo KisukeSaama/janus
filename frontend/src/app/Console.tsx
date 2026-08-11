@@ -5,6 +5,7 @@ import { Menu, RefreshCw } from 'lucide-react';
 import { useApplications, useCredentials, useGrants, useSignOut, type Identity } from '../api';
 import { SkeletonRows, Wordmark } from '../components';
 import { ConnectFlow, type NewConnection } from '../features/connections/ConnectFlow';
+import { ConnectionReady } from '../features/connections/ReadyScreen';
 import { NotificationsMenu } from '../features/notifications/NotificationsMenu';
 import { useMediaQuery, WIDE } from '../hooks/useMediaQuery';
 import { useI18n } from '../i18n';
@@ -41,9 +42,6 @@ const DocsPage = lazy(() => import('../features/docs/DocsPage').then((m) => ({ d
 const AgentsPage = lazy(() => import('../features/docs/AgentsPage').then((m) => ({ default: m.AgentsPage })));
 const AccountsPage = lazy(() =>
   import('../features/accounts/AccountsPage').then((m) => ({ default: m.AccountsPage })),
-);
-const ConnectionReady = lazy(() =>
-  import('../features/connections/ReadyScreen').then((m) => ({ default: m.ConnectionReady })),
 );
 
 export function Console({ identity }: { identity: Identity }) {
@@ -139,12 +137,14 @@ export function Console({ identity }: { identity: Identity }) {
             {location.page === 'connections' &&
               (openId ? (
                 <ConnectionPage
+                  username={identity.username}
                   id={openId}
                   onBack={() => navigate({ page: 'connections' })}
                   onFix={go}
                 />
               ) : (
                 <ConnectionsPage
+                  username={identity.username}
                   onOpen={(id) => navigate({ page: 'connections', id })}
                   onConnect={() => setConnecting(true)}
                   onNavigate={go}
@@ -152,11 +152,11 @@ export function Console({ identity }: { identity: Identity }) {
               ))}
 
             {location.page === 'activity' && <ActivityPage />}
-            {location.page === 'applications' && <ApplicationsPage />}
+            {location.page === 'applications' && <ApplicationsPage username={identity.username} />}
             {location.page === 'credentials' && <CredentialsPage />}
             {location.page === 'accounts' && <AccountsPage identity={identity} />}
-            {location.page === 'documentation' && <DocsPage />}
-            {location.page === 'agents' && <AgentsPage />}
+            {location.page === 'documentation' && <DocsPage username={identity.username} />}
+            {location.page === 'agents' && <AgentsPage username={identity.username} />}
           </Suspense>
         </main>
       </div>
@@ -164,6 +164,7 @@ export function Console({ identity }: { identity: Identity }) {
       {connecting && (
         <Suspense fallback={null}>
           <ConnectFlow
+            username={identity.username}
             onClose={() => setConnecting(false)}
             onDone={(connection) => {
               setConnecting(false);
@@ -173,9 +174,14 @@ export function Console({ identity }: { identity: Identity }) {
         </Suspense>
       )}
       {created && (
-        <Suspense fallback={null}>
-          <ConnectionReady connection={created} onDismiss={() => setCreated(null)} />
-        </Suspense>
+        <ConnectionReady
+          connection={created}
+          onDismiss={() => {
+            const id = created.connectionId;
+            setCreated(null);
+            navigate({ page: 'connections', id });
+          }}
+        />
       )}
     </div>
   );

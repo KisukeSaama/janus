@@ -163,6 +163,7 @@ export const fr: Translated<Dictionary> = {
     tokenScopes: 'Portées',
     tokenScopesHint: 'Séparées par des espaces. Vide pour celles par défaut.',
     secretValue: 'Le secret lui-même',
+    apiKeyValue: 'La clé API',
     secretBasic: 'identifiant:motdepasse',
     secretHint: 'Écrit dans OpenBao. Seule une référence est conservée ici.',
     secretExchangeHint: 'Les deux valeurs, séparées par un deux-points. Écrites dans OpenBao, jamais relues.',
@@ -354,7 +355,7 @@ export const fr: Translated<Dictionary> = {
     panelIntro: 'Le HTTP simple, les chaînes de requête et les hôtes privés sont refusés.',
     fieldName: 'Nom affiché',
     fieldSlug: 'Chemin de passerelle',
-    slugHint: 'Les appelants l’atteignent sur /gateway/{slug}/…',
+    slugHint: 'Les appelants l’atteignent sur /<utilisateur>/gateway/{slug}/…',
     fieldBaseUrl: 'Adresse HTTPS',
     submit: 'Enregistrer l’API',
     deleteConsequence: 'Les connexions qui pointent ici cessent.',
@@ -584,7 +585,7 @@ export const fr: Translated<Dictionary> = {
       title: 'Ce qu’il apprend à l’agent',
       lead: 'Ce qu’il ne peut pas lire dans votre dépôt.',
       gateway:
-        'Les appels vont sur `/gateway/<api>` avec deux en-têtes, et ce projet ne détient jamais le secret de l’API.',
+        'Les appels vont sur `/<utilisateur>/gateway/<api>` avec deux en-têtes, et ce projet ne détient jamais le secret de l’API.',
       routes: 'Quelles APIs ce service peut appeler, et sur quelle adresse de passerelle chacune répond.',
       handled:
         'Ce qu’il ne doit pas écrire : Janus met déjà en cache, réessaie, limite le débit et renouvelle les jetons OAuth2. L’agent lit les en-têtes au lieu de recoder tout ça.',

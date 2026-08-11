@@ -52,8 +52,8 @@ class GatewayControllerTest {
     private final io.janus.applications.Application application = Fixtures.application(owner);
     private final io.janus.grants.Grant grant = Fixtures.grant(application, provider, credential);
 
-    private final GatewayPrincipal principal =
-            new GatewayPrincipal(application.getId(), application.getName(), owner.getId());
+    private final GatewayPrincipal principal = new GatewayPrincipal(
+            application.getId(), application.getName(), owner.getId(), owner.getUsername(), Set.of());
 
     private MockMvc mvc;
     private GatewayController controller;
@@ -102,6 +102,21 @@ class GatewayControllerTest {
                 .andExpect(header().exists(CorrelationIdFilter.RESPONSE_HEADER));
 
         assertThat(recordedEvent().outcome()).isEqualTo(AuditOutcome.SUCCESS);
+    }
+
+    @Test
+    void relaysAUsernameScopedGatewayCall() throws Exception {
+        mvc.perform(get("/owner/gateway/spotify/v1/tracks"))
+                .andExpect(status().isOk())
+                .andExpect(content().string("{\"ok\":true}"));
+    }
+
+    @Test
+    void refusesAUsernameNamespaceThatDoesNotOwnThePresentedKey() throws Exception {
+        mvc.perform(get("/somebody-else/gateway/spotify/v1/tracks")).andExpect(status().isNotFound());
+
+        verify(providers, never()).findBySlugAndOwnerIdAndEnabledTrue(any(), any());
+        verify(traffic, never()).forward(any());
     }
 
     @Test
@@ -210,7 +225,7 @@ class GatewayControllerTest {
     void aMethodTheGatewayDoesNotProxyIsRefusedBeforeAnythingIsLookedUp() {
         var request = new org.springframework.mock.web.MockHttpServletRequest("TRACE", "/gateway/spotify/v1/tracks");
 
-        var response = controller.proxy("spotify", principal, request, null);
+        var response = controller.proxy(null, "spotify", principal, request, null);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
         verify(providers, never()).findBySlugAndOwnerIdAndEnabledTrue(any(), any());

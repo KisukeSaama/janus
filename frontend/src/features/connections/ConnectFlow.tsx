@@ -15,8 +15,9 @@ import {
 } from '../../api';
 import { ChoiceField, Field, SelectField, Sheet } from '../../components';
 import { useI18n } from '../../i18n';
-import { toSlug } from '../../lib/connections';
+import { gatewayUrl, toSlug } from '../../lib/connections';
 import { useErrorMessage } from '../../lib/errors';
+import { fromDateInput, NOTICE_DAYS, WARNING_DAYS } from '../../lib/expiry';
 
 /**
  * Janus needs four records to authorize one call: an application, a provider, a credential, and a
@@ -33,6 +34,8 @@ const NEW = '__new__';
 type Step = 1 | 2;
 
 export type NewConnection = {
+  connectionId: string;
+  username: string;
   apiName: string;
   slug: string;
   applicationId: string;
@@ -40,7 +43,15 @@ export type NewConnection = {
   key: string;
 };
 
-export function ConnectFlow({ onClose, onDone }: { onClose: () => void; onDone: (c: NewConnection) => void }) {
+export function ConnectFlow({
+  username,
+  onClose,
+  onDone,
+}: {
+  username: string;
+  onClose: () => void;
+  onDone: (c: NewConnection) => void;
+}) {
   const { t } = useI18n();
   const describe = useErrorMessage();
   const client = useQueryClient();
@@ -57,6 +68,7 @@ export function ConnectFlow({ onClose, onDone }: { onClose: () => void; onDone: 
   const [tokenUrl, setTokenUrl] = useState('');
   const [tokenScopes, setTokenScopes] = useState('');
   const [secret, setSecret] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
   const [callerId, setCallerId] = useState(NEW);
   const [callerName, setCallerName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -64,7 +76,7 @@ export function ConnectFlow({ onClose, onDone }: { onClose: () => void; onDone: 
   const [error, setError] = useState('');
 
   const effectiveSlug = slugEdited ? slug : toSlug(apiName);
-  const started = apiName !== '' || baseUrl !== '' || secret !== '' || callerName !== '';
+  const started = apiName !== '' || baseUrl !== '' || secret !== '' || expiresAt !== '' || callerName !== '';
 
   const complete: Record<Step, boolean> = {
     1: apiName.trim() !== '' && effectiveSlug.length >= 3 && baseUrl.trim() !== '',
@@ -114,6 +126,9 @@ export function ConnectFlow({ onClose, onDone }: { onClose: () => void; onDone: 
         tokenUrl: authType === 'OAUTH2_CLIENT_CREDENTIALS' ? tokenUrl.trim() : null,
         tokenScopes: authType === 'OAUTH2_CLIENT_CREDENTIALS' ? tokenScopes.trim() || null : null,
         secret: authType === 'NONE' ? null : secret,
+        // Empty is a supported answer: many upstream keys have no published end date. Converting
+        // only here keeps the form in the operator's calendar while the API receives an instant.
+        expiresAt: authType === 'NONE' ? null : fromDateInput(expiresAt),
         enabled: true,
       });
       undo.push(() => del(`/credentials/${credential.id}`));
@@ -133,7 +148,7 @@ export function ConnectFlow({ onClose, onDone }: { onClose: () => void; onDone: 
       }
 
       stage = t('connect.stepGrant');
-      await post<Grant>('/grants', {
+      const grant = await post<Grant>('/grants', {
         applicationId,
         providerId: provider.id,
         credentialId: credential.id,
@@ -148,7 +163,14 @@ export function ConnectFlow({ onClose, onDone }: { onClose: () => void; onDone: 
           client.invalidateQueries({ queryKey: key }),
         ),
       );
-      onDone({ apiName: apiName.trim(), slug: effectiveSlug, applicationId, key: issued });
+      onDone({
+        connectionId: grant.id,
+        username,
+        apiName: apiName.trim(),
+        slug: effectiveSlug,
+        applicationId,
+        key: issued,
+      });
     } catch (x) {
       for (const rollback of undo.reverse()) await rollback().catch(() => undefined);
       setError(t('connect.partial', { step: stage, reason: describe(x) }));
@@ -241,6 +263,7 @@ export function ConnectFlow({ onClose, onDone }: { onClose: () => void; onDone: 
               hint={t('connect.baseUrlHint')}
             />
             <GatewayPath
+              username={username}
               slug={effectiveSlug}
               editing={slugEdited}
               onEdit={() => {
@@ -328,7 +351,9 @@ export function ConnectFlow({ onClose, onDone }: { onClose: () => void; onDone: 
                     ? t('credentials.fieldSecretBasic')
                     : authType === 'OAUTH2_CLIENT_CREDENTIALS'
                       ? t('credentials.fieldSecretClient')
-                      : t('connect.secretValue')
+                      : authType === 'API_KEY_HEADER' || authType === 'API_KEY_QUERY'
+                        ? t('connect.apiKeyValue')
+                        : t('connect.secretValue')
                 }
                 type="password"
                 required
@@ -345,6 +370,20 @@ export function ConnectFlow({ onClose, onDone }: { onClose: () => void; onDone: 
                 onChange={(e) => setSecret(e.target.value)}
                 hint={
                   authType === 'OAUTH2_CLIENT_CREDENTIALS' ? t('connect.secretExchangeHint') : t('connect.secretHint')
+                }
+              />
+            )}
+            {authType !== 'NONE' && (
+              <Field
+                label={t('expiry.field')}
+                type="date"
+                data
+                value={expiresAt}
+                onChange={(e) => setExpiresAt(e.target.value)}
+                hint={
+                  authType === 'OAUTH2_CLIENT_CREDENTIALS'
+                    ? t('credentials.expiryHintExchange')
+                    : t('expiry.fieldHint', { notice: NOTICE_DAYS, warning: WARNING_DAYS })
                 }
               />
             )}
@@ -394,6 +433,7 @@ export function ConnectFlow({ onClose, onDone }: { onClose: () => void; onDone: 
 
               <Review
                 apiName={apiName.trim()}
+                username={username}
                 slug={effectiveSlug}
                 baseUrl={baseUrl.trim()}
                 authType={authType}
@@ -428,11 +468,13 @@ function StepHead({ title, lead }: { title: string; lead: string }) {
  * recognise later is the address, not the fragment it was built from.
  */
 function GatewayPath({
+  username,
   slug,
   editing,
   onEdit,
   onChange,
 }: {
+  username: string;
   slug: string;
   editing: boolean;
   onEdit: () => void;
@@ -458,10 +500,7 @@ function GatewayPath({
               {t('connect.slugEdit')}
             </button>
           </div>
-          <p className="data mt-1.5 break-all text-sm">
-            <span className="text-text-3">{window.location.origin}</span>
-            <span>/gateway/{slug || '…'}/</span>
-          </p>
+          <p className="data mt-1.5 break-all text-sm">{gatewayUrl(username, slug || '…')}/</p>
         </>
       )}
       <p className="mt-2 text-xs text-text-2">{t('connect.slugLead')}</p>
@@ -472,12 +511,14 @@ function GatewayPath({
 /** The last thing before four records exist: what is about to be created, in one glance. */
 function Review({
   apiName,
+  username,
   slug,
   baseUrl,
   authType,
   caller,
 }: {
   apiName: string;
+  username: string;
   slug: string;
   baseUrl: string;
   authType: AuthType;
@@ -498,10 +539,7 @@ function Review({
         <Line label={t('connect.reviewCaller')}>{caller}</Line>
         {/* The caller's own URL, not the upstream's: shown whole, or it reads as a path onto the line above. */}
         <Line label={t('connect.reviewReach')}>
-          <span className="data break-all text-xs text-text-2">
-            <span className="text-text-3">{window.location.origin}</span>
-            /gateway/{slug}/**
-          </span>
+          <span className="data break-all text-xs text-text-2">{gatewayUrl(username, slug)}/**</span>
         </Line>
       </dl>
     </section>
