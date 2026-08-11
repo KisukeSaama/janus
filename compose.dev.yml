@@ -10,7 +10,9 @@ services:
     volumes: ["postgres_dev:/var/lib/postgresql/data"]
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"], interval: 5s, timeout: 3s, retries: 20}
   openbao:
-    image: openbao/openbao:2.3
+    # Keep local development on the same OpenBao line as deployments. The 2.6 image runs as the
+    # `openbao` user by default and starts its dev server without a manual privilege transition.
+    image: openbao/openbao:2.6
     cap_add: ["IPC_LOCK"]
     environment:
       BAO_DEV_ROOT_TOKEN_ID: ${OPENBAO_DEV_ROOT_TOKEN:?Set OPENBAO_DEV_ROOT_TOKEN in .env}
