@@ -275,13 +275,13 @@ Configure these GitLab CI/CD variables (names only; never commit their values):
 - `JANUS_POSTGRES_PASSWORD`
 - `JANUS_ADMIN_PASSWORD` (at least 8 characters with an upper-case letter, a lower-case letter and a digit, and not a placeholder; the deployment job rejects anything weaker before it reaches the server)
 - `JANUS_OPENBAO_TOKEN`
-- `JANUS_OPENBAO_SEAL_KEY` (production only; 32 random bytes in base64, from `openssl rand -base64 32`)
+- `JANUS_OPENBAO_SEAL_KEY` (environment-scoped; 32 random bytes in base64, from `openssl rand -base64 32`)
 - `JANUS_ADMIN_USERNAME` (optional, defaults to `admin`)
 - `JANUS_ADMIN_EMAIL` (optional, defaults to `admin@localhost`; set it, or the first account's expiry notices go nowhere)
 
 Use environment-scoped values for `dev` and `production`, protect the production values, and protect the `v*` tag pattern so those values are available to release pipelines. The runner must have the `devops` tag and Docker socket access; the server must already provide the external `traefik` network. Deployment files live in `/home/kisuke/deploy-janus/{dev,prod}` and persistent data in `/home/kisuke/janus/{dev,prod}`. Because the runner exposes the host Docker socket but does not mount `/home/kisuke`, the pipeline stages those files onto the host through a short-lived container. Secret files are written under a `077` umask, then land on the host as `644` inside a root-owned `700` directory. Compose uses file bind mounts for these secrets, so this lets the non-root application user read them without making them reachable through the host filesystem.
 
-DEV uses an ephemeral OpenBao dev server. PROD keeps OpenBao file storage persistent and needs no manual step: `deploy/openbao/bootstrap.sh` runs as part of every production deployment and reconciles the vault with the deployed variables. On a first pipeline it initializes OpenBao, enables the `secret` KV v2 mount, writes the `janus` policy, and creates the application token with the id held in `JANUS_OPENBAO_TOKEN`. On later runs it verifies and renews. The policy it writes is:
+DEV and PROD both keep OpenBao file storage persistent and need no manual step: `deploy/openbao/bootstrap.sh` runs as part of every deployment and reconciles the vault with the environment-scoped variables. On a first pipeline it initializes OpenBao, enables the `secret` KV v2 mount, writes the `janus` policy, and creates the application token with the id held in `JANUS_OPENBAO_TOKEN`. On later runs it verifies and renews. The policy it writes is:
 
    ```hcl
    path "secret/data/janus/*" {
@@ -292,7 +292,7 @@ DEV uses an ephemeral OpenBao dev server. PROD keeps OpenBao file storage persis
    }
    ```
 
-File storage starts sealed on every restart, and a sealed OpenBao answers 503 to everything while its health check still passes — a deployment that looks green until the first credential write fails. Production therefore auto-unseals through OpenBao's `static` seal, using the key in `JANUS_OPENBAO_SEAL_KEY`. That key decrypts the vault and lives on the same host as the data it opens, so anyone with the server has both; it is a CI variable so a stolen data directory is useless on its own and a rebuilt server can be handed the same key. Treat it like the storage itself: keep it in a password manager, and losing it means losing every stored secret. `bao operator rekey` is not enough to recover from that — only the recovery share written to `${DATA_DIR}/prod/openbao-bootstrap/init.json` is, alongside the root token, which is why that directory is `700` and worth backing up.
+File storage starts sealed on every restart, and a sealed OpenBao answers 503 to everything while its health check still passes — a deployment that looks green until the first credential write fails. Both environments therefore auto-unseal through OpenBao's `static` seal, using their own environment-scoped `JANUS_OPENBAO_SEAL_KEY`. That key decrypts the vault and lives on the same host as the data it opens, so anyone with the server has both; it is a CI variable so a stolen data directory is useless on its own and a rebuilt server can be handed it again. Treat it like the storage itself: losing it means losing every stored secret. `bao operator rekey` is not enough to recover from that — only the recovery share written to `${DATA_DIR}/{dev,prod}/openbao-bootstrap/init.json` is, alongside the root token, which is why those directories are `700` and worth backing up.
 
 Rotating the seal key means setting `previous_key` alongside `current_key` in `deploy/openbao/openbao.hcl`, deploying once so the storage is re-encrypted, then dropping the old pair. A vault that was already initialized under the default Shamir seal before this change will refuse to start against a `static` seal; migrating it needs `bao operator unseal -migrate`, and an OpenBao that has never held a secret is faster to wipe and let the pipeline rebuild.
 

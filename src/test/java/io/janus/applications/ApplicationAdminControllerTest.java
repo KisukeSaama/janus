@@ -15,6 +15,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import io.janus.accounts.*;
 import io.janus.audit.AuditService;
+import io.janus.grants.GrantRepository;
 import io.janus.oauth.AccessTokenStore;
 import io.janus.oauth.RefreshTokenRepository;
 import io.janus.security.ApiKeyCache;
@@ -26,6 +27,7 @@ class ApplicationAdminControllerTest {
     private final ApiKeyCache keyCache = Mockito.mock(ApiKeyCache.class);
     private final AccessTokenStore accessTokens = Mockito.mock(AccessTokenStore.class);
     private final RefreshTokenRepository refreshTokens = Mockito.mock(RefreshTokenRepository.class);
+    private final GrantRepository grants = Mockito.mock(GrantRepository.class);
     private final AccountRepository accounts = Mockito.mock(AccountRepository.class);
     private final AccessScope scope = Mockito.mock(AccessScope.class);
     private final AuditService audit = Mockito.mock(AuditService.class);
@@ -41,6 +43,7 @@ class ApplicationAdminControllerTest {
                 keyCache,
                 accessTokens,
                 refreshTokens,
+                grants,
                 accounts,
                 scope,
                 audit);

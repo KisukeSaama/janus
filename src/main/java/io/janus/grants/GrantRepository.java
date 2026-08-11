@@ -44,5 +44,10 @@ public interface GrantRepository extends JpaRepository<Grant, UUID> {
 
     boolean existsByCredentialId(UUID credentialId);
 
+    boolean existsByApplicationId(UUID applicationId);
+
     boolean existsByProviderId(UUID providerId);
+
+    /** Every connection that must stop when its API is removed. */
+    List<Grant> findAllByProviderId(UUID providerId);
 }

@@ -25,6 +25,9 @@ public interface CredentialRepository extends JpaRepository<Credential, UUID> {
 
     boolean existsByProviderId(UUID providerId);
 
+    /** All metadata rows removed with an API. The provider has already been ownership-scoped. */
+    List<Credential> findAllByProviderId(UUID providerId);
+
     /**
      * Secrets whose recorded deadline has arrived or is near enough to speak about. A disabled
      * secret is left out: it authorizes nothing, so its expiry is not work anyone has to do.

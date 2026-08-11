@@ -4,7 +4,7 @@ import { Plus } from 'lucide-react';
 import {
   useCreateCredential,
   useCredentials,
-  useDeleteCredential,
+  useDeleteProvider,
   useProviders,
   useUpdateCredential,
   type AuthType,
@@ -74,7 +74,7 @@ export function CredentialsPage() {
   const providers = useProviders();
   const create = useCreateCredential();
   const update = useUpdateCredential();
-  const remove = useDeleteCredential();
+  const remove = useDeleteProvider();
 
   const [panel, setPanel] = useState<'closed' | 'new' | Credential>('closed');
   const [strategy, setStrategy] = useState<AuthType>('BEARER');
@@ -197,7 +197,7 @@ export function CredentialsPage() {
                 onDelete={async () => {
                   setError('');
                   try {
-                    await remove.mutateAsync(r.id);
+                    await remove.mutateAsync(r.providerId);
                   } catch (x) {
                     setError(describe(x));
                   }

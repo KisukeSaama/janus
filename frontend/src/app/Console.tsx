@@ -82,7 +82,11 @@ export function Console({ identity }: { identity: Identity }) {
     page: location.page,
     onNavigate: go,
     identity,
-    onSignOut: () => void signOut.mutateAsync().catch(() => undefined),
+    onSignOut: () =>
+      void signOut
+        .mutateAsync()
+        .then(() => window.history.replaceState(null, '', '/'))
+        .catch(() => undefined),
     // Withheld until the first load lands: a rail that counts to zero and then corrects itself reads
     // as an empty install for as long as the request takes.
     counts: {

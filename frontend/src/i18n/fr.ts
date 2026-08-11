@@ -424,7 +424,7 @@ export const fr: Translated<Dictionary> = {
 
     submit: 'Déposer dans OpenBao',
     submitOpen: 'Enregistrer',
-    deleteConsequence: 'La valeur stockée est détruite.',
+    deleteConsequence: 'Ses connexions cessent, la valeur stockée est détruite et les applications sans autre API sont supprimées.',
     editTitle: 'Modifier le secret',
     editIntro: 'L’API et l’environnement sont figés. Vide conserve la valeur actuelle.',
     editLabel: 'Modifier {name}',
