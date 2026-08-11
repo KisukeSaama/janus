@@ -179,7 +179,7 @@ class SecurityIT extends IntegrationTest {
                 .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .bodyValue(
                         """
-                        {"name":"Spotify","slug":"csrf-probe","baseUrl":"https://api.spotify.com","enabled":true}""")
+                        {"name":"Spotify","slug":"csrf-probe","baseUrl":"https://api.spotify.com","enabled":true,"authType":"NONE"}""")
                 .exchange()
                 .expectStatus()
                 .isOk();
@@ -283,7 +283,7 @@ class SecurityIT extends IntegrationTest {
 
     private static String providerNamed(String slug) {
         return """
-               {"name":"Spotify","slug":"%s","baseUrl":"https://api.spotify.com","enabled":true}"""
+               {"name":"Spotify","slug":"%s","baseUrl":"https://api.spotify.com","enabled":true,"authType":"NONE"}"""
                 .formatted(slug);
     }
 }

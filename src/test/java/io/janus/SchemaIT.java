@@ -84,7 +84,11 @@ class SchemaIT extends IntegrationTest {
                 jdbc().queryForList("select conname from pg_constraint where contype in ('u','p')", String.class);
 
         assertThat(constraints)
-                .contains("uq_provider_owner_slug", "uq_application_owner_name", "uq_grant_app_provider");
+                .contains(
+                        "uq_provider_slug",
+                        "uq_credential_owner_provider",
+                        "uq_application_owner_name",
+                        "uq_grant_app_provider");
     }
 
     /** A secret is addressed by its path, so two records may never claim the same one. */
