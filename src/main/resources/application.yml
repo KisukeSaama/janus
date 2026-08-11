@@ -91,6 +91,20 @@ janus:
     refresh-token-ttl: ${JANUS_REFRESH_TOKEN_TTL:30d}
     refresh-enabled: ${JANUS_REFRESH_TOKENS_ENABLED:true}
     max-active-tokens: ${JANUS_MAX_ACTIVE_TOKENS:10000}
+  # Nothing but the schedule deletes from the journal, and every call — and every refused attempt at
+  # one — writes to it, so how long it is kept is the setting that decides how much disk Janus asks
+  # for over a year. Two ages. Traffic is written by whoever is knocking rather than by anything
+  # configured here, and is read soonest: the console offers a month without asking for exact dates.
+  # A credential created, a grant changed, a sign-in that succeeded, are rare and are what somebody
+  # comes back to much later. Zero on either keeps it forever, for a deployment shipping the journal
+  # to a SIEM instead.
+  audit.retention:
+    traffic-days: ${JANUS_AUDIT_TRAFFIC_RETENTION_DAYS:30}
+    administrative-days: ${JANUS_AUDIT_RETENTION_DAYS:365}
+    # The quiet hours by default, and a delete at a time so the gateway keeps writing between them.
+    sweep-cron: ${JANUS_AUDIT_SWEEP_CRON:0 45 3 * * *}
+    zone: ${JANUS_AUDIT_SWEEP_ZONE:UTC}
+    batch-size: ${JANUS_AUDIT_SWEEP_BATCH_SIZE:5000}
   openbao:
     address: ${OPENBAO_ADDR:http://localhost:8200}
     token: ${OPENBAO_TOKEN:${openbao_token:}}

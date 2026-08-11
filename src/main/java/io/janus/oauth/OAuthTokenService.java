@@ -5,6 +5,8 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.*;
 
+import org.slf4j.*;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +31,8 @@ import io.janus.shared.CorrelationIdFilter;
  */
 @Service
 public class OAuthTokenService {
+    private static final Logger log = LoggerFactory.getLogger(OAuthTokenService.class);
+
     private static final String PREFIX = "jnr_";
     private static final int ENTROPY_BYTES = 32;
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -168,6 +172,24 @@ public class OAuthTokenService {
         byte[] material = new byte[ENTROPY_BYTES];
         RANDOM.nextBytes(material);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(material);
+    }
+
+    /**
+     * Drops the refresh tokens that have run out.
+     *
+     * <p>Rotation retires a row rather than removing it, because a value presented after it was
+     * retired is what proves a leak — but only until it expires, after which the row is refused on
+     * its date alone and proves nothing anybody can act on. Without this they accumulate one per
+     * exchange, for the lifetime of the deployment, and every one of them is dead weight.
+     *
+     * <p>Hourly rather than on a time of day: nothing about an expiry is tied to the morning, and the
+     * work is a single indexed delete.
+     */
+    @Scheduled(fixedDelayString = "${janus.oauth.refresh-sweep-millis:3600000}")
+    @Transactional
+    public void sweepExpired() {
+        int dropped = refreshTokens.deleteExpiredBefore(Instant.now());
+        if (dropped > 0) log.debug("Swept {} refresh token(s) that had expired", dropped);
     }
 
     /** A client id that is not an identifier fails as a credential, not as a malformed request. */

@@ -101,6 +101,9 @@ Everything below has a working default for development; the ones without a safe 
 | `JANUS_EXPIRY_CHECK_CRON` / `JANUS_EXPIRY_CHECK_ZONE` | `0 15 7 * * *` / `UTC` | when the daily expiry sweep runs, and the zone that schedule is read in |
 | `JANUS_EXPIRY_NOTICE_DAYS` / `JANUS_EXPIRY_WARNING_DAYS` | 30 / 7 | how far ahead each of the two announcements is made |
 | `JANUS_EXPIRY_EMAIL_ENABLED` / `_RECIPIENTS` / `_FROM` / `_SUBJECT_PREFIX` | `false` / empty / `janus@localhost` / `[Janus]` | outbound notice. Needs `SPRING_MAIL_HOST`; without a relay no sender is built and nothing is sent. |
+| `JANUS_AUDIT_TRAFFIC_RETENTION_DAYS` | 30 | how long a call, or a refusal to admit one, is kept. The volume setting: written per request, by whoever is knocking. `0` keeps them forever. |
+| `JANUS_AUDIT_RETENTION_DAYS` | 365 | how long everything else in the journal is kept — credentials, grants, consents, successful sign-ins. Rare, and what somebody comes back to months later. `0` keeps them forever. |
+| `JANUS_AUDIT_SWEEP_CRON` / `JANUS_AUDIT_SWEEP_ZONE` / `JANUS_AUDIT_SWEEP_BATCH_SIZE` | `0 45 3 * * *` / `UTC` / 5000 | when the trim runs, and how many rows one statement removes |
 
 ## Key expiry
 
@@ -321,6 +324,20 @@ Four surfaces, for four different questions.
 - The audit stream answers what happened to one request. Every response carries `X-Janus-Correlation-Id`, the same identifier appears in the application logs, and the console can filter the log by outcome.
 
 Gateway audit events are written off the request path by a bounded single-threaded writer. Saturation runs the write on the calling thread rather than dropping it, and shutdown drains the queue, so a proxied call does not pay for an insert before it can answer and no event is lost to a normal stop.
+
+### How long any of it is kept
+
+Everything Janus accumulates on its own expires on its own, so a deployment left running does not become a disk problem.
+
+The journal is the only one of them large enough to matter, and it ages in two halves.
+
+**Traffic** is everything written once per attempt at the door: a proxied call, and any request refused before it got in — a bad API key, bad console credentials, a bad client secret at the token endpoint. Its volume is decided by whoever is knocking rather than by anything you configure, which is why the refusals age here rather than with the security records: thirty days of rejected attempts is a forensic window, a year of them is a scripted flood choosing your disk budget. Kept **30 days**, a little wider than the month the console offers without asking for exact dates.
+
+**Everything else** — a credential created, a grant changed, a consent given or withdrawn, a sign-in that succeeded, a refresh token replayed — arrives a handful of times a day and is what somebody comes back to much later. Kept **a year**, for a fraction of the space.
+
+A nightly pass removes what has aged out, in bounded batches so it never holds locks on the table the gateway is still writing to, and it removes by age and by nothing else: a trim that could choose which events disappear would not be housekeeping. Set either age to `0` to keep that half forever, for a deployment that ships the journal to a SIEM instead.
+
+The rest looks after itself already: abandoned consent screens are swept every fifteen minutes, expired refresh tokens hourly, queued vault deletions every minute, and expiry announcements are withdrawn as soon as the dates stop supporting them. Container output is capped by the compose files at 10 MB across 3 files per service — Docker's `json-file` driver otherwise keeps every line ever written, which on a long-lived host fills a disk before the database does.
 
 ## CI/CD deployment
 

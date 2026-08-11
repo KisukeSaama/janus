@@ -1,6 +1,13 @@
 name: janus-dev
+# Same cap as the deployed compose files. A development machine is not the server, but a stack left
+# up for a week accumulates the same way, and 30 MB per service is still more history than anybody
+# scrolls back through.
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
 services:
   postgres:
+    logging: *logging
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-janus}
@@ -10,6 +17,7 @@ services:
     volumes: ["postgres_dev:/var/lib/postgresql/data"]
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"], interval: 5s, timeout: 3s, retries: 20}
   openbao:
+    logging: *logging
     # Keep local development on the same OpenBao line as deployments. The 2.6 image runs as the
     # `openbao` user by default and starts its dev server without a manual privilege transition.
     image: openbao/openbao:2.6
@@ -22,6 +30,7 @@ services:
     ports: ["8200:8200"]
     healthcheck: {test: ["CMD", "bao", "status"], interval: 5s, timeout: 3s, retries: 20}
   backend:
+    logging: *logging
     build: .
     environment:
       JANUS_DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-janus}
@@ -38,6 +47,7 @@ services:
       postgres: {condition: service_healthy}
       openbao: {condition: service_healthy}
   frontend:
+    logging: *logging
     image: node:22-alpine
     working_dir: /app
     command: sh -c "npm ci && npm run dev -- --mode docker"
