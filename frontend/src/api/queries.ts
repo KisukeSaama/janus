@@ -16,6 +16,7 @@ import type {
   NotificationFeed,
   Provider,
   ProviderPage,
+  ProviderPing,
   ProviderInput,
   Traffic,
 } from './types';
@@ -42,6 +43,7 @@ export const keys = {
   grants: ['grants'] as const,
   notifications: ['notifications'] as const,
   traffic: ['traffic'] as const,
+  oauthCallback: ['oauth-callback'] as const,
   session: ['session'] as const,
   accounts: ['accounts'] as const,
   audit: (page: number, size: number, filter: AuditFilter) =>
@@ -121,6 +123,21 @@ export function useGrants() {
     queryKey: keys.grants,
     queryFn: () => api<Grant[]>('/grants'),
     staleTime: RECORD_STALE_MS,
+  });
+}
+
+/**
+ * The address providers must be told to send people back to.
+ *
+ * Asked of the server rather than derived from the browser: the console may be served from another
+ * origin entirely, and what has to be registered is where Janus itself answers. It changes only when
+ * a deployment is reconfigured, so it is cached for the session.
+ */
+export function useOAuthCallback() {
+  return useQuery({
+    queryKey: keys.oauthCallback,
+    queryFn: () => api<{ url: string; configured: boolean }>('/oauth/callback'),
+    staleTime: Infinity,
   });
 }
 
@@ -218,6 +235,17 @@ export function useDeleteProvider() {
   return useMutation({
     mutationFn: (id: string) => del(`/providers/${id}`),
     onSuccess: () => invalidate(client, keys.providers, keys.credentials, keys.grants, keys.traffic),
+  });
+}
+
+/**
+ * Asks whether a registered API is answering. A mutation rather than a query: it is a question with
+ * an effect — Janus reaches out to somebody else's API — asked when somebody asks it, and an answer
+ * from a minute ago is not an answer to it.
+ */
+export function usePingProvider() {
+  return useMutation({
+    mutationFn: (id: string) => post<ProviderPing>(`/providers/${id}/ping`),
   });
 }
 

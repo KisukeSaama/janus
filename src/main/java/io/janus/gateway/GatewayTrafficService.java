@@ -14,6 +14,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.util.UriUtils;
 
 import io.janus.credentials.Credential;
+import io.janus.credentials.RequestSigner;
 import io.janus.credentials.UpstreamTokenProvider;
 import io.janus.openbao.OpenBaoClient;
 import io.janus.shared.CorrelationIdFilter;
@@ -51,6 +52,9 @@ public class GatewayTrafficService {
             Set.of(HttpMethod.GET, HttpMethod.HEAD, HttpMethod.PUT, HttpMethod.DELETE);
     /** Statuses that describe a moment rather than the request. */
     private static final Set<Integer> TRANSIENT = Set.of(429, 502, 503, 504);
+
+    /** Stateless, and a pure function of the request; see {@link RequestSigner}. */
+    private static final RequestSigner SIGNER = new RequestSigner();
 
     private final WebClient web;
     private final OpenBaoClient bao;
@@ -315,15 +319,22 @@ public class GatewayTrafficService {
 
     private ResponseEntity<byte[]> send(
             GatewayExchange exchange, Credential credential, String secret, ResponseCache.Entry validator) {
-        var target = credential.getAuthType().inQuery()
-                ? withQueryParameter(
-                        exchange.route().toTargetUri(exchange.provider().getBaseUrl()),
-                        credential.getQueryParameter(),
-                        secret)
-                : exchange.route().toTargetUri(exchange.provider().getBaseUrl());
+        var type = credential.getAuthType();
+        var address = exchange.route().toTargetUri(exchange.provider().getBaseUrl());
+        if (type.inQuery()) address = withQueryParameter(address, credential.getQueryParameter(), secret);
+
+        // A signature covers the request as it will actually be sent, so it is computed once the
+        // address and the body are both settled and nothing is added to either afterwards. It may
+        // move the address itself: some APIs want the timestamp and the signature appended to it.
+        var signed = type.signs()
+                ? SIGNER.sign(credential.signatureSettings(), secret, exchange.method(), address, exchange.body())
+                : null;
+        var target = signed == null ? address : signed.uri();
+
         var spec = web.method(exchange.method()).uri(target).headers(headers -> {
             headers.addAll(exchange.headers());
             injectCredential(headers, credential, secret);
+            if (signed != null) signed.headers().forEach(headers::set);
             headers.set(CorrelationIdFilter.REQUEST_HEADER, exchange.correlationId());
             if (validator != null) {
                 if (validator.etag() != null) headers.set(HttpHeaders.IF_NONE_MATCH, validator.etag());
@@ -539,9 +550,17 @@ public class GatewayTrafficService {
      */
     private void injectCredential(HttpHeaders headers, Credential credential, String secret) {
         switch (credential.getAuthType()) {
-                // An obtained token is a bearer token; what differs is only where it came from.
-            case BEARER, OAUTH2_CLIENT_CREDENTIALS -> headers.setBearerAuth(secret);
+                // An obtained token is a bearer token; what differs is only where it came from — a
+                // client secret of the application's, or a person's consent.
+            case BEARER, OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE -> headers.setBearerAuth(secret);
             case API_KEY_HEADER -> headers.set(credential.getHeaderName(), secret);
+                // The secret half signed the request and does not travel. The key half identifies who
+                // signed it, which is what lets the upstream pick the secret to verify against.
+            case HMAC_SIGNATURE -> {
+                int separator = secret.indexOf(':');
+                if (credential.getHeaderName() != null && separator >= 0)
+                    headers.set(credential.getHeaderName(), secret.substring(0, separator));
+            }
                 // Already in the address; see withQueryParameter.
             case API_KEY_QUERY -> {}
                 // The stored value is "username:password"; HttpHeaders#setBasicAuth(String) expects it pre-encoded.

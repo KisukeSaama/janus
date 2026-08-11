@@ -21,7 +21,7 @@ Requests run on virtual threads. A proxied call spends nearly all of its life wa
 - An unknown application identifier still costs a hash comparison, so response timing does not disclose which identifiers exist.
 - The administrator password is cached the same way and for the same reason. HTTP Basic is stateless, so every console request would otherwise repeat a comparison the hash was tuned to make expensive — roughly a tenth of a second each, several per screen, and a multiplier on anything sent in bulk. Only verified passwords are remembered, keyed on a digest of the value together with the hash it was checked against; the password comes from the environment, so changing it restarts the process and empties the cache.
 - Repeated authentication failures from one client are throttled on both surfaces, and every rejection is audited.
-- Every client is also capped on volume, whatever the outcome: 300 console requests a minute per address, 1800 gateway requests, and the token exchange on the console's tighter allowance, refused with 429 and a `Retry-After` before authentication is attempted. nginx enforces a rate and a connection ceiling in front of that, and the two are deliberately redundant — any route that reaches the backend without passing the reverse proxy still meets a limit. Refusals here are counted as `janus.ratelimit.rejected`, never audited: a row per rejected call would turn a flood into a second flood against the database.
+- Every client is also capped on volume, whatever the outcome: 1200 console requests a minute per address, 6000 gateway requests, and the token exchange on the console's tighter allowance, refused with 429 and a `Retry-After` before authentication is attempted. Both ceilings sit far above what legitimate use costs, because an address is shared — an office behind one NAT, a cluster behind one egress — and a false 429 is felt by everybody there at once; they exist to stop a runaway loop or a scripted flood, not to shape traffic, which is what the per-grant policy is for. nginx enforces a rate and a connection ceiling in front of that, and the two are deliberately redundant — any route that reaches the backend without passing the reverse proxy still meets a limit. Refusals here are counted as `janus.ratelimit.rejected`, never audited: a row per rejected call would turn a flood into a second flood against the database.
 - Who a client *is*, for all of the above, is decided by Tomcat's `RemoteIpValve`: it walks `X-Forwarded-For` from the far end and keeps the first address that is not a hop listed in `JANUS_TRUSTED_PROXIES`. A caller cannot pick its own throttling identity by sending the header itself, which would otherwise buy it unlimited password and API-key guesses. Two things follow. **A reverse proxy on a public address must be named in `JANUS_TRUSTED_PROXIES`** — the default lists loopback and the private ranges, where a containerised nginx or Traefik lives. And **the backend's own port must not be reachable except through that proxy**, because a caller connecting from a trusted range is believed when it names its predecessor. Both Compose files enforce this: the backend publishes no port and sits on an `internal` network. The development file deliberately does not, alongside its exposed database and OpenBao.
 - Credential values are accepted only on credential create/update and written to a server-derived OpenBao KV v2 path. API responses expose only an `openbao://` reference.
 - One deployment holds one environment. Janus runs as a separate instance per environment, each with its own database and OpenBao, so no record carries an environment discriminator and no request can be pointed at the wrong side by getting a field wrong.
@@ -87,10 +87,11 @@ Everything below has a working default for development; the ones without a safe 
 | `JANUS_ALLOW_PRIVATE_DESTINATIONS` | `false` | **Disables SSRF address filtering.** Only for pointing a development provider at a private host. |
 | `JANUS_MAX_REQUEST_BYTES` / `JANUS_MAX_RESPONSE_BYTES` | 10 MiB | proxied body limits |
 | `JANUS_CONNECT_TIMEOUT_MILLIS` / `JANUS_RESPONSE_TIMEOUT_SECONDS` | 5000 / 30 | outbound timeouts |
+| `JANUS_PING_TIMEOUT_SECONDS` | 5 | deadline for a destination probed from the console, where somebody is waiting for the answer |
 | `JANUS_MAX_AUTH_FAILURES` / `JANUS_AUTH_FAILURE_WINDOW_SECONDS` / `JANUS_AUTH_BLOCK_SECONDS` | 10 / 300 / 900 | authentication throttling |
 | `JANUS_TRUSTED_PROXIES` | loopback and RFC 1918 | regular expression for the hops Janus sits behind. **Everything throttled or rate-limited is keyed on the address this decides.** Too narrow and the proxy becomes the throttled client, so one caller locks everybody out; too wide and a caller's own `X-Forwarded-For` is believed. |
-| `JANUS_RATE_LIMIT_ADMIN_PER_MINUTE` / `_ADMIN_BURST` | 300 / 60 | per-address ceiling on `/api/**`, before authentication. Zero disables it. |
-| `JANUS_RATE_LIMIT_GATEWAY_PER_MINUTE` / `_GATEWAY_BURST` | 1800 / 300 | per-address ceiling on `/gateway/**`, before authentication. Zero disables it. |
+| `JANUS_RATE_LIMIT_ADMIN_PER_MINUTE` / `_ADMIN_BURST` | 1200 / 240 | per-address ceiling on `/api/**`, before authentication. Set well above normal console use: the address is shared by everybody behind the same NAT, so only a flood should meet it. Zero disables it. |
+| `JANUS_RATE_LIMIT_GATEWAY_PER_MINUTE` / `_GATEWAY_BURST` | 6000 / 1200 | per-address ceiling on `/gateway/**`, before authentication. 100 calls a second sustained, sized to stop a runaway loop rather than to shape traffic — use the per-grant policy for that. Zero disables it. |
 | `JANUS_CACHE_ENABLED` | `true` | master switch for response reuse; `false` overrides every provider |
 | `JANUS_CACHE_MAX_ENTRIES` / `JANUS_CACHE_MAX_ENTRY_BYTES` / `JANUS_CACHE_MAX_TOTAL_BYTES` | 1000 / 1 MiB / 64 MiB | store bounds, evicted least recently used first |
 | `JANUS_CACHE_STALE_IF_ERROR_SECONDS` | 300 | how long a stale response may answer while an upstream is failing |
@@ -100,6 +101,9 @@ Everything below has a working default for development; the ones without a safe 
 | `JANUS_EXPIRY_CHECK_CRON` / `JANUS_EXPIRY_CHECK_ZONE` | `0 15 7 * * *` / `UTC` | when the daily expiry sweep runs, and the zone that schedule is read in |
 | `JANUS_EXPIRY_NOTICE_DAYS` / `JANUS_EXPIRY_WARNING_DAYS` | 30 / 7 | how far ahead each of the two announcements is made |
 | `JANUS_EXPIRY_EMAIL_ENABLED` / `_RECIPIENTS` / `_FROM` / `_SUBJECT_PREFIX` | `false` / empty / `janus@localhost` / `[Janus]` | outbound notice. Needs `SPRING_MAIL_HOST`; without a relay no sender is built and nothing is sent. |
+| `JANUS_AUDIT_TRAFFIC_RETENTION_DAYS` | 30 | how long a call, or a refusal to admit one, is kept. The volume setting: written per request, by whoever is knocking. `0` keeps them forever. |
+| `JANUS_AUDIT_RETENTION_DAYS` | 365 | how long everything else in the journal is kept — credentials, grants, consents, successful sign-ins. Rare, and what somebody comes back to months later. `0` keeps them forever. |
+| `JANUS_AUDIT_SWEEP_CRON` / `JANUS_AUDIT_SWEEP_ZONE` / `JANUS_AUDIT_SWEEP_BATCH_SIZE` | `0 45 3 * * *` / `UTC` / 5000 | when the trim runs, and how many rows one statement removes |
 
 ## Key expiry
 
@@ -189,14 +193,23 @@ Credential strategies, for what Janus presents to the upstream API:
 - `BASIC`: stored value must be `username:password` and is Base64 encoded at request time
 - `OAUTH2_CLIENT_CREDENTIALS`: stored value must be `client_id:client_secret`, and is **exchanged**
   rather than sent
+- `OAUTH2_AUTHORIZATION_CODE`: the same exchange, for data belonging to a person rather than to the
+  application. Stores `client_id:client_secret` and, once somebody has agreed, the refresh token
+  their consent produced
+- `HMAC_SIGNATURE`: stored value must be `key:secret`, and the secret **signs** each request instead
+  of travelling with it
 
-The last one is why a client service does not implement a token clock. Janus posts the client
-credentials to the recorded token endpoint, holds the bearer token it gets back, and renews it a
-minute before the provider says it expires. The token is held in memory, per credential, and shared
-by every application that credential authorises. A refused exchange is remembered for thirty seconds,
-so a wrong client secret does not call the provider once per proxied request. If no token can be
-obtained the request is **not** sent: the caller gets `502` and the journal names the token endpoint,
-never its response body.
+The two exchanged strategies are why a client service does not implement a token clock. Janus posts
+to the recorded token endpoint, holds the bearer token it gets back, and renews it a minute before
+the provider says it expires. The token is held in memory, per credential, and shared by every
+application that credential authorises. A refused exchange is remembered for thirty seconds, so a
+wrong client secret does not call the provider once per proxied request. If no token can be obtained
+the request is **not** sent: the caller gets `502` and the journal names the token endpoint, never
+its response body.
+
+Considered and deliberately absent: an assertion signed with a private key (RFC 7523) and a key split
+across two headers. Both belong to enterprise service accounts rather than to public APIs, and each
+strategy in the list is one more thing between a reader and the one they need.
 
 ```bash
 # Spotify, end to end
@@ -220,6 +233,56 @@ curl -H 'Authorization: Bearer jnt_…' \
 `expiresAt` on such a credential dates the **client secret**, not the tokens it produces. Access
 tokens last minutes, are never persisted, and are renewed without anyone being told; the expiry
 announcements are about the thing a human has to go and rotate.
+
+### Connecting somebody's account
+
+`OAUTH2_CLIENT_CREDENTIALS` reads what an API publishes to everyone — the Spotify catalogue. Reading
+somebody's playlists is a different grant, and no configuration substitutes for it: the provider only
+issues those tokens once a person has agreed, at the provider's own site, in their own browser.
+
+Janus holds that exchange. Two settings are needed beyond the client pair — the authorisation page
+alongside the token endpoint — and one prerequisite lives outside Janus:
+
+```
+JANUS_PUBLIC_URL=https://janus.example.com     # where a browser reaches this deployment
+JANUS_CONSOLE_URL=https://janus.example.com    # where to send people back afterwards
+```
+
+**Register `{JANUS_PUBLIC_URL}/oauth/callback` with every provider** as the redirect URL, or the
+authorisation is refused for a redirect nobody declared. The console shows the exact address on the
+authorisation step and warns when it is still the localhost default; the server logs the same warning
+at startup.
+
+What happens then: the console sends the operator to the provider with a single-use `state` and a
+PKCE challenge (RFC 7636); the provider returns to `/oauth/callback`, which is the one admin path
+answering unauthenticated — a cross-site navigation carries no session cookie, so the `state` is what
+it is trusted on. Janus swaps the code, writes the refresh token to OpenBao **beside** the client
+secret, and renews access from it thereafter, storing a rotated refresh token whenever one is
+returned. A provider that returns no refresh token is reported rather than recorded as working.
+
+Until somebody agrees, the credential says so — `awaitingAuthorization` — and the gateway refuses the
+call rather than sending an anonymous one. Withdrawing consent deletes the refresh token; revoking it
+at the provider stays with the person who granted it.
+
+### Signed requests
+
+`HMAC_SIGNATURE` covers the exchanges — Binance, Coinbase, Kraken. There is no agreed
+canonicalisation, so the string to sign is recorded per API as a template, and everything outside its
+placeholders is copied through literally:
+
+| Placeholder | What it becomes |
+| --- | --- |
+| `{method}` | the HTTP method, uppercase |
+| `{path}` | the target path, no host and no query |
+| `{query}` | the final query string, timestamp included |
+| `{body}` | the request body as it will be sent |
+| `{timestamp}` / `{timestamp_ms}` | seconds, or milliseconds — the unit follows from which one is used |
+
+The signature is computed last, once the address and body are settled, and travels in either a header
+or a query parameter — exactly one, which the console enforces. Coinbase signs
+`{timestamp}{method}{path}{body}` into a header; Binance signs `{query}` and appends the result to
+the address. Both are preset in the console. The key half of `key:secret` identifies the signer in
+its own header; the secret half never leaves the process.
 
 ## Traffic handling
 
@@ -253,13 +316,28 @@ Revoking access does not require deleting a record. Clearing **Active** on an ap
 
 ## Observability
 
-Three surfaces, for three different questions.
+Four surfaces, for four different questions.
 
 - `GET /actuator/health` is open, for orchestrator probes, and says nothing beyond up or down.
+- `POST /api/admin/providers/{id}/ping` asks one registered API whether it is still there. A `HEAD` of its base URL, no credential presented and no path appended, sent through the gateway's own client so the same address rules apply, with its own short deadline. Whatever comes back — including `401` or `404` — counts as reachable: what this separates is a destination that cannot be talked to at all (a name that stopped resolving, an expired certificate, a host that stopped listening) from one that is answering and refusing, which is diagnosed on the credential instead. Administrators only, since the catalogue entry is theirs and the probe leaves the deployment.
 - `GET /actuator/metrics` requires administrator authentication and carries `janus.gateway.requests`, a timer tagged by provider slug, outcome, cache result, and status. The request path is deliberately never a tag: one time series per URL is how a metrics backend is brought down, and per-path detail is what the audit log is for. The slug is only tagged once a provider was actually resolved, so an unknown destination cannot mint series either.
 - The audit stream answers what happened to one request. Every response carries `X-Janus-Correlation-Id`, the same identifier appears in the application logs, and the console can filter the log by outcome.
 
 Gateway audit events are written off the request path by a bounded single-threaded writer. Saturation runs the write on the calling thread rather than dropping it, and shutdown drains the queue, so a proxied call does not pay for an insert before it can answer and no event is lost to a normal stop.
+
+### How long any of it is kept
+
+Everything Janus accumulates on its own expires on its own, so a deployment left running does not become a disk problem.
+
+The journal is the only one of them large enough to matter, and it ages in two halves.
+
+**Traffic** is everything written once per attempt at the door: a proxied call, and any request refused before it got in — a bad API key, bad console credentials, a bad client secret at the token endpoint. Its volume is decided by whoever is knocking rather than by anything you configure, which is why the refusals age here rather than with the security records: thirty days of rejected attempts is a forensic window, a year of them is a scripted flood choosing your disk budget. Kept **30 days**, a little wider than the month the console offers without asking for exact dates.
+
+**Everything else** — a credential created, a grant changed, a consent given or withdrawn, a sign-in that succeeded, a refresh token replayed — arrives a handful of times a day and is what somebody comes back to much later. Kept **a year**, for a fraction of the space.
+
+A nightly pass removes what has aged out, in bounded batches so it never holds locks on the table the gateway is still writing to, and it removes by age and by nothing else: a trim that could choose which events disappear would not be housekeeping. Set either age to `0` to keep that half forever, for a deployment that ships the journal to a SIEM instead.
+
+The rest looks after itself already: abandoned consent screens are swept every fifteen minutes, expired refresh tokens hourly, queued vault deletions every minute, and expiry announcements are withdrawn as soon as the dates stop supporting them. Container output is capped by the compose files at 10 MB across 3 files per service — Docker's `json-file` driver otherwise keeps every line ever written, which on a long-lived host fills a disk before the database does.
 
 ## CI/CD deployment
 

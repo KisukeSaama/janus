@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 
 import type { Identity } from '../api';
-import { Wordmark } from '../components';
+import { HomeLink } from '../components';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { useI18n, type MessageKey } from '../i18n';
 
@@ -43,10 +43,13 @@ const GROUPS: { label: MessageKey; items: Item[] }[] = [
     ],
   },
   {
+    // Callers before destinations, which is the order a connection reads in everywhere else: the
+    // arrow on the dashboard, the title of a connection, and the flow that writes one all go from
+    // the service to the API it reaches.
     label: 'nav.registry',
     items: [
-      { id: 'credentials', label: 'credentials.title', icon: KeyRound },
       { id: 'applications', label: 'applications.title', icon: Boxes },
+      { id: 'credentials', label: 'credentials.title', icon: KeyRound },
     ],
   },
   {
@@ -95,8 +98,13 @@ function Nav({ page, counts, identity, onNavigate, onSignOut, onClose }: NavProp
        */}
       <div className="shrink-0">
         <div className="flex items-center gap-2.5 px-4 py-3">
+          {/*
+           * The wordmark is the eighth destination: the corner of the window goes home, the same as
+           * it does everywhere else. It keeps the row's height whether or not the drawer's close
+           * button is beside it, so the rule underneath lands on the same pixel at every width.
+           */}
           <span className="flex min-h-[38px] flex-1 items-center gap-2.5 pointer-coarse:min-h-11">
-            <Wordmark />
+            <HomeLink onNavigate={() => onNavigate('dashboard')} />
           </span>
           {onClose && (
             <button className="btn btn-sm btn-quiet -mr-2 aspect-square px-0" aria-label={t('nav.close')} onClick={onClose}>

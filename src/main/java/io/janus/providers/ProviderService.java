@@ -34,6 +34,7 @@ public class ProviderService {
     private final GrantRepository grants;
     private final SecretDeletionQueue secretDeletions;
     private final DestinationValidator destinations;
+    private final UpstreamPing upstream;
     private final TrafficPolicyRegistry traffic;
     private final AccountRepository accounts;
     private final AccessScope scope;
@@ -45,6 +46,7 @@ public class ProviderService {
             GrantRepository grants,
             SecretDeletionQueue secretDeletions,
             DestinationValidator destinations,
+            UpstreamPing upstream,
             TrafficPolicyRegistry traffic,
             AccountRepository accounts,
             AccessScope scope,
@@ -54,6 +56,7 @@ public class ProviderService {
         this.grants = grants;
         this.secretDeletions = secretDeletions;
         this.destinations = destinations;
+        this.upstream = upstream;
         this.traffic = traffic;
         this.accounts = accounts;
         this.scope = scope;
@@ -161,6 +164,22 @@ public class ProviderService {
         return dropped;
     }
 
+    /**
+     * Whether this destination is answering, right now.
+     *
+     * <p>Deliberately outside a transaction: the call leaves the process and waits on somebody else's
+     * network, and a database connection held for that whole wait is a connection the gateway is not
+     * proxying with. The read it needs is one row, and the pool is small on purpose.
+     *
+     * <p>Restricted to administrators like every other action on a catalogue entry. Nothing is
+     * disclosed by the answer, but the address is theirs to maintain, and a probe anybody could ask
+     * for is outbound traffic anybody could raise from the deployment's own address.
+     */
+    public ProviderPing ping(UUID id) {
+        requireAdministrator();
+        return upstream.reach(require(id).getBaseUrl());
+    }
+
     /** Validated and normalised: the stored form is what the gateway will build every target URI on. */
     private String destination(ProviderRequest request) {
         String url = destinations.validate(request.baseUrl()).toString();
@@ -188,6 +207,31 @@ public class ProviderService {
                         destinations.validate(auth.tokenUrl()).toString(),
                         auth.tokenScopes(),
                         auth.tokenClientAuth());
+            }
+            case OAUTH2_AUTHORIZATION_CODE -> {
+                if (auth.tokenUrl() == null || auth.tokenUrl().isBlank())
+                    throw new IllegalArgumentException("A token endpoint is required");
+                if (auth.authorizationUrl() == null || auth.authorizationUrl().isBlank())
+                    throw new IllegalArgumentException("An authorisation page is required, where the account holder "
+                            + "agrees — such as https://accounts.spotify.com/authorize");
+                // Both are destinations Janus will send somebody or something to, so both are checked
+                // by the same rules that admit any other URL: no private address, no redirect chain.
+                auth = new Provider.Auth(
+                        auth.type(),
+                        null,
+                        null,
+                        destinations.validate(auth.tokenUrl()).toString(),
+                        auth.tokenScopes(),
+                        auth.tokenClientAuth(),
+                        destinations.validate(auth.authorizationUrl()).toString(),
+                        null);
+            }
+            case HMAC_SIGNATURE -> {
+                if (auth.headerName() != null && !auth.headerName().matches("[A-Za-z0-9-]{1,100}"))
+                    throw new IllegalArgumentException("A valid header name is required for the key");
+                if (auth.signature() == null || auth.signature().template() == null)
+                    throw new IllegalArgumentException("A signing recipe is required");
+                auth.signature().validate();
             }
             default -> {
                 // No extra configuration belongs to this strategy.

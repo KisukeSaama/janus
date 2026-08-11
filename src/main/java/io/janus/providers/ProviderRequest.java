@@ -2,8 +2,7 @@ package io.janus.providers;
 
 import jakarta.validation.constraints.*;
 
-import io.janus.credentials.AuthType;
-import io.janus.credentials.TokenClientAuth;
+import io.janus.credentials.*;
 
 /**
  * What an administrator may state about a destination.
@@ -37,10 +36,59 @@ public record ProviderRequest(
         @Size(max = 100) String queryParameter,
         @Size(max = 500) String tokenUrl,
         @Size(max = 500) String tokenScopes,
-        TokenClientAuth tokenClientAuth) {
+        TokenClientAuth tokenClientAuth,
+        @Size(max = 500) String authorizationUrl,
+        SignatureAlgorithm signatureAlgorithm,
+        @Size(max = SignatureTemplate.MAX_LENGTH) String signatureTemplate,
+        SignatureEncoding signatureEncoding,
+        @Size(max = 100) String signatureHeader,
+        @Size(max = 100) String signatureParameter,
+        @Size(max = 100) String timestampHeader,
+        @Size(max = 100) String timestampParameter) {
 
     public ProviderRequest {
         name = name == null ? null : name.trim();
+    }
+
+    /** Compatibility overload for callers written before consent and signing were offered. */
+    public ProviderRequest(
+            String name,
+            String slug,
+            String baseUrl,
+            boolean enabled,
+            Boolean cacheEnabled,
+            Integer cacheTtlSeconds,
+            Integer rateLimitPerMinute,
+            Integer rateLimitBurst,
+            AuthType authType,
+            String headerName,
+            String queryParameter,
+            String tokenUrl,
+            String tokenScopes,
+            TokenClientAuth tokenClientAuth) {
+        this(
+                name,
+                slug,
+                baseUrl,
+                enabled,
+                cacheEnabled,
+                cacheTtlSeconds,
+                rateLimitPerMinute,
+                rateLimitBurst,
+                authType,
+                headerName,
+                queryParameter,
+                tokenUrl,
+                tokenScopes,
+                tokenClientAuth,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 
     /** Compatibility overload for clients written before authentication moved onto the API. */
@@ -79,7 +127,30 @@ public record ProviderRequest(
     }
 
     public Provider.Auth auth() {
-        return new Provider.Auth(authType, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth);
+        return new Provider.Auth(
+                authType,
+                headerName,
+                queryParameter,
+                tokenUrl,
+                tokenScopes,
+                tokenClientAuth,
+                authorizationUrl,
+                signature());
+    }
+
+    /** The signing recipe, or null when this strategy does not sign. */
+    public SignatureSettings signature() {
+        if (authType == null || !authType.signs()) return null;
+        return new SignatureSettings(
+                signatureAlgorithm,
+                signatureTemplate == null || signatureTemplate.isBlank()
+                        ? null
+                        : new SignatureTemplate(signatureTemplate),
+                signatureEncoding,
+                signatureHeader,
+                signatureParameter,
+                timestampHeader,
+                timestampParameter);
     }
 
     private static int orZero(Integer value) {

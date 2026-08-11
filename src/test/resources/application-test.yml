@@ -10,6 +10,9 @@ janus:
     # Far enough away that the sweep never fires mid-suite and writes events a test did not expect.
     check-cron: "0 0 0 1 1 *"
     email.enabled: false
+  # Same reason, the other way round: a trim firing mid-suite would remove events a test wrote.
+  # AuditRetentionSweepIT calls the sweep itself rather than waiting for a schedule.
+  audit.retention.sweep-cron: "0 0 0 1 1 *"
   gateway:
     # Retries and waits are real behaviour, but a suite should not spend seconds re-enacting them.
     throttle.max-wait-millis: 50

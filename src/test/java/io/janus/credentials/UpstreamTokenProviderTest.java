@@ -14,6 +14,7 @@ import reactor.core.publisher.Mono;
 import tools.jackson.databind.ObjectMapper;
 
 import io.janus.accounts.TestAccount;
+import io.janus.openbao.OpenBaoClient;
 import io.janus.providers.Provider;
 
 /**
@@ -49,7 +50,10 @@ class UpstreamTokenProviderTest {
                     return next == null ? Mono.just(json("{\"access_token\":\"token-1\"}")) : next.get();
                 })
                 .build();
-        tokens = new UpstreamTokenProvider(web, cache, new ObjectMapper());
+        // OpenBao is only reached for the refresh token of a consented connection, which this
+        // exchange is not: a client-credentials credential holds everything it needs in one value.
+        tokens = new UpstreamTokenProvider(
+                web, cache, new ObjectMapper(), org.mockito.Mockito.mock(OpenBaoClient.class));
     }
 
     private static ClientResponse json(String body) {

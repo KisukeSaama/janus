@@ -1,20 +1,25 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ExternalLink, TriangleAlert } from 'lucide-react';
 
 import {
   del,
   keys,
   post,
+  useOAuthCallback,
   type AuthType,
   type Credential,
   type Provider,
+  type SignatureEncoding,
 } from '../../api';
-import { CheckField, ChoiceField, ConfirmDialog, Field, Sheet } from '../../components';
+import { CheckField, ChoiceField, ConfirmDialog, CopyField, Field, Sheet } from '../../components';
 import { useI18n } from '../../i18n';
 import { gatewayUrl, toSlug } from '../../lib/connections';
 import { useErrorMessage } from '../../lib/errors';
 import { fromDateInput, NOTICE_DAYS, WARNING_DAYS } from '../../lib/expiry';
+import { PresetPicker } from './PresetPicker';
+import type { ApiPreset } from './presets';
+import { secretLabel, secretPlaceholder } from './secrets';
 
 /**
  * An API is registered independently from the applications that may call it. This flow writes the
@@ -25,6 +30,17 @@ import { fromDateInput, NOTICE_DAYS, WARNING_DAYS } from '../../lib/expiry';
  * is unticked. An administrator writing the catalogue on behalf of the deployment is not thereby a
  * caller of every destination in it.
  *
+ * What it never writes is a connection. Admitting a service to a destination is the service's own
+ * decision, taken where the service is registered, and this flow is reached from there: the reader
+ * ticking APIs for their new service opens it, describes the one the catalogue is missing, and comes
+ * straight back to that list. Activating here only means this account now holds a credential, which
+ * is what makes the entry tickable at all.
+ *
+ * It opens on a list of APIs rather than on an empty form. Almost every field here has one correct
+ * answer published in somebody's documentation, and asking a reader to go and find it is how they
+ * come back with a token endpoint pasted from a blog post. Choosing "Spotify" answers all of them at
+ * once; everything stays editable afterwards, and an API not in the list is one click away.
+ *
  * Two steps: where it goes, and what it expects on arrival. Nothing here asks which paths the caller
  * may reach — registering an API admits it to all of them, and the API's own authorisation decides
  * the rest — which is what let the third step go.
@@ -32,18 +48,43 @@ import { fromDateInput, NOTICE_DAYS, WARNING_DAYS } from '../../lib/expiry';
 
 type Step = 1 | 2;
 
+/** Everything a signed request needs, kept together because none of it means anything alone. */
+type Signing = {
+  template: string;
+  encoding: SignatureEncoding;
+  signatureHeader: string;
+  signatureParameter: string;
+  timestampHeader: string;
+  timestampParameter: string;
+};
+
+const NO_SIGNING: Signing = {
+  template: '',
+  encoding: 'HEX',
+  signatureHeader: '',
+  signatureParameter: '',
+  timestampHeader: '',
+  timestampParameter: '',
+};
+
 export function ConnectFlow({
   onClose,
   onDone,
+  onHome,
 }: {
   onClose: () => void;
   onDone: () => void;
+  /** The wordmark's destination, which is a different exit from this flow than the button beside it. */
+  onHome: () => void;
 }) {
   const { t } = useI18n();
   const describe = useErrorMessage();
   const client = useQueryClient();
 
   const [step, setStep] = useState<Step>(1);
+  /** Null until an API has been chosen from the list or the reader asked to describe their own. */
+  const [preset, setPreset] = useState<ApiPreset | null>(null);
+  const [picking, setPicking] = useState(true);
   const [apiName, setApiName] = useState('');
   const [slug, setSlug] = useState('');
   const [slugEdited, setSlugEdited] = useState(false);
@@ -52,26 +93,92 @@ export function ConnectFlow({
   const [headerName, setHeaderName] = useState('X-Api-Key');
   const [queryParameter, setQueryParameter] = useState('api_key');
   const [tokenUrl, setTokenUrl] = useState('');
+  const [authorizationUrl, setAuthorizationUrl] = useState('');
   const [tokenScopes, setTokenScopes] = useState('');
+  const [signing, setSigning] = useState<Signing>(NO_SIGNING);
   const [activate, setActivate] = useState(false);
   const [secret, setSecret] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
   const [busy, setBusy] = useState(false);
-  const [leaving, setLeaving] = useState(false);
+  // The way out that is waiting on an answer, not merely the fact that one is. There are two exits
+  // from this flow — the button that closes it and the wordmark that leaves for the console's home —
+  // and the dialog has to fire the one that was actually clicked.
+  const [leaving, setLeaving] = useState<(() => void) | null>(null);
   const [error, setError] = useState('');
 
   const effectiveSlug = slugEdited ? slug : toSlug(apiName);
   const started = apiName !== '' || baseUrl !== '' || secret !== '' || expiresAt !== '';
 
+  /** Nothing typed, nothing to lose: an empty form leaves on the click rather than on a question. */
+  const leave = (exit: () => void) => (started ? setLeaving(() => exit) : exit());
+
+  const signs = authType === 'HMAC_SIGNATURE';
+  const exchanges = authType === 'OAUTH2_CLIENT_CREDENTIALS' || authType === 'OAUTH2_AUTHORIZATION_CODE';
+
+  /** Answers every question the reader would otherwise have had to go and look up. */
+  function apply(chosen: ApiPreset) {
+    setPreset(chosen);
+    setPicking(false);
+    setApiName(chosen.variant ? `${chosen.name} (${chosen.variant})` : chosen.name);
+    setSlug(chosen.slug);
+    setSlugEdited(true);
+    setBaseUrl(chosen.baseUrl);
+    setAuthType(chosen.authType);
+    if (chosen.headerName) setHeaderName(chosen.headerName);
+    if (chosen.queryParameter) setQueryParameter(chosen.queryParameter);
+    setTokenUrl(chosen.tokenUrl ?? '');
+    setAuthorizationUrl(chosen.authorizationUrl ?? '');
+    setTokenScopes(chosen.tokenScopes ?? '');
+    setSigning({
+      template: chosen.signatureTemplate ?? '',
+      encoding: chosen.signatureEncoding ?? 'HEX',
+      signatureHeader: chosen.signatureHeader ?? '',
+      signatureParameter: chosen.signatureParameter ?? '',
+      timestampHeader: chosen.timestampHeader ?? '',
+      timestampParameter: chosen.timestampParameter ?? '',
+    });
+  }
+
   const complete: Record<Step, boolean> = {
-    1: apiName.trim() !== '' && effectiveSlug.length >= 3 && baseUrl.trim() !== '',
+    1: !picking && apiName.trim() !== '' && effectiveSlug.length >= 3 && baseUrl.trim() !== '',
     2:
       // The contract is always required; the secret only when this account is activating with it.
       (authType !== 'API_KEY_HEADER' || headerName.trim() !== '') &&
       (authType !== 'API_KEY_QUERY' || queryParameter.trim() !== '') &&
-      (authType !== 'OAUTH2_CLIENT_CREDENTIALS' || tokenUrl.trim() !== '') &&
+      (!exchanges || tokenUrl.trim() !== '') &&
+      (authType !== 'OAUTH2_AUTHORIZATION_CODE' || authorizationUrl.trim() !== '') &&
+      // A signature travels in exactly one place, which is the one rule a reader can get wrong here.
+      (!signs ||
+        (signing.template.trim() !== '' &&
+          (signing.signatureHeader.trim() !== '') !== (signing.signatureParameter.trim() !== ''))) &&
       (!activate || authType === 'NONE' || secret !== ''),
   };
+
+  /** The authentication contract, in the shape both endpoints take it. */
+  function contract() {
+    return {
+      authType,
+      headerName:
+        authType === 'API_KEY_HEADER' || (signs && headerName.trim() !== '') ? headerName.trim() : null,
+      queryParameter: authType === 'API_KEY_QUERY' ? queryParameter.trim() : null,
+      tokenUrl: exchanges ? tokenUrl.trim() : null,
+      tokenScopes: exchanges ? tokenScopes.trim() || null : null,
+      authorizationUrl: authType === 'OAUTH2_AUTHORIZATION_CODE' ? authorizationUrl.trim() : null,
+      signatureAlgorithm: signs ? 'HMAC_SHA256' : null,
+      signatureTemplate: signs ? signing.template.trim() : null,
+      signatureEncoding: signs ? signing.encoding : null,
+      signatureHeader: signs ? signing.signatureHeader.trim() || null : null,
+      signatureParameter: signs ? signing.signatureParameter.trim() || null : null,
+      timestampHeader: signs ? signing.timestampHeader.trim() || null : null,
+      timestampParameter: signs ? signing.timestampParameter.trim() || null : null,
+    };
+  }
+
+  /** Every list this flow can have written to, told at once that it is out of date. */
+  const refresh = () =>
+    Promise.all(
+      [keys.providers, keys.credentials, ['audit']].map((key) => client.invalidateQueries({ queryKey: key })),
+    );
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -96,11 +203,7 @@ export function ConnectFlow({
         slug: effectiveSlug,
         baseUrl: baseUrl.trim(),
         enabled: true,
-        authType,
-        headerName: authType === 'API_KEY_HEADER' ? headerName.trim() : null,
-        queryParameter: authType === 'API_KEY_QUERY' ? queryParameter.trim() : null,
-        tokenUrl: authType === 'OAUTH2_CLIENT_CREDENTIALS' ? tokenUrl.trim() : null,
-        tokenScopes: authType === 'OAUTH2_CLIENT_CREDENTIALS' ? tokenScopes.trim() || null : null,
+        ...contract(),
       });
       undo.push(() => del(`/providers/${provider.id}`));
 
@@ -113,11 +216,7 @@ export function ConnectFlow({
           // off. Named for what it is, since "-secret" would describe a value that does not exist.
           name: authType === 'NONE' ? `${effectiveSlug}-open` : `${effectiveSlug}-secret`,
           providerId: provider.id,
-          authType,
-          headerName: authType === 'API_KEY_HEADER' ? headerName.trim() : null,
-          queryParameter: authType === 'API_KEY_QUERY' ? queryParameter.trim() : null,
-          tokenUrl: authType === 'OAUTH2_CLIENT_CREDENTIALS' ? tokenUrl.trim() : null,
-          tokenScopes: authType === 'OAUTH2_CLIENT_CREDENTIALS' ? tokenScopes.trim() || null : null,
+          ...contract(),
           secret: authType === 'NONE' ? null : secret,
           // Empty is a supported answer: many upstream keys have no published end date. Converting
           // only here keeps the form in the operator's calendar while the API receives an instant.
@@ -127,13 +226,7 @@ export function ConnectFlow({
         undo.push(() => del(`/credentials/${credential.id}`));
       }
 
-      // Registering an API is independent from authorising callers. Applications subscribe to it
-      // later from their own form, which may create any number of grants.
-      await Promise.all(
-        [keys.providers, keys.credentials, ['audit']].map((key) =>
-          client.invalidateQueries({ queryKey: key }),
-        ),
-      );
+      await refresh();
       onDone();
     } catch (x) {
       for (const rollback of undo.reverse()) await rollback().catch(() => undefined);
@@ -145,6 +238,7 @@ export function ConnectFlow({
   return (
     <Sheet
       label={t('connect.title')}
+      onHome={() => leave(onHome)}
       head={
         <div className="flex items-center gap-3">
           <p className="stamp text-text-2" aria-live="polite">
@@ -158,7 +252,7 @@ export function ConnectFlow({
           <button
             className="btn btn-sm btn-quiet"
             aria-haspopup={started ? 'dialog' : undefined}
-            onClick={() => (started ? setLeaving(true) : onClose())}
+            onClick={() => leave(onClose)}
           >
             {t('connect.abandon')}
           </button>
@@ -172,10 +266,11 @@ export function ConnectFlow({
               {t('common.back')}
             </button>
           )}
+          {/* Nothing to submit while the list is open: choosing from it is the whole interaction. */}
           <button
             type="submit"
             form="connect"
-            className="btn btn-primary ml-auto min-w-[12rem]"
+            className={`btn btn-primary ml-auto min-w-[12rem] ${picking ? 'invisible' : ''}`}
             disabled={!complete[step] || busy}
           >
             {step < 2 ? (
@@ -200,17 +295,25 @@ export function ConnectFlow({
           pending={t('common.working')}
           destructive
           busy={false}
-          onCancel={() => setLeaving(false)}
-          onConfirm={onClose}
+          onCancel={() => setLeaving(null)}
+          onConfirm={leaving}
         />
       )}
 
       <form id="connect" onSubmit={submit} className="space-y-6">
-        {step === 1 && (
+        {step === 1 && picking && (
+          <>
+            <StepHead title={t('connect.presetTitle')} lead={t('connect.presetLead')} />
+            <PresetPicker onChoose={apply} onSkip={() => setPicking(false)} />
+          </>
+        )}
+
+        {step === 1 && !picking && (
           <>
             {/* The contract of the whole flow, said once, on the screen that opens it. */}
             <p className="text-sm text-accent-text">{t('connect.lead')}</p>
             <StepHead title={t('connect.s1Title')} lead={t('connect.s1Lead')} />
+            {preset && <PresetBanner preset={preset} onClear={() => setPicking(true)} />}
             <Field
               label={t('connect.apiName')}
               required
@@ -265,18 +368,27 @@ export function ConnectFlow({
                   label: t('connect.authOauth2'),
                   hint: t('connect.authOauth2Hint'),
                 },
-                // Last, because it is the one case where this step asks for nothing.
+                {
+                  value: 'OAUTH2_AUTHORIZATION_CODE',
+                  label: t('connect.authOauthUser'),
+                  hint: t('connect.authOauthUserHint'),
+                },
+                // Last of those that send something: a reader only picks it knowing they need it.
+                { value: 'HMAC_SIGNATURE', label: t('connect.authHmac'), hint: t('connect.authHmacHint') },
+                // Last overall, because it is the one case where this step asks for nothing.
                 { value: 'NONE', label: t('connect.authNone'), hint: t('connect.authNoneHint') },
               ]}
             />
-            {authType === 'API_KEY_HEADER' && (
+            {preset?.caveat && <Caveat>{preset.caveat}</Caveat>}
+            {(authType === 'API_KEY_HEADER' || signs) && (
               <Field
-                label={t('connect.headerName')}
-                required
+                label={signs ? t('connect.keyHeaderName') : t('connect.headerName')}
+                required={authType === 'API_KEY_HEADER'}
                 data
                 autoComplete="off"
                 value={headerName}
                 onChange={(e) => setHeaderName(e.target.value)}
+                hint={signs ? t('connect.keyHeaderNameHint') : undefined}
               />
             )}
             {authType === 'API_KEY_QUERY' && (
@@ -290,7 +402,23 @@ export function ConnectFlow({
                 onChange={(e) => setQueryParameter(e.target.value)}
               />
             )}
-            {authType === 'OAUTH2_CLIENT_CREDENTIALS' && (
+            {/* Registering this with the provider is a step outside Janus, and the one nobody is told
+                about until the authorisation is refused for a redirect that was never declared. */}
+            {authType === 'OAUTH2_AUTHORIZATION_CODE' && <CallbackToRegister />}
+            {authType === 'OAUTH2_AUTHORIZATION_CODE' && (
+              <Field
+                label={t('connect.authorizationUrl')}
+                type="url"
+                required
+                data
+                autoComplete="off"
+                placeholder="https://accounts.spotify.com/authorize"
+                value={authorizationUrl}
+                onChange={(e) => setAuthorizationUrl(e.target.value)}
+                hint={t('connect.authorizationUrlHint')}
+              />
+            )}
+            {exchanges && (
               <>
                 <Field
                   label={t('connect.tokenUrl')}
@@ -309,23 +437,30 @@ export function ConnectFlow({
                   autoComplete="off"
                   value={tokenScopes}
                   onChange={(e) => setTokenScopes(e.target.value)}
-                  hint={t('connect.tokenScopesHint')}
+                  hint={
+                    authType === 'OAUTH2_AUTHORIZATION_CODE'
+                      ? t('connect.tokenScopesHintUser')
+                      : t('connect.tokenScopesHint')
+                  }
                 />
               </>
             )}
+            {signs && <SigningFields value={signing} onChange={setSigning} />}
             <div>
               <p className="stamp mb-1.5 text-text-2">{t('connect.preview')}</p>
               <p className="data rounded-control border border-line bg-sunk px-3 py-2 text-xs leading-5">
-                {authType === 'NONE'
-                  ? t('connect.previewOpen')
-                  : authType === 'API_KEY_HEADER'
-                    ? `${headerName.trim() || 'X-Api-Key'}: ${'•'.repeat(12)}`
-                    : authType === 'API_KEY_QUERY'
-                      ? `?${queryParameter.trim() || 'api_key'}=${'•'.repeat(12)}`
-                      : `Authorization: ${authType === 'BASIC' ? 'Basic' : 'Bearer'} ${'•'.repeat(12)}`}
+                <Preview
+                  authType={authType}
+                  headerName={headerName}
+                  queryParameter={queryParameter}
+                  signing={signing}
+                />
               </p>
               {authType === 'OAUTH2_CLIENT_CREDENTIALS' && (
                 <p className="mt-1.5 text-xs text-text-2">{t('connect.exchangeNote')}</p>
+              )}
+              {authType === 'OAUTH2_AUTHORIZATION_CODE' && (
+                <p className="mt-1.5 text-xs text-text-2">{t('connect.consentNote')}</p>
               )}
             </div>
 
@@ -341,34 +476,34 @@ export function ConnectFlow({
               {activate && authType !== 'NONE' && (
                 <>
                   <Field
-                    label={
-                      authType === 'BASIC'
-                        ? t('credentials.fieldSecretBasic')
-                        : authType === 'OAUTH2_CLIENT_CREDENTIALS'
-                          ? t('credentials.fieldSecretClient')
-                          : authType === 'API_KEY_HEADER' || authType === 'API_KEY_QUERY'
-                            ? t('connect.apiKeyValue')
-                            : t('connect.secretValue')
-                    }
+                    label={secretLabel(authType, t)}
                     type="password"
                     required
                     autoFocus
                     autoComplete="new-password"
-                    placeholder={
-                      authType === 'BASIC'
-                        ? t('connect.secretBasic')
-                        : authType === 'OAUTH2_CLIENT_CREDENTIALS'
-                          ? 'client_id:client_secret'
-                          : undefined
-                    }
+                    placeholder={secretPlaceholder(authType, t)}
                     value={secret}
                     onChange={(e) => setSecret(e.target.value)}
                     hint={
-                      authType === 'OAUTH2_CLIENT_CREDENTIALS'
-                        ? t('connect.secretExchangeHint')
-                        : t('connect.secretHint')
+                      authType === 'OAUTH2_AUTHORIZATION_CODE'
+                        ? t('connect.secretConsentHint')
+                        : authType === 'OAUTH2_CLIENT_CREDENTIALS'
+                          ? t('connect.secretExchangeHint')
+                          : t('connect.secretHint')
                     }
                   />
+                  {/* Where the reader gets these, so the next step is a link rather than a search. */}
+                  {preset?.credentialsUrl && (
+                    <a
+                      className="inline-flex items-center gap-1.5 text-xs text-accent-text underline underline-offset-2"
+                      href={preset.credentialsUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      {t('connect.whereCredentials', { name: preset.name })}
+                      <ExternalLink size={12} strokeWidth={2.25} aria-hidden="true" />
+                    </a>
+                  )}
                   <Field
                     label={t('expiry.field')}
                     type="date"
@@ -376,7 +511,7 @@ export function ConnectFlow({
                     value={expiresAt}
                     onChange={(e) => setExpiresAt(e.target.value)}
                     hint={
-                      authType === 'OAUTH2_CLIENT_CREDENTIALS'
+                      exchanges
                         ? t('credentials.expiryHintExchange')
                         : t('expiry.fieldHint', { notice: NOTICE_DAYS, warning: WARNING_DAYS })
                     }
@@ -405,6 +540,170 @@ export function ConnectFlow({
       </form>
     </Sheet>
   );
+}
+
+/**
+ * The redirect an operator has to declare at the provider before any of this works.
+ *
+ * Shown here rather than left in the documentation because it is the one prerequisite Janus knows
+ * and the reader does not: it is built from this deployment's public URL, which is why it is asked
+ * of the server. When that URL was never configured, the address below is a localhost default that
+ * every provider will refuse, and saying so here costs less than discovering it after a consent.
+ */
+function CallbackToRegister() {
+  const { t } = useI18n();
+  const callback = useOAuthCallback();
+  if (!callback.data) return null;
+  return (
+    <div className="space-y-2">
+      <CopyField label={t('connect.callbackLabel')} value={callback.data.url} />
+      <p className="text-xs text-text-2">{t('connect.callbackHint')}</p>
+      {!callback.data.configured && <Caveat>{t('connect.callbackUnconfigured')}</Caveat>}
+    </div>
+  );
+}
+
+/** What the chosen preset answered, and the way back to the list. */
+function PresetBanner({ preset, onClear }: { preset: ApiPreset; onClear: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-panel border border-accent/40 bg-accent-wash px-3.5 py-3">
+      <p className="text-sm">
+        {t('connect.presetApplied', {
+          name: preset.variant ? `${preset.name} — ${preset.variant}` : preset.name,
+        })}
+      </p>
+      <button type="button" className="text-xs text-accent-text underline underline-offset-2" onClick={onClear}>
+        {t('connect.presetChange')}
+      </button>
+    </div>
+  );
+}
+
+/** Something the API needs that Janus does not do for it. Said plainly rather than left to be found. */
+function Caveat({ children }: { children: ReactNode }) {
+  return (
+    <p className="flex gap-2.5 rounded-panel border border-warn/40 bg-warn-wash px-3.5 py-3 text-sm">
+      <TriangleAlert size={15} strokeWidth={2.25} aria-hidden="true" className="mt-0.5 shrink-0" />
+      <span>{children}</span>
+    </p>
+  );
+}
+
+/**
+ * The recipe for a signed request.
+ *
+ * The only place in this flow that asks a reader to know something structural about their API, which
+ * is why it is grouped and set apart: a preset fills all of it in, and somebody who arrived here
+ * without one has their provider's documentation open anyway.
+ */
+function SigningFields({ value, onChange }: { value: Signing; onChange: (next: Signing) => void }) {
+  const { t } = useI18n();
+  const set = (patch: Partial<Signing>) => onChange({ ...value, ...patch });
+  return (
+    <div className="space-y-6 rounded-panel border border-line bg-sunk p-4">
+      <Field
+        label={t('connect.signTemplate')}
+        required
+        data
+        autoComplete="off"
+        placeholder="{timestamp}{method}{path}{body}"
+        value={value.template}
+        onChange={(e) => set({ template: e.target.value })}
+        hint={t('connect.signTemplateHint')}
+      />
+      <ChoiceField
+        label={t('connect.signEncoding')}
+        name="signatureEncoding"
+        value={value.encoding}
+        onChange={(next) => set({ encoding: next as SignatureEncoding })}
+        options={[
+          { value: 'HEX', label: t('connect.signHex'), hint: t('connect.signHexHint') },
+          { value: 'BASE64', label: t('connect.signBase64'), hint: t('connect.signBase64Hint') },
+        ]}
+      />
+      {/* Setting either one clears the other: the signature goes in exactly one place. */}
+      <div className="grid gap-6 sm:grid-cols-2">
+        <Field
+          label={t('connect.signHeader')}
+          data
+          autoComplete="off"
+          placeholder="CB-ACCESS-SIGN"
+          value={value.signatureHeader}
+          onChange={(e) => set({ signatureHeader: e.target.value, signatureParameter: '' })}
+        />
+        <Field
+          label={t('connect.signParameter')}
+          data
+          autoComplete="off"
+          placeholder="signature"
+          value={value.signatureParameter}
+          onChange={(e) => set({ signatureParameter: e.target.value, signatureHeader: '' })}
+        />
+      </div>
+      <p className="text-xs text-text-2">{t('connect.signWhereHint')}</p>
+      <div className="grid gap-6 sm:grid-cols-2">
+        <Field
+          label={t('connect.timestampHeader')}
+          data
+          autoComplete="off"
+          placeholder="CB-ACCESS-TIMESTAMP"
+          value={value.timestampHeader}
+          onChange={(e) => set({ timestampHeader: e.target.value, timestampParameter: '' })}
+        />
+        <Field
+          label={t('connect.timestampParameter')}
+          data
+          autoComplete="off"
+          placeholder="timestamp"
+          value={value.timestampParameter}
+          onChange={(e) => set({ timestampParameter: e.target.value, timestampHeader: '' })}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** What will actually leave, in the shape it will leave in. */
+function Preview({
+  authType,
+  headerName,
+  queryParameter,
+  signing,
+}: {
+  authType: AuthType;
+  headerName: string;
+  queryParameter: string;
+  signing: Signing;
+}) {
+  const { t } = useI18n();
+  const dots = '•'.repeat(12);
+  switch (authType) {
+    case 'NONE':
+      return <>{t('connect.previewOpen')}</>;
+    case 'API_KEY_HEADER':
+      return <>{`${headerName.trim() || 'X-Api-Key'}: ${dots}`}</>;
+    case 'API_KEY_QUERY':
+      return <>{`?${queryParameter.trim() || 'api_key'}=${dots}`}</>;
+    case 'BASIC':
+      return <>{`Authorization: Basic ${dots}`}</>;
+    case 'HMAC_SIGNATURE':
+      return (
+        <>
+          {headerName.trim() !== '' && (
+            <>
+              {`${headerName.trim()}: ${dots}`}
+              <br />
+            </>
+          )}
+          {signing.signatureParameter.trim() !== ''
+            ? `?${signing.signatureParameter.trim()}=${dots}`
+            : `${signing.signatureHeader.trim() || 'X-Signature'}: ${dots}`}
+        </>
+      );
+    default:
+      return <>{`Authorization: Bearer ${dots}`}</>;
+  }
 }
 
 function StepHead({ title, lead }: { title: string; lead: string }) {

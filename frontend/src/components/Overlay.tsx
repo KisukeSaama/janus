@@ -6,7 +6,7 @@ import { useI18n } from '../i18n';
 import { useCopy } from '../hooks/useCopy';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { useMediaQuery, WIDE } from '../hooks/useMediaQuery';
-import { Wordmark } from './Brand';
+import { HomeLink, Wordmark } from './Brand';
 
 function useDismissable(onClose: () => void, ref: RefObject<HTMLElement | null>, autofocus: boolean) {
   useEffect(() => {
@@ -37,11 +37,18 @@ export function Sheet({
   head,
   children,
   footer,
+  onHome,
 }: {
   label: string;
   head?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
+  /**
+   * The corner goes home from here too. What the sheet receives is an intention rather than a
+   * destination: a flow holding an entry nobody has written down yet answers the click with a
+   * question first, and only the flow knows whether it has one.
+   */
+  onHome?: () => void;
 }) {
   const ref = useRef<HTMLElement>(null);
   useFocusTrap(ref);
@@ -65,7 +72,7 @@ export function Sheet({
     >
       <header className="shrink-0 border-b border-line bg-surface">
         <div className="mx-auto flex max-w-[46rem] flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 md:px-6">
-          <Wordmark />
+          {onHome ? <HomeLink onNavigate={onHome} /> : <Wordmark />}
           {head}
         </div>
       </header>

@@ -40,6 +40,15 @@ public class ProviderAdminController {
         providers.delete(id);
     }
 
+    /**
+     * Whether the destination is answering. A POST rather than a GET because it is not free — it
+     * makes Janus reach out to somebody else's API — and nothing may replay it from a cache.
+     */
+    @PostMapping("/{id}/ping")
+    public ProviderPing ping(@PathVariable UUID id) {
+        return providers.ping(id);
+    }
+
     @DeleteMapping("/{id}/cache")
     public Map<String, Object> purgeCache(@PathVariable UUID id) {
         return Map.of("purged", providers.purgeCache(id));

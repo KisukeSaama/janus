@@ -11,10 +11,33 @@ export type AuthType =
   | 'API_KEY_HEADER'
   | 'API_KEY_QUERY'
   | 'BASIC'
-  | 'OAUTH2_CLIENT_CREDENTIALS';
+  | 'OAUTH2_CLIENT_CREDENTIALS'
+  | 'OAUTH2_AUTHORIZATION_CODE'
+  | 'HMAC_SIGNATURE';
 
 /** How Janus proves who it is at an upstream token endpoint. Basic is what RFC 6749 requires. */
 export type TokenClientAuth = 'BASIC' | 'POST';
+
+/** The keyed hashes a signed request may use. */
+export type SignatureAlgorithm = 'HMAC_SHA256' | 'HMAC_SHA512';
+
+/** How a computed signature is written down. Each API simply decided; neither is more correct. */
+export type SignatureEncoding = 'HEX' | 'BASE64';
+
+/**
+ * The settings that belong to a signed request, which is the one strategy whose shape differs per
+ * API. Sent flat rather than nested, as the rest of the contract is.
+ */
+export type SignatureFields = {
+  signatureAlgorithm?: SignatureAlgorithm;
+  /** What gets signed: {method} {path} {query} {body} {timestamp} {timestamp_ms}, and literals. */
+  signatureTemplate?: string;
+  signatureEncoding?: SignatureEncoding;
+  signatureHeader?: string;
+  signatureParameter?: string;
+  timestampHeader?: string;
+  timestampParameter?: string;
+};
 
 export type Application = {
   id: string;
@@ -48,10 +71,30 @@ export type Provider = {
   tokenUrl?: string;
   tokenScopes?: string;
   tokenClientAuth?: TokenClientAuth;
+  /** Where the account holder is sent to agree, for OAUTH2_AUTHORIZATION_CODE. */
+  authorizationUrl?: string;
   /** Whether the signed-in account has provisioned its personal credential for this API. */
   activated: boolean;
   createdAt: string;
   updatedAt?: string;
+} & SignatureFields;
+
+/**
+ * Why a probe ended the way it did, as the backend names it. `ANSWERED` is the only one that means
+ * the destination is there; the rest each point at a different thing to go and look at.
+ */
+export type PingReason = 'ANSWERED' | 'TIMED_OUT' | 'UNRESOLVED' | 'TLS_FAILED' | 'BLOCKED' | 'UNREACHABLE';
+
+/**
+ * Whether a registered API answered just now. A status of 401 or 404 still counts as reachable: the
+ * probe presents no credential and asks for no path, so anything but silence means somebody is home.
+ */
+export type ProviderPing = {
+  reachable: boolean;
+  /** What it answered, or 0 when nothing did. */
+  status: number;
+  millis: number;
+  reason: PingReason;
 };
 
 export type ProviderPage = {
@@ -70,18 +113,27 @@ export type Credential = {
   authType: AuthType;
   headerName?: string;
   queryParameter?: string;
-  /** Where client credentials are exchanged, for OAUTH2_CLIENT_CREDENTIALS. */
+  /** Where credentials are exchanged, for the two strategies that exchange anything. */
   tokenUrl?: string;
   tokenScopes?: string;
   tokenClientAuth?: TokenClientAuth;
+  authorizationUrl?: string;
   /** Where the value lives, never the value. Absent for NONE, which stores none. */
   secretRef?: string;
   enabled: boolean;
+  /**
+   * Whether somebody still has to agree at the provider before this can be used. The one state that
+   * turns a row into a button: it is fixed by a person, not by an edit.
+   */
+  awaitingAuthorization: boolean;
+  /** When consent was last given, and whom the provider says it belongs to. */
+  authorizedAt?: string;
+  authorizedSubject?: string;
   /** When the upstream key stops working. Absent when no date was recorded for it. */
   expiresAt?: string;
   createdAt: string;
   updatedAt?: string;
-};
+} & SignatureFields;
 
 export type Grant = {
   id: string;
@@ -213,6 +265,15 @@ export type CredentialInput = {
   tokenUrl?: string | null;
   tokenScopes?: string | null;
   tokenClientAuth?: TokenClientAuth | null;
+  authorizationUrl?: string | null;
+  /** The signing recipe, repeated from the API that states it. Null on every other strategy. */
+  signatureAlgorithm?: SignatureAlgorithm | null;
+  signatureTemplate?: string | null;
+  signatureEncoding?: SignatureEncoding | null;
+  signatureHeader?: string | null;
+  signatureParameter?: string | null;
+  timestampHeader?: string | null;
+  timestampParameter?: string | null;
   /** Sent on create, and on update only to replace what OpenBao already holds. */
   secret?: string | null;
   expiresAt?: string | null;

@@ -1,5 +1,7 @@
 /** The mark and the wordmark, the only two places Janus draws itself. */
 
+import { useI18n } from '../i18n';
+
 /**
  * Two uprights of unequal weight: a threshold, half open.
  *
@@ -28,5 +30,28 @@ export function Wordmark({ subtitle, accent = true }: { subtitle?: string; accen
         <span className="stamp hidden border-l border-current pl-2.5 text-text-3 sm:inline">{subtitle}</span>
       )}
     </span>
+  );
+}
+
+/**
+ * The wordmark doing what a wordmark in the top left corner has meant since there were windows: the
+ * way back to the start.
+ *
+ * A button rather than a link, because the console's home is reached through the same navigator as
+ * every other destination, and because this one is sometimes intercepted: a screen holding an
+ * unsaved entry answers the click with a question first. It carries a label of its own, since
+ * "Janus" names the product and not the place the click leads.
+ */
+export function HomeLink({ subtitle, onNavigate }: { subtitle?: string; onNavigate: () => void }) {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      className="rounded-[3px] transition-opacity hover:opacity-70"
+      aria-label={t('nav.home')}
+      onClick={onNavigate}
+    >
+      <Wordmark subtitle={subtitle} />
+    </button>
   );
 }

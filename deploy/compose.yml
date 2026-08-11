@@ -1,6 +1,18 @@
+# Everything here logs to stdout, and Docker's default json-file driver keeps every line ever
+# written. On a host that stays up for months that file is what fills the disk first — ahead of the
+# database, because it grows with traffic rather than with what anybody configures, and nothing ever
+# reads most of it. Ten megabytes across three files caps each service at 30 MB and still leaves
+# several days of history for the one thing container logs are for: reading them after an incident.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   web:
     image: ${CI_REGISTRY_IMAGE}/web:${IMAGE_TAG}
+    logging: *logging
     networks:
       - application
       - traefik
@@ -28,6 +40,7 @@ services:
 
   backend:
     image: ${CI_REGISTRY_IMAGE}/backend:${IMAGE_TAG}
+    logging: *logging
     environment:
       SPRING_PROFILES_ACTIVE: prod
       JANUS_DATABASE_URL: jdbc:postgresql://postgres:5432/janus
@@ -60,6 +73,7 @@ services:
 
   postgres:
     image: postgres:17-alpine
+    logging: *logging
     environment:
       POSTGRES_DB: janus
       POSTGRES_USER: janus
@@ -84,6 +98,7 @@ services:
   # a DEV container must not erase its credentials.
   openbao:
     image: openbao/openbao:2.6
+    logging: *logging
     profiles: [dev, prod]
     # OpenBao 2.6 defaults to its unprivileged user. Start its entrypoint as root so it can repair
     # ownership on a fresh host bind mount; the official entrypoint drops back to `openbao` before
@@ -118,6 +133,7 @@ services:
   # alongside the long-running ones.
   openbao-init:
     image: openbao/openbao:2.6
+    logging: *logging
     profiles: [bootstrap]
     user: "0:0"
     entrypoint: ["/bin/sh", "/etc/openbao/bootstrap.sh"]

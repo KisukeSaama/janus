@@ -76,6 +76,14 @@ janus:
     # the migration wrote; once a real one is set, here or from the console, that one stands.
     email: ${JANUS_ADMIN_EMAIL:admin@localhost}
   cors-origins: ${JANUS_CORS_ORIGINS:http://localhost:5173}
+  # Where this deployment is reachable from a browser. It is what the OAuth callback address is built
+  # from, and that address has to be registered with every provider a connection is authorised at, so
+  # it must be the public one rather than whatever the process binds to.
+  public-url: ${JANUS_PUBLIC_URL:http://localhost:8080}
+  # Where the console lives, for sending somebody back to it once they have agreed. The same as the
+  # public URL wherever Janus serves its own console; different during development, where the console
+  # runs on Vite's port.
+  console-url: ${JANUS_CONSOLE_URL:http://localhost:5173}
   # The token exchange every client library already speaks. A service's own identifier and API key
   # are its client id and client secret; nothing extra to create.
   oauth:
@@ -83,6 +91,20 @@ janus:
     refresh-token-ttl: ${JANUS_REFRESH_TOKEN_TTL:30d}
     refresh-enabled: ${JANUS_REFRESH_TOKENS_ENABLED:true}
     max-active-tokens: ${JANUS_MAX_ACTIVE_TOKENS:10000}
+  # Nothing but the schedule deletes from the journal, and every call — and every refused attempt at
+  # one — writes to it, so how long it is kept is the setting that decides how much disk Janus asks
+  # for over a year. Two ages. Traffic is written by whoever is knocking rather than by anything
+  # configured here, and is read soonest: the console offers a month without asking for exact dates.
+  # A credential created, a grant changed, a sign-in that succeeded, are rare and are what somebody
+  # comes back to much later. Zero on either keeps it forever, for a deployment shipping the journal
+  # to a SIEM instead.
+  audit.retention:
+    traffic-days: ${JANUS_AUDIT_TRAFFIC_RETENTION_DAYS:30}
+    administrative-days: ${JANUS_AUDIT_RETENTION_DAYS:365}
+    # The quiet hours by default, and a delete at a time so the gateway keeps writing between them.
+    sweep-cron: ${JANUS_AUDIT_SWEEP_CRON:0 45 3 * * *}
+    zone: ${JANUS_AUDIT_SWEEP_ZONE:UTC}
+    batch-size: ${JANUS_AUDIT_SWEEP_BATCH_SIZE:5000}
   openbao:
     address: ${OPENBAO_ADDR:http://localhost:8200}
     token: ${OPENBAO_TOKEN:${openbao_token:}}
@@ -95,17 +117,27 @@ janus:
     # failure throttle above, which by construction never sees a caller whose requests succeed.
     # The console spends a handful of requests per screen; the gateway is called by services in a
     # loop, so its allowance is the one sized for machines. Zero on either leaves it unmetered.
+    #
+    # Both are set well above what legitimate use costs, because the address they are keyed on is
+    # shared: a whole office behind one NAT, or every service in a cluster behind one egress, counts
+    # as a single client here. A ceiling tight enough to shape normal traffic would cut those first
+    # and the flood it exists for last. These are sized to stop the violent case — a runaway loop or
+    # a scripted flood, both of which arrive an order of magnitude above the figures below.
     rate-limit:
-      admin-per-minute: ${JANUS_RATE_LIMIT_ADMIN_PER_MINUTE:300}
-      admin-burst: ${JANUS_RATE_LIMIT_ADMIN_BURST:60}
-      gateway-per-minute: ${JANUS_RATE_LIMIT_GATEWAY_PER_MINUTE:1800}
-      gateway-burst: ${JANUS_RATE_LIMIT_GATEWAY_BURST:300}
+      admin-per-minute: ${JANUS_RATE_LIMIT_ADMIN_PER_MINUTE:1200}
+      admin-burst: ${JANUS_RATE_LIMIT_ADMIN_BURST:240}
+      gateway-per-minute: ${JANUS_RATE_LIMIT_GATEWAY_PER_MINUTE:6000}
+      gateway-burst: ${JANUS_RATE_LIMIT_GATEWAY_BURST:1200}
   gateway:
     allow-private-destinations: ${JANUS_ALLOW_PRIVATE_DESTINATIONS:false}
     max-response-bytes: ${JANUS_MAX_RESPONSE_BYTES:10485760}
     max-request-bytes: ${JANUS_MAX_REQUEST_BYTES:10485760}
     connect-timeout-millis: ${JANUS_CONNECT_TIMEOUT_MILLIS:5000}
     response-timeout-seconds: ${JANUS_RESPONSE_TIMEOUT_SECONDS:30}
+    # A destination probed from the console, where somebody is waiting for the answer. Far shorter
+    # than a proxied call's allowance: a destination that has not answered in a few seconds is the
+    # answer, and a longer wait only makes the console look broken instead of the API.
+    ping-timeout-seconds: ${JANUS_PING_TIMEOUT_SECONDS:5}
     cache:
       enabled: ${JANUS_CACHE_ENABLED:true}
       max-entries: ${JANUS_CACHE_MAX_ENTRIES:1000}

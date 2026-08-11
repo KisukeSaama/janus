@@ -1,6 +1,14 @@
 name: janus
+# Everything here logs to stdout, and Docker's default json-file driver keeps every line ever
+# written. On a host that stays up for months that file is what fills the disk first — ahead of the
+# database, because it grows with traffic rather than with what anybody configures. Ten megabytes
+# across three files caps each service at 30 MB and still leaves several days of history.
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
 services:
   reverse-proxy:
+    logging: *logging
     build:
       context: .
       dockerfile: deploy/nginx/Dockerfile
@@ -11,6 +19,7 @@ services:
       backend: {condition: service_healthy}
     restart: unless-stopped
   backend:
+    logging: *logging
     build: .
     environment:
       SPRING_PROFILES_ACTIVE: prod
@@ -30,6 +39,7 @@ services:
     tmpfs: ["/tmp"]
     security_opt: ["no-new-privileges:true"]
   postgres:
+    logging: *logging
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: janus
@@ -43,6 +53,7 @@ services:
     security_opt: ["no-new-privileges:true"]
   # Static seal auto-unseal needs OpenBao 2.4.0 or newer; older images reject the stanza.
   openbao:
+    logging: *logging
     image: openbao/openbao:2.6
     command: server
     cap_add: ["IPC_LOCK"]
@@ -56,6 +67,7 @@ services:
     security_opt: ["no-new-privileges:true"]
   # Run once after `up`: docker compose -f compose.prod.yml --profile bootstrap run --rm openbao-init
   openbao-init:
+    logging: *logging
     image: openbao/openbao:2.6
     profiles: [bootstrap]
     user: "0:0"
