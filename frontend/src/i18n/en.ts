@@ -181,16 +181,6 @@ export const en = {
     authorizationUrl: 'Authorisation page',
     authorizationUrlHint: 'Where the person signs in and agrees. Not the same as the token endpoint.',
     consentNote: 'Once the API is registered, a button will ask the account holder to agree.',
-    // The preset list, which is the first screen of the flow.
-    presetTitle: 'Which API?',
-    presetLead: 'Pick it to fill in the destination, the endpoints and how it authenticates.',
-    presetSearch: 'Search for an API…',
-    presetSkip: 'Another API, which I will describe myself',
-    presetCount: '{count} APIs ready to use. Everything stays editable afterwards.',
-    presetNoMatch: 'No ready-made API matches “{query}”. Describe yours below.',
-    presetApplied: 'Preset applied: {name}',
-    presetChange: 'Change',
-    whereCredentials: 'Where to find these credentials at {name}',
     // Signed requests.
     keyHeaderName: 'Key header',
     keyHeaderNameHint: 'What identifies the signer. The secret half never travels.',

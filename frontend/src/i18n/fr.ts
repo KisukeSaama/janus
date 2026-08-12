@@ -182,16 +182,6 @@ export const fr: Translated<Dictionary> = {
     authorizationUrl: 'Page d’autorisation',
     authorizationUrlHint: 'Où la personne se connecte et accepte. Différente du point de délivrance.',
     consentNote: 'Une fois l’API enregistrée, un bouton demandera l’accord du titulaire du compte.',
-    // The preset list, which is the first screen of the flow.
-    presetTitle: 'Quelle API ?',
-    presetLead: 'Choisissez-la pour remplir la destination, les endpoints et le mode d’authentification.',
-    presetSearch: 'Chercher une API…',
-    presetSkip: 'Une autre API, à décrire moi-même',
-    presetCount: '{count} API préconfigurées. Tout reste modifiable ensuite.',
-    presetNoMatch: 'Aucune API préconfigurée ne correspond à « {query} ». Décrivez-la vous-même ci-dessous.',
-    presetApplied: 'Préréglage appliqué : {name}',
-    presetChange: 'Changer',
-    whereCredentials: 'Où trouver ces identifiants chez {name}',
     // Signed requests.
     keyHeaderName: 'En-tête de la clé',
     keyHeaderNameHint: 'Ce qui identifie le signataire. La moitié secrète, elle, ne voyage jamais.',
