@@ -113,7 +113,7 @@ export function Console({ identity }: { identity: Identity }) {
 
       <div className="min-h-svh lg:pl-64">
         <header className="sticky top-0 z-30 bg-surface">
-          <div className="mx-auto flex max-w-[85rem] items-center gap-3 px-4 py-3 md:px-6">
+          <div className="safe-x safe-top mx-auto flex max-w-[85rem] items-center gap-2 py-3 min-[24rem]:gap-3 md:px-6">
             {!wide && (
               <>
                 <button
@@ -124,7 +124,7 @@ export function Console({ identity }: { identity: Identity }) {
                 >
                   <Menu size={17} strokeWidth={2} />
                 </button>
-                <HomeLink onNavigate={() => go('dashboard')} />
+                <HomeLink compactOnSmall onNavigate={() => go('dashboard')} />
               </>
             )}
 
@@ -146,7 +146,7 @@ export function Console({ identity }: { identity: Identity }) {
           <div className="h-0.5 bg-line" />
         </header>
 
-        <main id="content" tabIndex={-1} className="mx-auto max-w-[85rem] px-4 py-7 md:px-6 md:py-9">
+        <main id="content" tabIndex={-1} className="safe-x mx-auto max-w-[85rem] py-7 md:px-6 md:py-9">
           <Suspense fallback={<PageSkeleton />}>
             {location.page === 'dashboard' &&
               (openId ? (
