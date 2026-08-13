@@ -17,9 +17,14 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * Establishes one correlation identifier per request. A caller-supplied {@code X-Correlation-Id} is
  * honoured only when it matches a conservative charset, so it can never be used to inject content
  * into logs, audit records, or response headers.
+ *
+ * <p>First in the chain, ahead of even the URI guard. Nothing here reads the path — only a header —
+ * so there is nothing for an ambiguous URI to confuse; and being second meant the requests the guard
+ * refuses were the one kind that came back with no identifier on them at all, which is precisely the
+ * kind somebody then has to ask about.
  */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE + 10)
+@Order(Ordered.HIGHEST_PRECEDENCE)
 public class CorrelationIdFilter extends OncePerRequestFilter {
     public static final String REQUEST_HEADER = "X-Correlation-Id";
     public static final String RESPONSE_HEADER = "X-Janus-Correlation-Id";

@@ -7,6 +7,7 @@ import org.springframework.context.annotation.*;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.*;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.Customizer;
@@ -17,6 +18,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.*;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
 import org.springframework.security.web.context.NullSecurityContextRepository;
@@ -28,7 +30,9 @@ import tools.jackson.databind.ObjectMapper;
 import io.janus.audit.AuditService;
 import io.janus.credentials.CredentialAuthorizationService;
 import io.janus.gateway.GatewayCorsConfigurationSource;
+import io.janus.shared.ApiProblem;
 import io.janus.shared.CorrelationIdFilter;
+import io.janus.shared.ErrorCode;
 
 @Configuration
 public class SecurityConfig {
@@ -61,8 +65,17 @@ public class SecurityConfig {
     @Bean
     @Order(1)
     SecurityFilterChain gateway(
-            HttpSecurity http, ApiKeyAuthenticationFilter apiKey, GatewayCorsConfigurationSource gatewayCors)
+            HttpSecurity http,
+            ApiKeyAuthenticationFilter apiKey,
+            GatewayCorsConfigurationSource gatewayCors,
+            ObjectMapper mapper)
             throws Exception {
+        AuthenticationEntryPoint challenge = (request, response, failure) -> ApiProblem.write(
+                response,
+                mapper,
+                HttpStatus.UNAUTHORIZED,
+                ErrorCode.AUTHENTICATION_REQUIRED,
+                "Valid credentials are required");
         return http.securityMatcher("/gateway/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(gatewayCors))
@@ -81,6 +94,12 @@ public class SecurityConfig {
                         .anyRequest()
                         .authenticated())
                 .addFilterBefore(apiKey, BasicAuthenticationFilter.class)
+                // The API-key filter answers almost everything before this point. What is left is the
+                // bare OPTIONS refused above, which would otherwise be the one gateway response that
+                // is not a problem document.
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint(challenge)
+                        .accessDeniedHandler(new ProblemAuthorizationHandler(mapper, challenge)))
                 .headers(headers -> headers.frameOptions(frame -> frame.deny())
                         .referrerPolicy(
                                 referrer -> referrer.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER)))
@@ -202,8 +221,14 @@ public class SecurityConfig {
                 .addFilterAfter(new CsrfCookieFilter(), BasicAuthenticationFilter.class)
                 .httpBasic(basic -> basic.authenticationEntryPoint(entryPoint))
                 // The same refusal whether the credentials were wrong (Basic answers that itself) or
-                // never presented at all, which is what an ended console session looks like.
-                .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(entryPoint))
+                // never presented at all, which is what an ended console session looks like — and the
+                // handler is given that same entry point, so a write refused by the CSRF filter before
+                // anybody has signed in is answered the one way too. Signed in without the role an
+                // endpoint asks for is a different answer, and one the console has to be able to read:
+                // hence a handler rather than the container's error page.
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint(entryPoint)
+                        .accessDeniedHandler(new ProblemAuthorizationHandler(mapper, entryPoint)))
                 .headers(headers -> headers.frameOptions(frame -> frame.deny())
                         .referrerPolicy(
                                 referrer -> referrer.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER))

@@ -49,11 +49,23 @@ public record ProviderRequest(
         // traffic fields and for the same reason: a caller written before local networks were
         // addressable states nothing here, and an unstated answer is no rather than a refused
         // request. Last in the record so those callers still compile.
-        Boolean allowPrivateDestination) {
+        Boolean allowPrivateDestination,
+        // Boxed and last for the same reason as the field above: a caller written before this existed
+        // states nothing, and an unstated answer is no.
+        Boolean normalizeJson,
+        // Element names, or dotted paths, separated by commas. Bounded in character as well as in
+        // length: this is copied into no query and no address, but a field that accepts anything is
+        // a field somebody eventually stores a document in.
+        @Size(max = 1000)
+                @Pattern(
+                        regexp = "[\\p{L}\\p{N}_.:, -]*",
+                        message = "must be element names or dotted paths, separated by commas")
+                String jsonArrayPaths) {
 
     public ProviderRequest {
         name = name == null ? null : name.trim();
         allowPrivateDestination = allowPrivateDestination != null && allowPrivateDestination;
+        normalizeJson = normalizeJson != null && normalizeJson;
     }
 
     /** Compatibility overload for callers written before consent and signing were offered. */
@@ -95,7 +107,9 @@ public record ProviderRequest(
                 null,
                 null,
                 null,
-                false);
+                false,
+                false,
+                null);
     }
 
     /** Compatibility overload for clients written before authentication moved onto the API. */
@@ -123,6 +137,10 @@ public record ProviderRequest(
                 null,
                 null,
                 null);
+    }
+
+    public Provider.Normalization normalization() {
+        return new Provider.Normalization(normalizeJson != null && normalizeJson, jsonArrayPaths);
     }
 
     public Provider.TrafficPolicy trafficPolicy() {

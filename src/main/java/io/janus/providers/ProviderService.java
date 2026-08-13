@@ -98,6 +98,7 @@ public class ProviderService {
                 request.allowPrivateDestination(),
                 request.trafficPolicy(),
                 auth(request));
+        provider.applyNormalization(request.normalization());
         repository.save(provider);
         audit.recordAdmin(AuditAction.PROVIDER_CREATED, provider.getId(), provider.getSlug());
         return ProviderResponse.of(provider);
@@ -117,6 +118,7 @@ public class ProviderService {
                 request.enabled(),
                 request.allowPrivateDestination());
         provider.applyTrafficPolicy(request.trafficPolicy());
+        provider.applyNormalization(request.normalization());
         provider.applyAuth(auth(request));
         var personalCredentials = credentials.findAllByProviderId(id);
         if (!previousAuth.anonymous() && provider.getAuthType().anonymous())

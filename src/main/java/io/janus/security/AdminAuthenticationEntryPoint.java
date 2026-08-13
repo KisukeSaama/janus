@@ -1,7 +1,6 @@
 package io.janus.security;
 
 import java.io.IOException;
-import java.util.LinkedHashMap;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -11,7 +10,8 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import tools.jackson.databind.ObjectMapper;
 
-import io.janus.shared.CorrelationIdFilter;
+import io.janus.shared.ApiProblem;
+import io.janus.shared.ErrorCode;
 
 /**
  * How the administration chain refuses a request that carried no usable credentials.
@@ -44,13 +44,6 @@ public class AdminAuthenticationEntryPoint implements AuthenticationEntryPoint {
             throws IOException {
         if (request.getHeader(BROWSER_MARKER) == null) response.setHeader(HttpHeaders.WWW_AUTHENTICATE, CHALLENGE);
 
-        response.setStatus(HttpStatus.UNAUTHORIZED.value());
-        response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-        var body = new LinkedHashMap<String, Object>();
-        body.put("title", HttpStatus.UNAUTHORIZED.getReasonPhrase());
-        body.put("status", HttpStatus.UNAUTHORIZED.value());
-        body.put("detail", "Not signed in");
-        body.put("correlationId", CorrelationIdFilter.current());
-        mapper.writeValue(response.getOutputStream(), body);
+        ApiProblem.write(response, mapper, HttpStatus.UNAUTHORIZED, ErrorCode.NOT_SIGNED_IN, "Not signed in");
     }
 }

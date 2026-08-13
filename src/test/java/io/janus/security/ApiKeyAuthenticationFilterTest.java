@@ -242,6 +242,25 @@ class ApiKeyAuthenticationFilterTest {
 
         assertThat(response.getStatus()).isEqualTo(429);
         verify(chain, never()).doFilter(any(), any());
+        // Blocked for fifteen minutes. A caller not told that reads this as a wrong key, and either
+        // hunts for a fault that is not there or keeps retrying — which is what the block stops.
+        assertThat(response.getHeader(org.springframework.http.HttpHeaders.RETRY_AFTER))
+                .isNotNull()
+                .satisfies(seconds -> assertThat(Long.parseLong(seconds)).isBetween(890L, 901L));
+        assertThat(response.getHeader(io.janus.shared.ApiProblem.HEADER)).isEqualTo("authentication_throttled");
+    }
+
+    /** The two refusals are different problems, and only one of them is worth waiting out. */
+    @Test
+    void aRefusedKeyAndABlockedClientAreNamedApart() throws Exception {
+        var refused =
+                invoke(gatewayRequest(application.getId().toString(), "jns_wrong"), Mockito.mock(FilterChain.class));
+
+        assertThat(refused.getStatus()).isEqualTo(401);
+        assertThat(refused.getHeader(io.janus.shared.ApiProblem.HEADER)).isEqualTo("authentication_required");
+        assertThat(refused.getContentAsString()).contains("\"code\":\"authentication_required\"");
+        assertThat(refused.getHeader(org.springframework.http.HttpHeaders.RETRY_AFTER))
+                .isNull();
     }
 
     @Test

@@ -1,7 +1,6 @@
 package io.janus.security;
 
 import java.io.IOException;
-import java.util.LinkedHashMap;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -14,7 +13,8 @@ import tools.jackson.databind.ObjectMapper;
 import io.janus.audit.AuditAction;
 import io.janus.audit.AuditActor;
 import io.janus.audit.AuditService;
-import io.janus.shared.CorrelationIdFilter;
+import io.janus.shared.ApiProblem;
+import io.janus.shared.ErrorCode;
 
 /**
  * Rate-limits failed administrator sign-ins over HTTP Basic. Unrestricted guessing is the most
@@ -41,8 +41,15 @@ public class AdminAuthenticationThrottleFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         String client = "admin:" + request.getRemoteAddr();
-        if (throttle.isBlocked(client)) {
-            writeProblem(response, HttpStatus.TOO_MANY_REQUESTS, "Too many failed sign-in attempts");
+        long blockedFor = throttle.blockedForSeconds(client);
+        if (blockedFor > 0) {
+            response.setHeader(HttpHeaders.RETRY_AFTER, Long.toString(blockedFor));
+            ApiProblem.write(
+                    response,
+                    mapper,
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    ErrorCode.AUTHENTICATION_THROTTLED,
+                    "Too many failed sign-in attempts");
             return;
         }
         chain.doFilter(request, response);
@@ -59,16 +66,5 @@ public class AdminAuthenticationThrottleFilter extends OncePerRequestFilter {
         } else if (presentedCredentials) {
             throttle.recordSuccess(client);
         }
-    }
-
-    private void writeProblem(HttpServletResponse response, HttpStatus status, String detail) throws IOException {
-        response.setStatus(status.value());
-        response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-        var body = new LinkedHashMap<String, Object>();
-        body.put("title", status.getReasonPhrase());
-        body.put("status", status.value());
-        body.put("detail", detail);
-        body.put("correlationId", CorrelationIdFilter.current());
-        mapper.writeValue(response.getOutputStream(), body);
     }
 }

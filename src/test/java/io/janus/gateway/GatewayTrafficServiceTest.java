@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.function.Supplier;
 
@@ -13,10 +14,12 @@ import org.springframework.http.*;
 import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.*;
 import reactor.core.publisher.Mono;
+import tools.jackson.databind.ObjectMapper;
 
 import io.janus.accounts.Account;
 import io.janus.applications.Application;
 import io.janus.credentials.*;
+import io.janus.gateway.transform.JsonNormalizer;
 import io.janus.grants.Grant;
 import io.janus.openbao.OpenBaoClient;
 import io.janus.providers.Provider;
@@ -43,11 +46,15 @@ class GatewayTrafficServiceTest {
             // a one-millisecond backoff exercises the same branch a realistic one does.
             new GatewayTrafficProperties.Throttle(1, 300),
             new GatewayTrafficProperties.Retry(2, 1, 1),
-            new GatewayTrafficProperties.Authorization(true, 10, 100));
+            new GatewayTrafficProperties.Authorization(true, 10, 100),
+            new GatewayTrafficProperties.Transform(true, 2097152));
 
     private final ResponseCache cache = new ResponseCache(properties);
     private final RateLimiter limiter = new RateLimiter();
     private final UpstreamCooldown cooldown = new UpstreamCooldown();
+    // The real one. It does nothing at all unless a destination asks for it, so every test that is
+    // not about conversion is unaffected by its presence.
+    private final JsonNormalizer normalizer = new JsonNormalizer(new ObjectMapper(), properties);
 
     private final List<ClientRequest> sent = new ArrayList<>();
     private final Deque<Supplier<Mono<ClientResponse>>> answers = new ArrayDeque<>();
@@ -67,7 +74,8 @@ class GatewayTrafficServiceTest {
                     return next == null ? Mono.just(cacheable("{}")) : next.get();
                 })
                 .build();
-        service = new GatewayTrafficService(web, web, bao, tokens, cache, limiter, cooldown, properties, 30);
+        service =
+                new GatewayTrafficService(web, web, bao, tokens, cache, limiter, cooldown, normalizer, properties, 30);
         when(bao.read(any())).thenReturn(SECRET);
     }
 
@@ -625,5 +633,114 @@ class GatewayTrafficServiceTest {
         var outcome = service.forward(exchange(HttpMethod.POST, "/v1/tracks", bearer(), new HttpHeaders()));
 
         assertThat(new String(outcome.body())).doesNotContain(SECRET);
+    }
+
+    // --- restating the answer as JSON ---------------------------------------
+
+    /** A Plex library, in the shape Plex actually returns it. */
+    private static ClientResponse library() {
+        return ClientResponse.create(HttpStatus.OK)
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_XML_VALUE)
+                .header(HttpHeaders.ETAG, "\"v1\"")
+                .header(HttpHeaders.CACHE_CONTROL, "max-age=60")
+                .body("<MediaContainer size=\"1\"><Directory key=\"4\"/></MediaContainer>")
+                .build();
+    }
+
+    private static String body(GatewayOutcome outcome) {
+        return new String(outcome.body(), StandardCharsets.UTF_8);
+    }
+
+    private void normalising(String arrayPaths) {
+        provider.applyNormalization(new Provider.Normalization(true, arrayPaths));
+    }
+
+    @Test
+    void restatesAnXmlAnswerAsJsonWhereTheDestinationAsksForIt() {
+        normalising("Directory");
+        willAnswer(library());
+
+        var outcome = service.forward(exchange(bearer()));
+
+        assertThat(body(outcome)).isEqualTo("{\"MediaContainer\":{\"@size\":\"1\",\"Directory\":[{\"@key\":\"4\"}]}}");
+        assertThat(outcome.headers().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
+        assertThat(outcome.headers().getFirst(JsonNormalizer.TRANSFORM_HEADER)).isEqualTo("xml->json");
+    }
+
+    @Test
+    void leavesTheAnswerAloneWhereTheDestinationDoesNotAskForIt() {
+        willAnswer(library());
+
+        var outcome = service.forward(exchange(bearer()));
+
+        assertThat(body(outcome)).startsWith("<MediaContainer");
+        assertThat(outcome.headers().headerNames()).doesNotContain(JsonNormalizer.TRANSFORM_HEADER);
+        assertThat(outcome.headers().getVary()).isEmpty();
+    }
+
+    /**
+     * The upstream issued its validator for the document it sent. A caller holding it for one it
+     * never received would revalidate against the wrong representation, so it does not travel.
+     */
+    @Test
+    void dropsTheUpstreamValidatorOnceTheBodyIsNoLongerTheOneItDescribes() {
+        normalising(null);
+        willAnswer(library());
+
+        var outcome = service.forward(exchange(bearer()));
+
+        assertThat(outcome.headers().getETag()).isNull();
+        assertThat(outcome.headers().getVary()).contains(HttpHeaders.ACCEPT);
+    }
+
+    /**
+     * The store holds what the upstream sent, not what the caller received, so the conversion runs
+     * again on the way out of a hit — and the same entry could still answer a caller that wanted the
+     * original.
+     */
+    @Test
+    void storesTheOriginalAndConvertsOnTheWayOut() {
+        normalising("Directory");
+        willAnswer(library());
+        // The same credential both times: a stored entry is addressed by the one that fetched it.
+        var credential = bearer();
+
+        service.forward(exchange(credential));
+        var second = service.forward(exchange(credential));
+
+        assertThat(second.cacheStatus()).isEqualTo(CacheStatus.HIT);
+        assertThat(sent).hasSize(1);
+        assertThat(body(second)).isEqualTo("{\"MediaContainer\":{\"@size\":\"1\",\"Directory\":[{\"@key\":\"4\"}]}}");
+    }
+
+    /** Asking for the original is how a caller opts out, one request at a time. */
+    @Test
+    void returnsTheOriginalToACallerThatNamedIt() {
+        normalising(null);
+        willAnswer(library());
+        var headers = new HttpHeaders();
+        headers.set(HttpHeaders.ACCEPT, MediaType.APPLICATION_XML_VALUE);
+
+        var outcome = service.forward(exchange(HttpMethod.GET, "/v1/library", bearer(), headers));
+
+        assertThat(body(outcome)).startsWith("<MediaContainer");
+        // Still stated: the answer depends on Accept whether or not this caller exercised it.
+        assertThat(outcome.headers().getVary()).contains(HttpHeaders.ACCEPT);
+    }
+
+    /** A conversion is never a way for a request to fail; the reason travels instead of an error. */
+    @Test
+    void returnsTheUpstreamsOwnBytesWhenTheyAreNotWhatTheyClaimed() {
+        normalising(null);
+        willAnswer(ClientResponse.create(HttpStatus.OK)
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_XML_VALUE)
+                .body("<MediaContainer><Directory></MediaContainer>")
+                .build());
+
+        var outcome = service.forward(exchange(bearer()));
+
+        assertThat(outcome.status().value()).isEqualTo(200);
+        assertThat(body(outcome)).isEqualTo("<MediaContainer><Directory></MediaContainer>");
+        assertThat(outcome.headers().getFirst(JsonNormalizer.TRANSFORM_HEADER)).startsWith("none (");
     }
 }

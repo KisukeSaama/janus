@@ -185,6 +185,8 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
       enabled: form.get('enabled') === 'on',
       cacheEnabled: form.get('cacheEnabled') === 'on',
       cacheTtlSeconds: Number(form.get('cacheTtlSeconds') || 0),
+      normalizeJson: form.get('normalizeJson') === 'on',
+      jsonArrayPaths: String(form.get('jsonArrayPaths') ?? '') || null,
       rateLimitPerMinute: Number(form.get('rateLimitPerMinute') || 0),
       rateLimitBurst: Number(form.get('rateLimitBurst') || 0),
       authType: strategy,
@@ -447,6 +449,8 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
             )}
             <CheckField label={t('providers.cacheLabel')} name="cacheEnabled" defaultChecked={panel.provider.cacheEnabled ?? true} />
             <Field label={t('providers.cacheTtlLabel')} name="cacheTtlSeconds" type="number" min={0} defaultValue={panel.provider.cacheTtlSeconds ?? 0} />
+            <CheckField label={t('providers.normalizeLabel')} name="normalizeJson" defaultChecked={panel.provider.normalizeJson ?? false} hint={t('providers.normalizeHint')} />
+            <Field label={t('providers.arrayPathsLabel')} name="jsonArrayPaths" data maxLength={1000} placeholder="MediaContainer.Directory, Location" defaultValue={panel.provider.jsonArrayPaths ?? ''} hint={t('providers.arrayPathsHint')} />
             <Field label={t('providers.rateLimitLabel')} name="rateLimitPerMinute" type="number" min={0} defaultValue={panel.provider.rateLimitPerMinute ?? 0} />
             <Field label={t('providers.burstLabel')} name="rateLimitBurst" type="number" min={0} defaultValue={panel.provider.rateLimitBurst ?? 0} />
             <CheckField label={t('providers.enabledLabel')} name="enabled" defaultChecked={panel.provider.enabled ?? true} />

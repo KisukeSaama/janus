@@ -171,6 +171,7 @@ export function DocsPage() {
                   { term: 'Age', note: t('docs.handled.age') },
                   { term: 'X-Janus-RateLimit-Limit / -Remaining / -Reset', note: t('docs.handled.limit') },
                   { term: 'X-Janus-Upstream-Attempts', note: t('docs.handled.attempts') },
+                  { term: 'X-Janus-Transform', note: t('docs.handled.transform') },
                   { term: 'Retry-After', note: t('docs.handled.retryAfter') },
                   { term: 'X-Janus-Correlation-Id', note: t('docs.handled.correlation') },
                 ]}

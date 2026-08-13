@@ -67,6 +67,26 @@ class SecretRedactorTest {
                 .doesNotContain(encoded);
     }
 
+    /**
+     * An upstream quotes the request it refused in whatever it speaks, and the ones worth proxying in
+     * a self-hosted deployment speak XML.
+     */
+    @Test
+    void removesASecretEchoedInAnXmlBody() {
+        String body = "<error><message>invalid key " + SECRET + "</message></error>";
+        assertThat(scrub(body, headers(MediaType.APPLICATION_XML, null)))
+                .doesNotContain(SECRET)
+                .contains(SecretRedactor.PLACEHOLDER);
+    }
+
+    @Test
+    void handlesVendorXmlAndFormMediaTypes() {
+        var feed = MediaType.parseMediaType("application/atom+xml");
+        assertThat(scrub("<entry>" + SECRET + "</entry>", headers(feed, null))).doesNotContain(SECRET);
+        assertThat(scrub("token=" + SECRET, headers(MediaType.APPLICATION_FORM_URLENCODED, null)))
+                .doesNotContain(SECRET);
+    }
+
     @Test
     void handlesVendorJsonMediaTypes() {
         var contentType = MediaType.parseMediaType("application/vnd.example.v1+json");

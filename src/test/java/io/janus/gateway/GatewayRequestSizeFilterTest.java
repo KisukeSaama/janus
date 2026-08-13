@@ -7,6 +7,10 @@ import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.*;
+import tools.jackson.databind.ObjectMapper;
+
+import io.janus.shared.ApiProblem;
+import io.janus.shared.CorrelationIdFilter;
 
 /**
  * The body limit. Spring materialises a proxied body as a byte array before the controller runs, so
@@ -15,7 +19,7 @@ import org.springframework.mock.web.*;
 class GatewayRequestSizeFilterTest {
     private static final int LIMIT = 100;
 
-    private final GatewayRequestSizeFilter filter = new GatewayRequestSizeFilter(LIMIT);
+    private final GatewayRequestSizeFilter filter = new GatewayRequestSizeFilter(LIMIT, new ObjectMapper());
 
     private MockHttpServletResponse refuseOrPass(MockHttpServletRequest request) throws Exception {
         var response = new MockHttpServletResponse();
@@ -60,6 +64,27 @@ class GatewayRequestSizeFilterTest {
         assertThat(response.getStatus()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE.value());
         assertThat(response.getContentAsString()).contains("Payload Too Large");
         assertThat(response.getContentType()).contains("application/problem+json");
+        assertThat(response.getHeader(ApiProblem.HEADER)).isEqualTo("payload_too_large");
+    }
+
+    /**
+     * Refusing means discarding whatever was already written, and {@code reset()} takes the headers
+     * with it — including the one the correlation filter had already set.
+     */
+    @Test
+    void aRefusalKeepsItsCorrelationIdentifierDespiteTheReset() throws Exception {
+        var request = gatewayRequest(new byte[LIMIT + 1], true);
+        request.addHeader(CorrelationIdFilter.REQUEST_HEADER, "trace-2");
+        var response = new MockHttpServletResponse();
+
+        new CorrelationIdFilter().doFilter(request, response, (req, res) -> filter.doFilter(req, res, chain()));
+
+        assertThat(response.getHeader(CorrelationIdFilter.RESPONSE_HEADER)).isEqualTo("trace-2");
+        assertThat(response.getContentAsString()).contains("\"correlationId\":\"trace-2\"");
+    }
+
+    private static MockFilterChain chain() {
+        return new MockFilterChain();
     }
 
     /** Without a declared length the body has to be cut off while it is being read. */

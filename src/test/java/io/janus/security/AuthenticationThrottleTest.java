@@ -16,6 +16,21 @@ class AuthenticationThrottleTest {
         assertThat(throttle.isBlocked("client")).isTrue();
     }
 
+    /**
+     * A block lasts a quarter of an hour by default. Without this the refusal carried no
+     * {@code Retry-After}, so a caller could not tell a block from a wrong key.
+     */
+    @Test
+    void aBlockedClientCanBeToldHowLongToWait() {
+        var throttle = new AuthenticationThrottle(1, 300, 900);
+        assertThat(throttle.blockedForSeconds("client")).isZero();
+
+        throttle.recordFailure("client");
+
+        assertThat(throttle.blockedForSeconds("client")).isBetween(890L, 901L);
+        assertThat(throttle.blockedForSeconds("bystander")).isZero();
+    }
+
     @Test
     void oneClientCannotBlockAnother() {
         var throttle = new AuthenticationThrottle(1, 300, 900);

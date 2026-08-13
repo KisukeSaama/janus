@@ -16,7 +16,8 @@ class ResponseCacheTest {
                 new GatewayTrafficProperties.Cache(true, maxEntries, maxEntryBytes, maxTotalBytes, 300),
                 new GatewayTrafficProperties.Throttle(2000, 300),
                 new GatewayTrafficProperties.Retry(2, 200, 2000),
-                new GatewayTrafficProperties.Authorization(true, 10, 100)));
+                new GatewayTrafficProperties.Authorization(true, 10, 100),
+                new GatewayTrafficProperties.Transform(true, 2097152)));
     }
 
     private static ResponseCache.Entry entry(long freshForMillis, byte[] body, Map<String, String> vary) {
@@ -199,7 +200,8 @@ class ResponseCacheTest {
                 new GatewayTrafficProperties.Cache(false, 10, 1024, 8192, 300),
                 new GatewayTrafficProperties.Throttle(2000, 300),
                 new GatewayTrafficProperties.Retry(2, 200, 2000),
-                new GatewayTrafficProperties.Authorization(true, 10, 100)));
+                new GatewayTrafficProperties.Authorization(true, 10, 100),
+                new GatewayTrafficProperties.Transform(true, 2097152)));
         assertFalse(disabled.isEnabled());
         disabled.store(key("/v1/orders"), entry(60_000, "a".getBytes(), Map.of()));
         assertTrue(disabled.lookup(key("/v1/orders"), new HttpHeaders()).isEmpty());

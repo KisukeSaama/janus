@@ -28,7 +28,8 @@ class AuthorizationCacheTest {
                 new GatewayTrafficProperties.Cache(true, 100, 1_000_000, 10_000_000, 300),
                 new GatewayTrafficProperties.Throttle(2000, 300),
                 new GatewayTrafficProperties.Retry(2, 200, 2000),
-                new GatewayTrafficProperties.Authorization(enabled, ttlSeconds, 100)));
+                new GatewayTrafficProperties.Authorization(enabled, ttlSeconds, 100),
+                new GatewayTrafficProperties.Transform(true, 2097152)));
     }
 
     private final io.janus.accounts.Account owner = Fixtures.owner();
