@@ -1,4 +1,7 @@
+# Everything Spotless formats, so the check reads the same file on a Windows clone and on the Linux
+# runner: its line endings follow these rules, and a CRLF here fails the build on one machine only.
 *.java text eol=lf
+pom.xml text eol=lf
 # Shipped to Linux and executed by /bin/sh: a CRLF here fails as `\r: not found`.
 *.sh text eol=lf
 *.hcl text eol=lf
