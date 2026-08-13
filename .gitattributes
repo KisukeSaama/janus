@@ -1,7 +1,9 @@
-# Everything Spotless formats, so the check reads the same file on a Windows clone and on the Linux
-# runner: its line endings follow these rules, and a CRLF here fails the build on one machine only.
-*.java text eol=lf
-pom.xml text eol=lf
-# Shipped to Linux and executed by /bin/sh: a CRLF here fails as `\r: not found`.
-*.sh text eol=lf
-*.hcl text eol=lf
+# Line endings are decided here rather than by whatever core.autocrlf each clone happens to carry.
+# Nearly everything in this repository is read on Linux — by /bin/sh, by docker compose, by nginx,
+# by Spotless — and a CRLF that survives the trip fails there and only there: `\r: not found` from a
+# script, an invalid project name from a sourced variable, a whole file rewritten by the formatter.
+# One rule for all of it, so a Windows checkout and the runner read the same bytes.
+* text=auto eol=lf
+
+# Except the one file Windows reads, where cmd.exe wants its own ending.
+*.cmd text eol=crlf
