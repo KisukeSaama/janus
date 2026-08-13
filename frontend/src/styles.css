@@ -236,17 +236,6 @@
 }
 
 @layer components {
-  /* Viewport-fit lets the console use the whole phone screen; these gutters keep controls and
-     content clear of notches and rounded display corners without changing the desktop rhythm. */
-  .safe-x {
-    padding-left: max(1rem, env(safe-area-inset-left));
-    padding-right: max(1rem, env(safe-area-inset-right));
-  }
-
-  .safe-top {
-    padding-top: max(0.75rem, env(safe-area-inset-top));
-  }
-
   /*
    * Machine data, set as machine data. The monospace is what the gateway will match literally, so
    * a path, a slug, or a key is never mistaken for prose. Figures stay tabular so columns align,

@@ -58,6 +58,8 @@ export type Provider = {
   slug: string;
   baseUrl: string;
   enabled: boolean;
+  /** Whether this destination lives on the local network. Only offered where the deployment allows it. */
+  allowPrivateDestination: boolean;
   /** Whether Janus may reuse a response from this destination at all. */
   cacheEnabled: boolean;
   /** Freshness assumed when the upstream states none. Zero leaves the decision to it. */
@@ -239,11 +241,20 @@ export type ApplicationInput = {
   allowedOrigins: string[];
 };
 
+/**
+ * What this deployment lets a destination be. Fixed at startup, so the console reads it once and
+ * hides whatever is not on offer rather than letting somebody submit what the backend refuses.
+ */
+export type ProviderCapabilities = {
+  privateDestinations: boolean;
+};
+
 export type ProviderInput = {
   name: string;
   slug: string;
   baseUrl: string;
   enabled: boolean;
+  allowPrivateDestination?: boolean;
   cacheEnabled?: boolean;
   cacheTtlSeconds?: number;
   rateLimitPerMinute?: number;

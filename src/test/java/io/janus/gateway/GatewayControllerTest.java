@@ -71,7 +71,7 @@ class GatewayControllerTest {
                 providers,
                 grants,
                 authorizations,
-                new DestinationValidator(false),
+                new DestinationValidator(false, false),
                 traffic,
                 audit,
                 metrics,

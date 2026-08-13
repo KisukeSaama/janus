@@ -95,6 +95,7 @@ public class ProviderService {
                 request.slug(),
                 destination(request),
                 request.enabled(),
+                request.allowPrivateDestination(),
                 request.trafficPolicy(),
                 auth(request));
         repository.save(provider);
@@ -109,7 +110,12 @@ public class ProviderService {
         if (!provider.getSlug().equals(request.slug()) && repository.existsBySlug(request.slug()))
             throw new IllegalArgumentException("An API with that slug already exists");
         var previousAuth = provider.getAuthType();
-        provider.describe(request.name(), request.slug(), destination(request), request.enabled());
+        provider.describe(
+                request.name(),
+                request.slug(),
+                destination(request),
+                request.enabled(),
+                request.allowPrivateDestination());
         provider.applyTrafficPolicy(request.trafficPolicy());
         provider.applyAuth(auth(request));
         var personalCredentials = credentials.findAllByProviderId(id);
@@ -177,12 +183,20 @@ public class ProviderService {
      */
     public ProviderPing ping(UUID id) {
         requireAdministrator();
-        return upstream.reach(require(id).getBaseUrl());
+        var provider = require(id);
+        return upstream.reach(provider.getBaseUrl(), provider.isAllowPrivateDestination());
+    }
+
+    /** Configuration rather than data, so no account check and nothing to audit. */
+    public ProviderCapabilities capabilities() {
+        return new ProviderCapabilities(destinations.isOfferingPrivateDestinations());
     }
 
     /** Validated and normalised: the stored form is what the gateway will build every target URI on. */
     private String destination(ProviderRequest request) {
-        String url = destinations.validate(request.baseUrl()).toString();
+        String url = destinations
+                .validate(request.baseUrl(), request.allowPrivateDestination())
+                .toString();
         return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }
 

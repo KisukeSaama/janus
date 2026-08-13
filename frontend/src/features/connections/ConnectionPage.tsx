@@ -11,6 +11,7 @@ import {
   useDeleteGrant,
   useGrants,
   usePingProvider,
+  useProviderCapabilities,
   useProviders,
   usePurgeProviderCache,
   useRotateApplicationKey,
@@ -480,6 +481,7 @@ function DestinationPanel({
     slug: string;
     baseUrl: string;
     enabled: boolean;
+    allowPrivateDestination: boolean;
     cacheEnabled: boolean;
     cacheTtlSeconds: number;
     rateLimitPerMinute: number;
@@ -494,6 +496,7 @@ function DestinationPanel({
 }) {
   const { t } = useI18n();
   const describe = useErrorMessage();
+  const capabilities = useProviderCapabilities();
   const [error, setError] = useState('');
 
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -505,6 +508,7 @@ function DestinationPanel({
         slug: String(form.get('slug') ?? ''),
         baseUrl: String(form.get('baseUrl') ?? ''),
         enabled: form.get('enabled') === 'on',
+        allowPrivateDestination: form.get('allowPrivateDestination') === 'on',
         cacheEnabled: form.get('cacheEnabled') === 'on',
         cacheTtlSeconds: Number(form.get('cacheTtlSeconds') || 0),
         rateLimitPerMinute: Number(form.get('rateLimitPerMinute') || 0),
@@ -543,6 +547,18 @@ function DestinationPanel({
           autoComplete="off"
           defaultValue={provider.baseUrl}
         />
+        {/*
+          Shown when the deployment offers it, and also whenever this destination already carries it
+          — a deployment that withdraws the option must not leave a field the form silently unsets.
+        */}
+        {(capabilities.data?.privateDestinations || provider.allowPrivateDestination) && (
+          <CheckField
+            label={t('connect.lan')}
+            name="allowPrivateDestination"
+            defaultChecked={provider.allowPrivateDestination}
+            hint={t('connect.lanHint')}
+          />
+        )}
         <CheckField
           label={t('providers.enabledLabel')}
           name="enabled"

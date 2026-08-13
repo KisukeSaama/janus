@@ -44,7 +44,10 @@ public record ProviderRequest(
         @Size(max = 100) String signatureHeader,
         @Size(max = 100) String signatureParameter,
         @Size(max = 100) String timestampHeader,
-        @Size(max = 100) String timestampParameter) {
+        @Size(max = 100) String timestampParameter,
+        // Refused outright unless the deployment offers it; see DestinationValidator. Last in the
+        // record so every caller written before local networks were addressable still compiles.
+        boolean allowPrivateDestination) {
 
     public ProviderRequest {
         name = name == null ? null : name.trim();
@@ -88,7 +91,8 @@ public record ProviderRequest(
                 null,
                 null,
                 null,
-                null);
+                null,
+                false);
     }
 
     /** Compatibility overload for clients written before authentication moved onto the API. */

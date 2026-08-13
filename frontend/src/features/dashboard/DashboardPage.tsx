@@ -312,7 +312,7 @@ function RecentDecision({ event }: { event: Audit }) {
   return (
     <li className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 py-3">
       <p className="text-sm">{tEnum('action', event.action)}</p>
-      <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs text-text-2">
+      <p className="flex items-baseline gap-3 text-xs text-text-2">
         <span className="data">{formatTime(event.occurredAt)}</span>
         <span>{tEnum('actor', event.actorType)}</span>
         {event.statusCode ? <span className="data">{event.statusCode}</span> : null}

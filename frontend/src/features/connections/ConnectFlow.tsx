@@ -1,12 +1,13 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ArrowRight, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ExternalLink, TriangleAlert } from 'lucide-react';
 
 import {
   del,
   keys,
   post,
   useOAuthCallback,
+  useProviderCapabilities,
   type AuthType,
   type Credential,
   type Provider,
@@ -17,6 +18,8 @@ import { useI18n } from '../../i18n';
 import { gatewayUrl, toSlug } from '../../lib/connections';
 import { useErrorMessage } from '../../lib/errors';
 import { fromDateInput, NOTICE_DAYS, WARNING_DAYS } from '../../lib/expiry';
+import { PresetPicker } from './PresetPicker';
+import type { ApiPreset } from './presets';
 import { secretLabel, secretPlaceholder } from './secrets';
 
 /**
@@ -33,6 +36,11 @@ import { secretLabel, secretPlaceholder } from './secrets';
  * ticking APIs for their new service opens it, describes the one the catalogue is missing, and comes
  * straight back to that list. Activating here only means this account now holds a credential, which
  * is what makes the entry tickable at all.
+ *
+ * It opens on a list of APIs rather than on an empty form. Almost every field here has one correct
+ * answer published in somebody's documentation, and asking a reader to go and find it is how they
+ * come back with a token endpoint pasted from a blog post. Choosing "Spotify" answers all of them at
+ * once; everything stays editable afterwards, and an API not in the list is one click away.
  *
  * Two steps: where it goes, and what it expects on arrival. Nothing here asks which paths the caller
  * may reach — registering an API admits it to all of them, and the API's own authorisation decides
@@ -75,10 +83,16 @@ export function ConnectFlow({
   const client = useQueryClient();
 
   const [step, setStep] = useState<Step>(1);
+  /** Null until an API has been chosen from the list or the reader asked to describe their own. */
+  const [preset, setPreset] = useState<ApiPreset | null>(null);
+  const [picking, setPicking] = useState(true);
   const [apiName, setApiName] = useState('');
   const [slug, setSlug] = useState('');
   const [slugEdited, setSlugEdited] = useState(false);
   const [baseUrl, setBaseUrl] = useState('');
+  // Only ever true where the deployment offers it: the box that sets it is not rendered otherwise.
+  const [onLan, setOnLan] = useState(false);
+  const capabilities = useProviderCapabilities();
   const [authType, setAuthType] = useState<AuthType>('BEARER');
   const [headerName, setHeaderName] = useState('X-Api-Key');
   const [queryParameter, setQueryParameter] = useState('api_key');
@@ -105,8 +119,32 @@ export function ConnectFlow({
   const signs = authType === 'HMAC_SIGNATURE';
   const exchanges = authType === 'OAUTH2_CLIENT_CREDENTIALS' || authType === 'OAUTH2_AUTHORIZATION_CODE';
 
+  /** Answers every question the reader would otherwise have had to go and look up. */
+  function apply(chosen: ApiPreset) {
+    setPreset(chosen);
+    setPicking(false);
+    setApiName(chosen.variant ? `${chosen.name} (${chosen.variant})` : chosen.name);
+    setSlug(chosen.slug);
+    setSlugEdited(true);
+    setBaseUrl(chosen.baseUrl);
+    setAuthType(chosen.authType);
+    if (chosen.headerName) setHeaderName(chosen.headerName);
+    if (chosen.queryParameter) setQueryParameter(chosen.queryParameter);
+    setTokenUrl(chosen.tokenUrl ?? '');
+    setAuthorizationUrl(chosen.authorizationUrl ?? '');
+    setTokenScopes(chosen.tokenScopes ?? '');
+    setSigning({
+      template: chosen.signatureTemplate ?? '',
+      encoding: chosen.signatureEncoding ?? 'HEX',
+      signatureHeader: chosen.signatureHeader ?? '',
+      signatureParameter: chosen.signatureParameter ?? '',
+      timestampHeader: chosen.timestampHeader ?? '',
+      timestampParameter: chosen.timestampParameter ?? '',
+    });
+  }
+
   const complete: Record<Step, boolean> = {
-    1: apiName.trim() !== '' && effectiveSlug.length >= 3 && baseUrl.trim() !== '',
+    1: !picking && apiName.trim() !== '' && effectiveSlug.length >= 3 && baseUrl.trim() !== '',
     2:
       // The contract is always required; the secret only when this account is activating with it.
       (authType !== 'API_KEY_HEADER' || headerName.trim() !== '') &&
@@ -169,6 +207,7 @@ export function ConnectFlow({
         slug: effectiveSlug,
         baseUrl: baseUrl.trim(),
         enabled: true,
+        allowPrivateDestination: onLan,
         ...contract(),
       });
       undo.push(() => del(`/providers/${provider.id}`));
@@ -232,10 +271,11 @@ export function ConnectFlow({
               {t('common.back')}
             </button>
           )}
+          {/* Nothing to submit while the list is open: choosing from it is the whole interaction. */}
           <button
             type="submit"
             form="connect"
-            className="btn btn-primary ml-auto min-w-[12rem]"
+            className={`btn btn-primary ml-auto min-w-[12rem] ${picking ? 'invisible' : ''}`}
             disabled={!complete[step] || busy}
           >
             {step < 2 ? (
@@ -266,11 +306,19 @@ export function ConnectFlow({
       )}
 
       <form id="connect" onSubmit={submit} className="space-y-6">
-        {step === 1 && (
+        {step === 1 && picking && (
+          <>
+            <StepHead title={t('connect.presetTitle')} lead={t('connect.presetLead')} />
+            <PresetPicker onChoose={apply} onSkip={() => setPicking(false)} />
+          </>
+        )}
+
+        {step === 1 && !picking && (
           <>
             {/* The contract of the whole flow, said once, on the screen that opens it. */}
             <p className="text-sm text-accent-text">{t('connect.lead')}</p>
             <StepHead title={t('connect.s1Title')} lead={t('connect.s1Lead')} />
+            {preset && <PresetBanner preset={preset} onClear={() => setPicking(true)} />}
             <Field
               label={t('connect.apiName')}
               required
@@ -292,6 +340,14 @@ export function ConnectFlow({
               onChange={(e) => setBaseUrl(e.target.value)}
               hint={t('connect.baseUrlHint')}
             />
+            {capabilities.data?.privateDestinations && (
+              <CheckField
+                label={t('connect.lan')}
+                hint={t('connect.lanHint')}
+                checked={onLan}
+                onChange={(e) => setOnLan(e.target.checked)}
+              />
+            )}
             <GatewayPath
               slug={effectiveSlug}
               editing={slugEdited}
@@ -336,6 +392,7 @@ export function ConnectFlow({
                 { value: 'NONE', label: t('connect.authNone'), hint: t('connect.authNoneHint') },
               ]}
             />
+            {preset?.caveat && <Caveat>{preset.caveat}</Caveat>}
             {(authType === 'API_KEY_HEADER' || signs) && (
               <Field
                 label={signs ? t('connect.keyHeaderName') : t('connect.headerName')}
@@ -448,6 +505,18 @@ export function ConnectFlow({
                           : t('connect.secretHint')
                     }
                   />
+                  {/* Where the reader gets these, so the next step is a link rather than a search. */}
+                  {preset?.credentialsUrl && (
+                    <a
+                      className="inline-flex items-center gap-1.5 text-xs text-accent-text underline underline-offset-2"
+                      href={preset.credentialsUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      {t('connect.whereCredentials', { name: preset.name })}
+                      <ExternalLink size={12} strokeWidth={2.25} aria-hidden="true" />
+                    </a>
+                  )}
                   <Field
                     label={t('expiry.field')}
                     type="date"
@@ -507,6 +576,23 @@ function CallbackToRegister() {
   );
 }
 
+/** What the chosen preset answered, and the way back to the list. */
+function PresetBanner({ preset, onClear }: { preset: ApiPreset; onClear: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-panel border border-accent/40 bg-accent-wash px-3.5 py-3">
+      <p className="text-sm">
+        {t('connect.presetApplied', {
+          name: preset.variant ? `${preset.name} — ${preset.variant}` : preset.name,
+        })}
+      </p>
+      <button type="button" className="text-xs text-accent-text underline underline-offset-2" onClick={onClear}>
+        {t('connect.presetChange')}
+      </button>
+    </div>
+  );
+}
+
 /** Something the API needs that Janus does not do for it. Said plainly rather than left to be found. */
 function Caveat({ children }: { children: ReactNode }) {
   return (
@@ -521,8 +607,8 @@ function Caveat({ children }: { children: ReactNode }) {
  * The recipe for a signed request.
  *
  * The only place in this flow that asks a reader to know something structural about their API, which
- * is why it is grouped and set apart: somebody who arrived here has their provider's documentation
- * open anyway.
+ * is why it is grouped and set apart: a preset fills all of it in, and somebody who arrived here
+ * without one has their provider's documentation open anyway.
  */
 function SigningFields({ value, onChange }: { value: Signing; onChange: (next: Signing) => void }) {
   const { t } = useI18n();

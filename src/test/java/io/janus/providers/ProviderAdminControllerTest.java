@@ -50,7 +50,7 @@ class ProviderAdminControllerTest {
         // Private destinations allowed, which is what stops the validator from resolving the host:
         // an ordinary test must not need working DNS, and what it asserts here is the registry's
         // behaviour rather than the network's. The SSRF rules get their own MockMvc below.
-        mvc = mvcValidatingWith(new DestinationValidator(true));
+        mvc = mvcValidatingWith(new DestinationValidator(true, false));
 
         when(scope.ownerFilter()).thenReturn(owner.getId());
         when(scope.accountId()).thenReturn(owner.getId());
@@ -124,7 +124,7 @@ class ProviderAdminControllerTest {
      */
     @Test
     void refusesADestinationThatIsNotAPublicHttpsUrl() throws Exception {
-        var strict = mvcValidatingWith(new DestinationValidator(false));
+        var strict = mvcValidatingWith(new DestinationValidator(false, false));
 
         for (String url : List.of(
                 "http://api.spotify.com",

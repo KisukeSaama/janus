@@ -64,10 +64,13 @@ function Wrapper({ children }: { children: ReactNode }) {
 /**
  * Everything the first step needs, up to the screen where activation is decided.
  *
- * The flow opens directly on the API description form.
+ * The flow opens on the list of ready-made APIs, so describing one by hand starts by declining it.
+ * That is the path these tests are about: what a preset fills in is asserted separately, and the
+ * behaviour below has to hold for an API nobody preconfigured.
  */
 async function describeApi() {
   const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: /another API|une autre API/i }));
   await user.type(screen.getByLabelText(/what is this API called|comment s.appelle cette API/i), 'Payments');
   await user.type(screen.getByLabelText(/HTTPS/i), 'https://api.example.com');
   await user.click(screen.getByRole('button', { name: /continue|continuer/i }));
@@ -123,6 +126,25 @@ describe('ConnectFlow', () => {
     // taken in the flow that registers one. Nothing here admits anybody to anything.
     await waitFor(() => expect(paths()).toEqual(['/api/admin/providers', '/api/admin/credentials']));
     expect(JSON.parse(writes()[1][1].body)).toMatchObject({ providerId: 'p1', secret: 'sk-live-1' });
+  });
+
+  it('answers the whole contract from a preset, including what only a person can grant', async () => {
+    renderFlow();
+    const user = userEvent.setup();
+
+    // The point of the list: one click replaces a destination, a strategy and two endpoints that
+    // would otherwise have been looked up in Spotify's documentation and typed by hand.
+    await user.click(screen.getByRole('button', { name: /spotify.*compte|spotify.*account/is }));
+    await user.click(screen.getByRole('button', { name: /continue|continuer/i }));
+    await user.click(screen.getByRole('button', { name: /register the API|enregistrer l.API/i }));
+
+    await waitFor(() => expect(paths()).toEqual(['/api/admin/providers']));
+    expect(JSON.parse(writes()[0][1].body)).toMatchObject({
+      baseUrl: 'https://api.spotify.com/v1',
+      authType: 'OAUTH2_AUTHORIZATION_CODE',
+      tokenUrl: 'https://accounts.spotify.com/api/token',
+      authorizationUrl: 'https://accounts.spotify.com/authorize',
+    });
   });
 
   it('unwinds the catalogue entry when the credential is refused', async () => {

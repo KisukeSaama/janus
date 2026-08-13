@@ -91,7 +91,7 @@ public class GatewayController {
                     .provider(slug, () -> providers.findBySlugAndEnabledTrue(slug))
                     .orElseThrow(() -> new Denied(HttpStatus.NOT_FOUND, "Provider is not available"));
             call.reached(provider);
-            destinations.validateShape(provider.getBaseUrl());
+            destinations.validateShape(provider.getBaseUrl(), provider.isAllowPrivateDestination());
 
             var grant = authorizations
                     .grant(

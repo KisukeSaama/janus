@@ -57,6 +57,7 @@ public class GatewayTrafficService {
     private static final RequestSigner SIGNER = new RequestSigner();
 
     private final WebClient web;
+    private final WebClient privateWeb;
     private final OpenBaoClient bao;
     private final UpstreamTokenProvider tokens;
     private final ResponseCache cache;
@@ -70,6 +71,7 @@ public class GatewayTrafficService {
 
     public GatewayTrafficService(
             WebClient gatewayWebClient,
+            WebClient gatewayPrivateWebClient,
             OpenBaoClient bao,
             UpstreamTokenProvider tokens,
             ResponseCache cache,
@@ -78,6 +80,7 @@ public class GatewayTrafficService {
             GatewayTrafficProperties properties,
             @Value("${janus.gateway.response-timeout-seconds:30}") long responseTimeoutSeconds) {
         this.web = gatewayWebClient;
+        this.privateWeb = gatewayPrivateWebClient;
         this.bao = bao;
         this.tokens = tokens;
         this.cache = cache;
@@ -317,6 +320,15 @@ public class GatewayTrafficService {
         return deliver(upstream, exchange, key, attempts, presented, secret);
     }
 
+    /**
+     * Which address rule this call connects under. The check runs inside the connection pool, where
+     * the provider is no longer in scope, so it is chosen here — before the request is built — rather
+     * than consulted at connection time.
+     */
+    private WebClient client(GatewayExchange exchange) {
+        return exchange.provider().isAllowPrivateDestination() ? privateWeb : web;
+    }
+
     private ResponseEntity<byte[]> send(
             GatewayExchange exchange, Credential credential, String secret, ResponseCache.Entry validator) {
         var type = credential.getAuthType();
@@ -331,7 +343,7 @@ public class GatewayTrafficService {
                 : null;
         var target = signed == null ? address : signed.uri();
 
-        var spec = web.method(exchange.method()).uri(target).headers(headers -> {
+        var spec = client(exchange).method(exchange.method()).uri(target).headers(headers -> {
             headers.addAll(exchange.headers());
             injectCredential(headers, credential, secret);
             if (signed != null) signed.headers().forEach(headers::set);

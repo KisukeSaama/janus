@@ -25,6 +25,15 @@ public class ProviderAdminController {
         return providers.catalog(q, page, size);
     }
 
+    /**
+     * What this deployment allows a destination to be. Read when the catalogue loads; it answers from
+     * configuration and changes only with a restart.
+     */
+    @GetMapping("/capabilities")
+    public ProviderCapabilities capabilities() {
+        return providers.capabilities();
+    }
+
     @PostMapping
     public ProviderResponse create(@Valid @RequestBody ProviderRequest request) {
         return providers.create(request);

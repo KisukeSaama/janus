@@ -11,6 +11,9 @@ image: docker:27
 #   JANUS_OPENBAO_TOKEN
 # Optional variables:
 #   JANUS_ADMIN_EMAIL (defaults to admin@localhost)
+#   JANUS_PRIVATE_DESTINATIONS_ENABLED (defaults to false) — lets an API be registered as living on
+#     the deployment's own local network. Not a secret, so leave it unmasked; scope it to the one
+#     environment that needs it rather than setting it for the project.
 
 stages:
   - test
@@ -118,6 +121,7 @@ variables:
           "CI_REGISTRY_IMAGE=${CI_REGISTRY_IMAGE}" \
           "IMAGE_TAG=${IMAGE_TAG}" \
           "JANUS_ADMIN_EMAIL=${JANUS_ADMIN_EMAIL:-admin@localhost}" \
+          "JANUS_PRIVATE_DESTINATIONS_ENABLED=${JANUS_PRIVATE_DESTINATIONS_ENABLED:-false}" \
           > "${target}/app.env"
 
         (umask 077; printf '%s' "${JANUS_POSTGRES_PASSWORD}" > "${target}/.secrets/postgres_password")

@@ -8,8 +8,11 @@ import java.net.UnknownHostException;
 import org.junit.jupiter.api.Test;
 
 class DestinationValidatorTest {
-    private final DestinationValidator strict = new DestinationValidator(false);
-    private final DestinationValidator permissive = new DestinationValidator(true);
+    private final DestinationValidator strict = new DestinationValidator(false, false);
+    private final DestinationValidator permissive = new DestinationValidator(true, false);
+
+    /** Offers the per-destination exception without lifting the check for the whole deployment. */
+    private final DestinationValidator offeringLan = new DestinationValidator(false, true);
 
     @Test
     void rejectsLocalAndNonHttpsDestinations() {
@@ -102,6 +105,76 @@ class DestinationValidatorTest {
     @Test
     void theOptInModeDisablesAddressFiltering() throws UnknownHostException {
         assertThat(permissive.isDisallowed(InetAddress.getByName("127.0.0.1"))).isFalse();
+    }
+
+    @Test
+    void aLocalNetworkDestinationReachesTheLanAndNothingElse() throws UnknownHostException {
+        for (String literal : new String[] {
+            "10.1.2.3",
+            "172.16.0.1",
+            "172.31.255.255",
+            "192.168.1.1",
+            "100.64.0.1", // carrier-grade NAT, which a sizeable home ISP hands out
+            "fc00::1",
+            "fd12::1"
+        }) {
+            assertThat(offeringLan.isDisallowed(InetAddress.getByName(literal), true))
+                    .withFailMessage("expected %s to be reachable by a local-network destination", literal)
+                    .isFalse();
+        }
+    }
+
+    @Test
+    void aLocalNetworkDestinationStillCannotReachJanusOrItsHost() throws UnknownHostException {
+        for (String literal : new String[] {
+            "127.0.0.1", // Janus itself, and the OpenBao it reads credentials from
+            "0.0.0.0",
+            "169.254.169.254", // cloud instance metadata
+            "192.0.0.1",
+            "198.18.0.1",
+            "224.0.0.1",
+            "255.255.255.255",
+            "::1",
+            "::",
+            "fe80::1",
+            "ff02::1"
+        }) {
+            assertThat(offeringLan.isDisallowed(InetAddress.getByName(literal), true))
+                    .withFailMessage("expected %s to stay blocked for every destination", literal)
+                    .isTrue();
+        }
+    }
+
+    @Test
+    void theExceptionBelongsToTheDestinationRatherThanTheDeployment() throws UnknownHostException {
+        // The same validator, the same address: admitting one destination onto the local network
+        // leaves every other one refusing exactly what it refused before.
+        assertThat(offeringLan.isDisallowed(InetAddress.getByName("192.168.1.10"), false))
+                .isTrue();
+        assertThat(offeringLan.isDisallowed(InetAddress.getByName("192.168.1.10"), true))
+                .isFalse();
+    }
+
+    @Test
+    void aLocalNetworkDestinationMayBePlainHttp() {
+        // No certificate authority issues for an address only one network resolves, so requiring
+        // HTTPS there would mean the destination simply cannot be registered.
+        assertThat(offeringLan.validateShape("http://192.168.1.10:32400", true).getPort())
+                .isEqualTo(32400);
+        assertThatThrownBy(() -> offeringLan.validateShape("http://192.168.1.10:32400", false))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void aDeploymentThatDoesNotOfferLocalNetworksRefusesTheSettingOutright() {
+        assertThat(strict.isOfferingPrivateDestinations()).isFalse();
+        assertThat(offeringLan.isOfferingPrivateDestinations()).isTrue();
+        // The development flag already reaches everything the per-destination setting admits.
+        assertThat(permissive.isOfferingPrivateDestinations()).isTrue();
+
+        assertThatThrownBy(() -> strict.validateShape("http://192.168.1.10:32400", true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not allow");
     }
 
     /** Builds an address from raw bytes, so the test does not depend on how literals are parsed. */
