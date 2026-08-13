@@ -55,6 +55,20 @@ public class Provider {
     @Column(name = "cache_ttl_seconds", nullable = false)
     private int cacheTtlSeconds;
 
+    /**
+     * Whether Janus restates this destination's responses as JSON.
+     *
+     * <p>Says nothing about which format to expect: the converter is chosen from the response's own
+     * {@code Content-Type}, because an API answering XML on one route and JSON on another is ordinary
+     * rather than exceptional.
+     */
+    @Column(name = "normalize_json", nullable = false)
+    private boolean normalizeJson;
+
+    /** Which elements must always come out as arrays; see {@code ArrayPaths}. */
+    @Column(name = "json_array_paths", length = 1000)
+    private String jsonArrayPaths;
+
     /** Ceiling on outbound calls to this destination, all callers combined. Zero is no ceiling. */
     @Column(name = "rate_limit_per_minute", nullable = false)
     private int rateLimitPerMinute;
@@ -164,6 +178,24 @@ public class Provider {
     }
 
     /**
+     * Whether callers of this destination receive JSON whatever it answers in.
+     *
+     * <p>Kept apart from {@link TrafficPolicy} rather than folded into it. That record is about how
+     * much Janus may call a destination and how long an answer stays good; this is about what the
+     * answer looks like, and the two are set by different people for different reasons — one from
+     * what the upstream's quota allows, the other from what its callers can parse.
+     *
+     * @param enabled    whether responses are restated as JSON
+     * @param arrayPaths elements that must always be arrays, comma-separated; see {@code ArrayPaths}
+     */
+    public record Normalization(boolean enabled, String arrayPaths) {
+
+        public static Normalization none() {
+            return new Normalization(false, null);
+        }
+    }
+
+    /**
      * The authentication contract, which belongs to the API rather than to any one account: every
      * caller of a destination presents in the same way, and only the value differs between them.
      */
@@ -208,6 +240,12 @@ public class Provider {
         this.baseUrl = baseUrl;
         this.enabled = enabled;
         this.allowPrivateDestination = allowPrivateDestination;
+    }
+
+    /** Paths are only kept while normalisation is on, so a row never states a rule nothing reads. */
+    public void applyNormalization(Normalization normalization) {
+        this.normalizeJson = normalization.enabled();
+        this.jsonArrayPaths = normalization.enabled() ? blankToNull(normalization.arrayPaths()) : null;
     }
 
     public void applyTrafficPolicy(TrafficPolicy traffic) {
@@ -286,6 +324,14 @@ public class Provider {
 
     public boolean isCacheEnabled() {
         return cacheEnabled;
+    }
+
+    public boolean isNormalizeJson() {
+        return normalizeJson;
+    }
+
+    public String getJsonArrayPaths() {
+        return jsonArrayPaths;
     }
 
     public int getCacheTtlSeconds() {

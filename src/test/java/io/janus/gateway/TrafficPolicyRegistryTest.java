@@ -21,7 +21,8 @@ class TrafficPolicyRegistryTest {
             new GatewayTrafficProperties.Cache(true, 100, 1_000_000, 10_000_000, 300),
             new GatewayTrafficProperties.Throttle(1, 300),
             new GatewayTrafficProperties.Retry(2, 1, 1),
-            new GatewayTrafficProperties.Authorization(true, 10, 100));
+            new GatewayTrafficProperties.Authorization(true, 10, 100),
+            new GatewayTrafficProperties.Transform(true, 2097152));
 
     private final ResponseCache cache = new ResponseCache(properties);
     private final AuthorizationCache authorizations = new AuthorizationCache(properties);

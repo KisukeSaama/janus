@@ -28,7 +28,7 @@ Requests run on virtual threads. A proxied call spends nearly all of its life wa
 - Upstream URLs come only from enabled Providers. URLs with user info, queries, fragments, non-HTTPS schemes, or private/local DNS results are rejected. The address a request is actually about to connect to is checked again at connection time, which closes the DNS rebinding window that a registration-time check leaves open. Upstream redirects are never followed.
 - A destination on the local network is the one exception to that, and reaching it takes two separate decisions: the deployment must offer the setting at all with `JANUS_PRIVATE_DESTINATIONS_ENABLED`, and the destination itself must be registered as being on one. It is a property of a single catalogue entry, so admitting a media server leaves every other provider refusing exactly what it refused before, and the console hides the setting entirely where the deployment does not offer it. Loopback, link-local, and the unspecified address stay refused whatever a row says — from inside a container the first is Janus and the OpenBao it reads credentials from, and the second is where a cloud host answers with instance credentials. Such a destination may be plain HTTP, because no certificate authority issues for an address only one network resolves. This is not `JANUS_ALLOW_PRIVATE_DESTINATIONS`, which lifts the whole check for the whole deployment and is meant for development.
 - A grant admits one application to one provider, not to a subset of its surface: once granted, every path and method under that slug is forwarded. What the API itself permits for the credential Janus presents is the limit, and an allowlist here would only be a second, staler copy of that answer. Authorization is decided before OpenBao is read, and the request is forwarded with its original encoding. Encoded path separators are rejected, and any request URI containing an empty or dot segment is refused before routing, so no two layers can disagree about which path was requested.
-- Client authorization, cookies, hop-by-hop headers, inbound-hop headers, and Janus authentication headers are not forwarded. Authentication response headers and cookies are not returned. Text/JSON responses are scrubbed if they echo the credential.
+- Client authorization, cookies, hop-by-hop headers, inbound-hop headers, and Janus authentication headers are not forwarded. Authentication response headers and cookies are not returned. Textual responses — JSON, XML, form-encoded, plain text — are scrubbed if they echo the credential.
 - Request and response bodies are size-bounded, and outbound calls have connect and response timeouts.
 - Stored responses are addressed by the credential they were fetched with, never by the calling application, and authorization is decided before the store is consulted. An application whose grant was revoked cannot be served from an entry it once caused. Nothing marked `private`, nothing carrying a cookie, and nothing with `Vary: *` is stored at all.
 - Gateway decisions and administrative mutations produce audit events with correlation IDs and no credential material. Every response carries `X-Janus-Correlation-Id`, and the same identifier appears in the application logs.
@@ -41,7 +41,7 @@ src/main/java/io/janus/
   providers/      fixed destinations and SSRF validation
   credentials/    OpenBao-backed credential metadata
   grants/         application/provider bindings and their per-caller quotas
-  gateway/        authorization, path handling, and the outbound proxy
+  gateway/        authorization, path handling, the outbound proxy, and JSON normalisation
   audit/          immutable operational event stream
   security/       separate admin and gateway filter chains, key cache, throttling, per-client rate limit
   openbao/        minimal KV v2 integration
@@ -97,6 +97,8 @@ Everything below has a working default for development; the ones without a safe 
 | `JANUS_CACHE_ENABLED` | `true` | master switch for response reuse; `false` overrides every provider |
 | `JANUS_CACHE_MAX_ENTRIES` / `JANUS_CACHE_MAX_ENTRY_BYTES` / `JANUS_CACHE_MAX_TOTAL_BYTES` | 1000 / 1 MiB / 64 MiB | store bounds, evicted least recently used first |
 | `JANUS_CACHE_STALE_IF_ERROR_SECONDS` | 300 | how long a stale response may answer while an upstream is failing |
+| `JANUS_TRANSFORM_ENABLED` | `true` | master switch for restating responses as JSON; `false` overrides every provider |
+| `JANUS_MAX_TRANSFORM_BYTES` | 2 MiB | largest body a conversion is attempted on. Far below the response limit on purpose: that one bounds what arrives, this one what a conversion has to build, and a conversion expands. Past it the original is returned unchanged. |
 | `JANUS_THROTTLE_MAX_WAIT_MILLIS` | 2000 | how long a request may wait for a provider allowance before 429 |
 | `JANUS_THROTTLE_MAX_COOLDOWN_SECONDS` | 300 | ceiling on a pause taken from an upstream `Retry-After` |
 | `JANUS_RETRY_MAX_ATTEMPTS` / `JANUS_RETRY_INITIAL_BACKOFF_MILLIS` / `JANUS_RETRY_MAX_BACKOFF_MILLIS` | 2 / 200 / 2000 | retries after the first attempt, for idempotent methods only |
@@ -298,6 +300,7 @@ Every request is answered with headers stating what was done, so the behaviour i
 | `Age` | seconds since the served response was fetched |
 | `X-Janus-RateLimit-Limit` / `-Remaining` / `-Reset` | the calling application's own allowance, when one is set |
 | `X-Janus-Upstream-Attempts` | present when Janus retried |
+| `X-Janus-Transform` | what a response was restated from, or why it was not |
 | `Retry-After` | always present on a 429 |
 
 **Reuse.** Enabled per provider, on by default. Janus obeys the upstream's `Cache-Control`, `Expires`, `ETag`, and `Vary`; a provider that states nothing is only cached if you give it a default freshness. `GET` and `HEAD` only. A stale entry with a validator is revalidated conditionally, so an unchanged resource costs a 304 rather than a body. A successful write invalidates that resource and everything under it. A caller can opt out per request with `Cache-Control: no-cache` or `no-store`. A served hit reads no credential: the secret never leaves OpenBao.
@@ -312,9 +315,59 @@ All three are continuously refilled token buckets, so an allowance cannot be spe
 
 **Failure absorption.** Idempotent requests (`GET`, `HEAD`, `PUT`, `DELETE`) are retried on 429, 502, 503, 504, and transport failures, with jittered exponential backoff. `POST` and `PATCH` are never retried. If a provider answers 429 or 503 with a `Retry-After` longer than a retry could absorb, Janus stops calling it entirely for that period rather than letting every caller discover the ban in turn. While a provider is failing or paused, a stale stored response answers instead of an error, within its `stale-if-error` window. Identical concurrent reads are collapsed into a single upstream call.
 
-Policy is set on the provider (reuse, default freshness, outbound limit, burst) and on the grant (the application's own limit and burst). `GET /api/admin/gateway/traffic` reports what is held, how often it spared a call, and which providers are paused; `DELETE /api/admin/providers/{id}/cache` and `DELETE /api/admin/gateway/cache` drop stored responses when data changed upstream without Janus having changed it.
+**One format.** Enabled per provider, off by default. With it set, a response that arrives as XML, form-encoded, or newline-delimited JSON reaches the caller as JSON — which is what makes a self-hosted deployment's most useful APIs callable the same way as everything else. Plex answers in XML, so do Newznab indexers, podcast feeds, and every SOAP endpoint still running; without this each client service carries a parser for a format it never chose, and two clients of the same API carry two that disagree.
+
+The setting says only *whether*, never *from what*: the converter is chosen from the response's own `Content-Type`, because an API answering XML on one route and JSON on another is ordinary rather than exceptional. JSON passes through untouched, and so does anything no converter claims.
+
+**A conversion is never a way for a request to fail.** A body that is not what its `Content-Type` announced, one over `JANUS_MAX_TRANSFORM_BYTES`, or one that arrived compressed is returned exactly as the upstream sent it, with the reason in `X-Janus-Transform`. A caller that receives XML where it expected JSON has a header saying why; a 502 would be a failure Janus invented and the upstream never had.
+
+Two things follow from the mapping. XML carries no types, so every value stays a string — inferring them would turn the identifier `"0123"` into `123`. And XML cannot say "this is a list", so an element seen once is indistinguishable from a list of one: a library holding one section would return an object where the same library holding two returns an array, and the client breaks on the day a section is added. Declare those elements on the provider — `Directory` applies wherever it appears, `MediaContainer.Directory` at that one place — and they are arrays whatever the data does. A caller can have the original for one request with `Accept: application/xml`, which is also why a normalised response carries `Vary: Accept`. It carries no `ETag`: the upstream issued that for the document it sent, and Janus goes on using it against the upstream rather than handing a caller a validator for a representation it never received.
+
+Policy is set on the provider (reuse, default freshness, JSON normalisation, outbound limit, burst) and on the grant (the application's own limit and burst). `GET /api/admin/gateway/traffic` reports what is held, how often it spared a call, and which providers are paused; `DELETE /api/admin/providers/{id}/cache` and `DELETE /api/admin/gateway/cache` drop stored responses when data changed upstream without Janus having changed it.
 
 Revoking access does not require deleting a record. Clearing **Active** on an application, credential, or grant stops gateway calls immediately while preserving the audit trail, and rotating an application key invalidates the previous one at once.
+
+## Errors
+
+Everything Janus refuses is `application/problem+json`, in one shape, whichever layer refused it:
+
+```json
+{
+  "type": "about:blank",
+  "title": "Forbidden",
+  "status": 403,
+  "code": "grant_missing",
+  "detail": "No active grant for this provider",
+  "correlationId": "0f3c…",
+  "timestamp": "2026-08-14T09:12:44Z"
+}
+```
+
+**Read `code`, not `detail`.** `detail` is prose written for whoever is looking at it and may be reworded at any time; `code` is stable, and no two refusals a caller must handle differently share one. Validation failures add an `errors` member naming each field. `correlationId` is also returned as `X-Janus-Correlation-Id` on every response, and is the identifier the audit record was written under — quote it and the call can be found.
+
+**`X-Janus-Error` repeats `code` as a header, and is how you tell a refusal from Janus apart from one the upstream API made.** An upstream's own `401` or `403` is relayed byte for byte and carries no such header; a `401` from Janus always does.
+
+| `code` | Status | What it means |
+|---|---|---|
+| `authentication_required` | 401 | No usable application credential was presented |
+| `authentication_throttled` | 429 | Too many failed attempts from this client; obey `Retry-After` |
+| `provider_unavailable` | 404 | No enabled provider under that slug — unknown and disabled are deliberately the same answer |
+| `grant_missing` | 403 | This application has no active grant for that provider |
+| `credential_disabled` | 403 | The grant exists; the credential behind it was switched off |
+| `rate_limit_client` / `rate_limit_grant` / `rate_limit_provider` | 429 | Which of the three allowances was hit — your own, or one shared with every other caller |
+| `provider_cooldown` | 429 | The provider asked for a pause and Janus is honouring it for everyone |
+| `path_ambiguous` / `path_invalid` | 400 | The request path is not one that can be routed unambiguously |
+| `payload_too_large` | 413 | Over `JANUS_MAX_REQUEST_BYTES` |
+| `provider_misconfigured` | 502 | The registered base URL no longer satisfies this deployment's address rules; `detail` says which one |
+| `destination_blocked` | 502 | The hostname resolved to an address the gateway may not reach |
+| `token_exchange_failed` | 502 | Janus could not obtain the token this credential needs, so nothing was sent |
+| `upstream_unreachable` | 502 | DNS, connection, or TLS failed; `detail` says which |
+| `upstream_timeout` | 504 | The provider accepted the connection and did not answer in time |
+| `internal_error` | 500 | A fault inside Janus. Never the provider's, and always logged with its stack under the same `correlationId` |
+
+The distinction between the last three is the point: a timeout is worth retrying, an unreachable host usually is not, and a 500 is ours. All three used to be one 502 saying `Upstream request failed`.
+
+The token endpoint is the one exception to the shape. `POST /oauth/token` answers RFC 6749 `{"error", "error_description"}`, because that is what every OAuth client already parses; it carries `Retry-After` when it is throttled.
 
 ## Observability
 

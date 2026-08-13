@@ -44,9 +44,13 @@ public class OAuthTokenController {
             HttpServletRequest request) {
 
         String client = key(request);
-        if (throttle.isBlocked(client))
+        long blockedFor = throttle.blockedForSeconds(client);
+        if (blockedFor > 0)
             throw new OAuthException(
-                    "invalid_request", HttpStatus.TOO_MANY_REQUESTS, "Too many failed attempts. Wait and try again.");
+                    "invalid_request",
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "Too many failed attempts. Wait and try again.",
+                    blockedFor);
 
         // RFC 6749 §2.3.1: a client may present its credentials in the body or as Basic. Both are
         // accepted, and the header wins, so a caller cannot smuggle a second identity past the one
@@ -91,6 +95,9 @@ public class OAuthTokenController {
         // RFC 6749 §5.2: a 401 from this endpoint carries a challenge.
         if (ex.status == HttpStatus.UNAUTHORIZED)
             response.header(HttpHeaders.WWW_AUTHENTICATE, "Basic realm=\"janus\"");
+        // The body stays RFC 6749 rather than a problem document, because that is the shape every
+        // OAuth client already parses. Retry-After is the one thing it does not carry a place for.
+        if (ex.retryAfterSeconds > 0) response.header(HttpHeaders.RETRY_AFTER, Long.toString(ex.retryAfterSeconds));
         return response.body(body);
     }
 

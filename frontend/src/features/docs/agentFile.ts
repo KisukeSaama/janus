@@ -20,7 +20,12 @@
 
 export const AGENT_FILE_NAME = 'JANUS.md';
 
-export type AgentApi = { name: string; slug: string };
+export type AgentApi = {
+  name: string;
+  slug: string;
+  /** Whether this API's responses reach the caller as JSON whatever it answers in. */
+  normalizeJson: boolean;
+};
 
 export type AgentTarget = {
   /** Where Janus answers, taken from the address the console was opened at. */
@@ -84,6 +89,7 @@ ${apiList(apis)}
 
 Any path and any method under a slug above is forwarded. What the API itself allows for the secret
 Janus presents is the only limit; an API at a slug not listed is not reachable at all.
+${conversionNote(apis)}
 
 ## Errors
 
@@ -124,9 +130,29 @@ Then add the new slug to this file.
 `;
 }
 
-/** One line per API: the name, and the gateway path every one of its routes hangs off. */
+/** One line per API: the name, the gateway path its routes hang off, and what it answers in. */
 function apiList(apis: AgentApi[]): string {
   if (apis.length === 0) return 'None yet. Follow the next section before writing any call.';
 
-  return apis.map(({ name, slug }) => `- ${name} — \`/gateway/${slug}/…\``).join('\n');
+  return apis
+    .map(({ name, slug, normalizeJson }) => `- ${name} — \`/gateway/${slug}/…\`${normalizeJson ? ' — **JSON**' : ''}`)
+    .join('\n');
+}
+
+/**
+ * Written only when something is actually converted, and worth its lines when it is.
+ *
+ * An agent handed a Plex task reads Plex's documentation, sees XML, and reaches for a parser and a
+ * dependency — the same reflex that makes it invent an `Authorization` header. It cannot know the
+ * gateway restated the response, because the only place that is written down is here.
+ */
+function conversionNote(apis: AgentApi[]): string {
+  if (!apis.some((api) => api.normalizeJson)) return '';
+
+  return `
+APIs marked **JSON** reach you as JSON whatever their own documentation shows: Janus converts XML,
+form-encoded and NDJSON responses on the way back. Parse JSON, add no XML parser and no new
+dependency for it. \`X-Janus-Transform\` names the conversion that ran, or says why none did — and
+sending \`Accept: application/xml\` returns the untouched original if you ever need it.
+`;
 }

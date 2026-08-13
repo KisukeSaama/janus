@@ -1,7 +1,6 @@
 package io.janus.shared;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -10,9 +9,9 @@ import jakarta.servlet.http.*;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Refuses request URIs that different layers would read differently.
@@ -24,23 +23,31 @@ import org.springframework.web.filter.OncePerRequestFilter;
  *
  * <p>None of the rejected forms has a legitimate use: an empty path segment, a dot segment, a
  * backslash, or a control character in a URI is always either a mistake or an attempt.
+ *
+ * <p>It runs second, behind {@link CorrelationIdFilter} alone, so that its refusals carry an
+ * identifier like every other one. That filter reads no path and decides nothing, so nothing it does
+ * can be confused by the very URIs this one exists to reject.
  */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@Order(Ordered.HIGHEST_PRECEDENCE + 10)
 public class RequestUriGuardFilter extends OncePerRequestFilter {
+    private final ObjectMapper mapper;
+
+    public RequestUriGuardFilter(ObjectMapper mapper) {
+        this.mapper = mapper;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         String uri = request.getRequestURI();
         if (isAmbiguous(uri)) {
-            response.setStatus(HttpStatus.BAD_REQUEST.value());
-            response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-            response.getOutputStream()
-                    .write(
-                            ("""
-                    {"title":"Bad Request","status":400,"detail":"The request path is not unambiguous"}""")
-                                    .getBytes(StandardCharsets.UTF_8));
+            ApiProblem.write(
+                    response,
+                    mapper,
+                    HttpStatus.BAD_REQUEST,
+                    ErrorCode.PATH_AMBIGUOUS,
+                    "The request path is not unambiguous");
             return;
         }
         chain.doFilter(request, response);

@@ -484,6 +484,8 @@ function DestinationPanel({
     allowPrivateDestination: boolean;
     cacheEnabled: boolean;
     cacheTtlSeconds: number;
+    normalizeJson: boolean;
+    jsonArrayPaths: string;
     rateLimitPerMinute: number;
     rateLimitBurst: number;
     authType: Provider['authType'];
@@ -498,6 +500,9 @@ function DestinationPanel({
   const describe = useErrorMessage();
   const capabilities = useProviderCapabilities();
   const [error, setError] = useState('');
+  // The array declaration only means anything while normalisation is on, so it follows the switch
+  // rather than sitting there inert.
+  const [normalizing, setNormalizing] = useState(provider.normalizeJson);
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     const form = new FormData(e.currentTarget);
@@ -511,6 +516,8 @@ function DestinationPanel({
         allowPrivateDestination: form.get('allowPrivateDestination') === 'on',
         cacheEnabled: form.get('cacheEnabled') === 'on',
         cacheTtlSeconds: Number(form.get('cacheTtlSeconds') || 0),
+        normalizeJson: form.get('normalizeJson') === 'on',
+        jsonArrayPaths: String(form.get('jsonArrayPaths') ?? ''),
         rateLimitPerMinute: Number(form.get('rateLimitPerMinute') || 0),
         rateLimitBurst: Number(form.get('rateLimitBurst') || 0),
         authType: provider.authType,
@@ -587,6 +594,25 @@ function DestinationPanel({
             defaultValue={provider.cacheTtlSeconds}
             hint={t('providers.cacheTtlHint')}
           />
+          <CheckField
+            label={t('providers.normalizeLabel')}
+            name="normalizeJson"
+            defaultChecked={provider.normalizeJson}
+            onChange={(e) => setNormalizing(e.currentTarget.checked)}
+            hint={t('providers.normalizeHint')}
+          />
+          {normalizing && (
+            <Field
+              label={t('providers.arrayPathsLabel')}
+              name="jsonArrayPaths"
+              data
+              autoComplete="off"
+              maxLength={1000}
+              placeholder="MediaContainer.Directory, Location"
+              defaultValue={provider.jsonArrayPaths ?? ''}
+              hint={t('providers.arrayPathsHint')}
+            />
+          )}
           <Field
             label={t('providers.rateLimitLabel')}
             name="rateLimitPerMinute"

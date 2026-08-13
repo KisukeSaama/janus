@@ -37,10 +37,22 @@ public class AuthenticationThrottle {
     }
 
     public boolean isBlocked(String client) {
+        return blockedForSeconds(client) > 0;
+    }
+
+    /**
+     * How much longer this client stays blocked, or 0 when it is not.
+     *
+     * <p>Exists so a refusal can carry {@code Retry-After}. A block lasts fifteen minutes by default,
+     * and a caller that is not told that reasonably assumes its credentials are simply wrong — or
+     * keeps retrying, which is the behaviour the block was meant to stop. Rounded up, never to zero
+     * while the block stands, so obeying the header always clears it.
+     */
+    public long blockedForSeconds(String client) {
         var current = attempts.get(client);
-        return current != null
-                && current.blockedUntilNanos() != 0
-                && System.nanoTime() - current.blockedUntilNanos() < 0;
+        if (current == null || current.blockedUntilNanos() == 0) return 0;
+        long remaining = current.blockedUntilNanos() - System.nanoTime();
+        return remaining <= 0 ? 0 : Math.max(1, Duration.ofNanos(remaining).toSeconds() + 1);
     }
 
     public void recordFailure(String client) {

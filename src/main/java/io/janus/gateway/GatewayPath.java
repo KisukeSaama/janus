@@ -7,6 +7,8 @@ import java.nio.charset.StandardCharsets;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import io.janus.shared.ErrorCode;
+
 /**
  * The caller-supplied portion of a gateway URL, in both the form Janus reasons about and the form
  * sent upstream.
@@ -37,12 +39,12 @@ public record GatewayPath(String rawPath, String decodedPath, String rawQuery) {
 
     private static GatewayPath parseWithPrefix(String requestUri, String prefix, String queryString) {
         if (!requestUri.startsWith(prefix))
-            throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, "Unsafe gateway path");
+            throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, ErrorCode.PATH_INVALID, "Unsafe gateway path");
 
         String rawPath = requestUri.substring(prefix.length());
         if (rawPath.isEmpty()) rawPath = "/";
         if (!rawPath.startsWith("/") || rawPath.contains("//"))
-            throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, "Unsafe gateway path");
+            throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, ErrorCode.PATH_INVALID, "Unsafe gateway path");
         rejectUnsafeRawCharacters(rawPath);
 
         // A space or a brace is legitimate once decoded — "/v1/customers/john%20doe" is an ordinary
@@ -50,7 +52,7 @@ public record GatewayPath(String rawPath, String decodedPath, String rawQuery) {
         String decodedPath = percentDecode(rawPath);
         rejectUnsafeDecodedCharacters(decodedPath);
         if (decodedPath.contains("//") || hasTraversalSegment(decodedPath))
-            throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, "Unsafe gateway path");
+            throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, ErrorCode.PATH_INVALID, "Unsafe gateway path");
 
         if (queryString != null) rejectUnsafeRawCharacters(queryString);
         return new GatewayPath(rawPath, decodedPath, queryString);
@@ -70,7 +72,7 @@ public record GatewayPath(String rawPath, String decodedPath, String rawQuery) {
         try {
             return builder.build(true).toUri();
         } catch (IllegalArgumentException ex) {
-            throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, "Unsafe gateway path");
+            throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, ErrorCode.PATH_INVALID, "Unsafe gateway path");
         }
     }
 
@@ -78,7 +80,8 @@ public record GatewayPath(String rawPath, String decodedPath, String rawQuery) {
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
             if (c < 0x20 || c == 0x7f || FORBIDDEN_RAW_LITERALS.indexOf(c) >= 0)
-                throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, "Unsafe gateway path");
+                throw new GatewayController.Denied(
+                        HttpStatus.BAD_REQUEST, ErrorCode.PATH_INVALID, "Unsafe gateway path");
         }
     }
 
@@ -87,7 +90,8 @@ public record GatewayPath(String rawPath, String decodedPath, String rawQuery) {
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
             if (c < 0x20 || c == 0x7f || c == '\\')
-                throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, "Unsafe gateway path");
+                throw new GatewayController.Denied(
+                        HttpStatus.BAD_REQUEST, ErrorCode.PATH_INVALID, "Unsafe gateway path");
         }
     }
 
@@ -112,13 +116,17 @@ public record GatewayPath(String rawPath, String decodedPath, String rawQuery) {
                 continue;
             }
             if (i + 2 >= value.length())
-                throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, "Unsafe gateway path");
+                throw new GatewayController.Denied(
+                        HttpStatus.BAD_REQUEST, ErrorCode.PATH_INVALID, "Unsafe gateway path");
             int high = Character.digit(value.charAt(i + 1), 16);
             int low = Character.digit(value.charAt(i + 2), 16);
-            if (high < 0 || low < 0) throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, "Unsafe gateway path");
+            if (high < 0 || low < 0)
+                throw new GatewayController.Denied(
+                        HttpStatus.BAD_REQUEST, ErrorCode.PATH_INVALID, "Unsafe gateway path");
             int octet = (high << 4) + low;
             if (octet == '/' || octet == '\\' || octet == 0)
-                throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, "Encoded path separators are not accepted");
+                throw new GatewayController.Denied(
+                        HttpStatus.BAD_REQUEST, ErrorCode.PATH_INVALID, "Encoded path separators are not accepted");
             pending.write(octet);
             i += 2;
         }

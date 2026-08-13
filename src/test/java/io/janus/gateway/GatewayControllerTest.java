@@ -18,6 +18,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -29,6 +30,7 @@ import io.janus.providers.DestinationValidator;
 import io.janus.providers.ProviderRepository;
 import io.janus.security.GatewayPrincipal;
 import io.janus.shared.CorrelationIdFilter;
+import io.janus.shared.ErrorCode;
 import io.janus.testing.Fixtures;
 
 /**
@@ -48,10 +50,15 @@ class GatewayControllerTest {
             new GatewayTrafficProperties.Cache(true, 100, 1_000_000, 10_000_000, 300),
             new GatewayTrafficProperties.Throttle(1, 300),
             new GatewayTrafficProperties.Retry(2, 1, 1),
-            new GatewayTrafficProperties.Authorization(true, 10, 100)));
+            new GatewayTrafficProperties.Authorization(true, 10, 100),
+            new GatewayTrafficProperties.Transform(true, 2097152)));
 
     private final AuditService audit = Mockito.mock(AuditService.class);
     private final GatewayMetrics metrics = Mockito.mock(GatewayMetrics.class);
+
+    /** Real, so ordinary calls are validated as production validates them; spied, so one test can
+     * make a registered address stop satisfying the rules it was accepted under. */
+    private final DestinationValidator destinations = Mockito.spy(new DestinationValidator(false, false));
 
     private final io.janus.accounts.Account owner = Fixtures.owner();
     private final io.janus.providers.Provider provider = Fixtures.provider(owner);
@@ -68,14 +75,7 @@ class GatewayControllerTest {
     @BeforeEach
     void setUp() {
         controller = new GatewayController(
-                providers,
-                grants,
-                authorizations,
-                new DestinationValidator(false, false),
-                traffic,
-                audit,
-                metrics,
-                new ObjectMapper());
+                providers, grants, authorizations, destinations, traffic, audit, metrics, new ObjectMapper());
         mvc = MockMvcBuilders.standaloneSetup(controller)
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .build();
@@ -289,7 +289,9 @@ class GatewayControllerTest {
 
     @Test
     void aThrottledCallIsAnsweredWithRetryAfter() throws Exception {
-        when(traffic.forward(any())).thenThrow(new Throttled("Provider rate limit reached", 42, new HttpHeaders()));
+        when(traffic.forward(any()))
+                .thenThrow(new Throttled(
+                        ErrorCode.RATE_LIMIT_PROVIDER, "Provider rate limit reached", 42, new HttpHeaders()));
 
         mvc.perform(get("/gateway/spotify/v1/tracks"))
                 .andExpect(status().isTooManyRequests())
@@ -335,24 +337,90 @@ class GatewayControllerTest {
 
         mvc.perform(get("/gateway/spotify/v1/tracks"))
                 .andExpect(status().isBadGateway())
-                .andExpect(jsonPath("$.detail").value("Upstream request failed"))
+                .andExpect(jsonPath("$.code").value("upstream_failed"))
                 .andExpect(
                         content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("sk_live"))));
 
         assertThat(recordedEvent().detail()).isEqualTo("Upstream returned 401");
     }
 
+    /**
+     * A defect in Janus is not the provider's fault, and 502 said it was. Somebody reading that goes
+     * and looks at an upstream's status page over a stack trace that is in this process.
+     */
     @Test
-    void anUnexpectedFailureIsReportedWithoutItsMessage() throws Exception {
+    void aFailureInsideJanusIsNotBlamedOnTheProvider() throws Exception {
         when(traffic.forward(any())).thenThrow(new IllegalStateException("jdbc://user:hunter2@db/janus is down"));
 
         mvc.perform(get("/gateway/spotify/v1/tracks"))
-                .andExpect(status().isBadGateway())
-                .andExpect(jsonPath("$.detail").value("Upstream request failed"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("internal_error"))
+                .andExpect(jsonPath("$.detail").value("The request could not be completed"))
                 .andExpect(
                         content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("hunter2"))));
 
         assertThat(recordedEvent().outcome()).isEqualTo(AuditOutcome.ERROR);
+    }
+
+    /** A slow provider and a broken one are different problems, and only one is worth retrying. */
+    @Test
+    void aTimeoutIsAGatewayTimeoutRatherThanABadGateway() throws Exception {
+        when(traffic.forward(any()))
+                .thenThrow(new WebClientRequestException(
+                        io.netty.handler.timeout.ReadTimeoutException.INSTANCE,
+                        org.springframework.http.HttpMethod.GET,
+                        java.net.URI.create("https://api.spotify.com/v1/tracks"),
+                        HttpHeaders.EMPTY));
+
+        mvc.perform(get("/gateway/spotify/v1/tracks"))
+                .andExpect(status().isGatewayTimeout())
+                .andExpect(jsonPath("$.code").value("upstream_timeout"));
+    }
+
+    @Test
+    void anUnreachableProviderSaysSoRatherThanJustFailing() throws Exception {
+        when(traffic.forward(any()))
+                .thenThrow(new WebClientRequestException(
+                        new java.net.UnknownHostException("api.spotify.invalid"),
+                        org.springframework.http.HttpMethod.GET,
+                        java.net.URI.create("https://api.spotify.invalid/v1/tracks"),
+                        HttpHeaders.EMPTY));
+
+        mvc.perform(get("/gateway/spotify/v1/tracks"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("upstream_unreachable"))
+                .andExpect(jsonPath("$.detail").value("The provider's hostname could not be resolved"));
+    }
+
+    /**
+     * The validator's message names what is wrong with the registered address, which is worth saying
+     * — but only to a caller that has already been admitted to this provider.
+     */
+    @Test
+    void aProviderThatNoLongerSatisfiesTheAddressRulesSaysWhichRule() throws Exception {
+        doThrow(new IllegalArgumentException("Provider URL must use HTTPS"))
+                .when(destinations)
+                .validateShape(any(), anyBoolean());
+
+        mvc.perform(get("/gateway/spotify/v1/tracks"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("provider_misconfigured"))
+                .andExpect(jsonPath("$.detail").value("Provider URL must use HTTPS"));
+
+        // Not the caller's mistake, so the journal must not read as though an application overstepped.
+        assertThat(recordedEvent().outcome()).isEqualTo(AuditOutcome.ERROR);
+    }
+
+    /** Refused before the address is ever looked at, so a stranger learns nothing about it. */
+    @Test
+    void aCallerWithNoGrantNeverReachesTheAddressCheck() throws Exception {
+        when(grants.findActive(any(), any())).thenReturn(Optional.empty());
+
+        mvc.perform(get("/gateway/spotify/v1/tracks"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("grant_missing"));
+
+        verify(destinations, never()).validateShape(any(), anyBoolean());
     }
 
     // --- what is measured ---------------------------------------------------

@@ -1,7 +1,6 @@
 package io.janus.security;
 
 import java.io.IOException;
-import java.util.LinkedHashMap;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -18,7 +17,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.ObjectMapper;
 
 import io.janus.gateway.RateLimiter;
-import io.janus.shared.CorrelationIdFilter;
+import io.janus.shared.ApiProblem;
+import io.janus.shared.ErrorCode;
 
 /**
  * A ceiling on how fast one client may call Janus at all, whoever it turns out to be.
@@ -118,14 +118,12 @@ public class ClientRateLimitFilter extends OncePerRequestFilter {
 
     private void refuse(HttpServletResponse response, long retryAfterSeconds) throws IOException {
         if (response.isCommitted()) return;
-        response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
         response.setHeader(HttpHeaders.RETRY_AFTER, Long.toString(retryAfterSeconds));
-        response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-        var body = new LinkedHashMap<String, Object>();
-        body.put("title", HttpStatus.TOO_MANY_REQUESTS.getReasonPhrase());
-        body.put("status", HttpStatus.TOO_MANY_REQUESTS.value());
-        body.put("detail", "Too many requests from this client");
-        body.put("correlationId", CorrelationIdFilter.current());
-        mapper.writeValue(response.getOutputStream(), body);
+        ApiProblem.write(
+                response,
+                mapper,
+                HttpStatus.TOO_MANY_REQUESTS,
+                ErrorCode.RATE_LIMIT_CLIENT,
+                "Too many requests from this client");
     }
 }

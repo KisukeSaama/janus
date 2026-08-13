@@ -13,10 +13,18 @@ public class OAuthException extends RuntimeException {
 
     public final HttpStatus status;
 
+    /** Seconds the caller should wait, or 0 when waiting is not what will help. */
+    public final long retryAfterSeconds;
+
     public OAuthException(String error, HttpStatus status, String description) {
+        this(error, status, description, 0);
+    }
+
+    public OAuthException(String error, HttpStatus status, String description, long retryAfterSeconds) {
         super(description);
         this.error = error;
         this.status = status;
+        this.retryAfterSeconds = retryAfterSeconds;
     }
 
     public static OAuthException invalidRequest(String description) {

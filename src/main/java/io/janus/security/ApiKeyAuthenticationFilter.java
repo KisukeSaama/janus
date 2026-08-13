@@ -18,7 +18,8 @@ import io.janus.audit.AuditAction;
 import io.janus.audit.AuditActor;
 import io.janus.audit.AuditService;
 import io.janus.oauth.AccessTokenStore;
-import io.janus.shared.CorrelationIdFilter;
+import io.janus.shared.ApiProblem;
+import io.janus.shared.ErrorCode;
 
 /**
  * Authenticates gateway callers, two ways.
@@ -73,8 +74,19 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         String client = request.getRemoteAddr();
-        if (throttle.isBlocked(client)) {
-            reject(request, response, "Too many failed authentication attempts", HttpStatus.TOO_MANY_REQUESTS, false);
+        long blockedFor = throttle.blockedForSeconds(client);
+        if (blockedFor > 0) {
+            // Blocked for a quarter of an hour by default. Said out loud, because a caller that is
+            // not told reads this as "my key is wrong" and either goes looking for a fault that is
+            // not there or keeps retrying — which is the behaviour the block exists to stop.
+            response.setHeader(HttpHeaders.RETRY_AFTER, Long.toString(blockedFor));
+            reject(
+                    request,
+                    response,
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    ErrorCode.AUTHENTICATION_THROTTLED,
+                    "Too many failed authentication attempts",
+                    false);
             return;
         }
 
@@ -88,8 +100,9 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
             reject(
                     request,
                     response,
-                    "Valid Janus application credentials are required",
                     HttpStatus.UNAUTHORIZED,
+                    ErrorCode.AUTHENTICATION_REQUIRED,
+                    "Valid Janus application credentials are required",
                     true);
             return;
         }
@@ -131,11 +144,11 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
     private void reject(
             HttpServletRequest request,
             HttpServletResponse response,
-            String detail,
             HttpStatus status,
+            ErrorCode code,
+            String detail,
             boolean recordAudit)
             throws IOException {
-        String correlationId = CorrelationIdFilter.current();
         if (recordAudit) {
             audit.recordAuthenticationDenied(
                     AuditActor.APPLICATION,
@@ -145,13 +158,6 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
                     status.value(),
                     detail);
         }
-        response.setStatus(status.value());
-        response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-        var body = new LinkedHashMap<String, Object>();
-        body.put("title", status.getReasonPhrase());
-        body.put("status", status.value());
-        body.put("detail", detail);
-        body.put("correlationId", correlationId);
-        mapper.writeValue(response.getOutputStream(), body);
+        ApiProblem.write(response, mapper, status, code, detail);
     }
 }

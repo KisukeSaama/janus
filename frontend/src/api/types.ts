@@ -64,6 +64,10 @@ export type Provider = {
   cacheEnabled: boolean;
   /** Freshness assumed when the upstream states none. Zero leaves the decision to it. */
   cacheTtlSeconds: number;
+  /** Whether callers receive JSON whatever this destination answers in. */
+  normalizeJson: boolean;
+  /** Elements that must always be arrays once converted, comma-separated. */
+  jsonArrayPaths?: string;
   /** Outbound ceiling for this destination, every caller combined. Zero is no ceiling. */
   rateLimitPerMinute: number;
   rateLimitBurst: number;
@@ -257,6 +261,8 @@ export type ProviderInput = {
   allowPrivateDestination?: boolean;
   cacheEnabled?: boolean;
   cacheTtlSeconds?: number;
+  normalizeJson?: boolean;
+  jsonArrayPaths?: string | null;
   rateLimitPerMinute?: number;
   rateLimitBurst?: number;
   authType: AuthType;

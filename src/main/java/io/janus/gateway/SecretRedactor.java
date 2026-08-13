@@ -68,11 +68,27 @@ final class SecretRedactor {
     }
 
     private static boolean isInspectable(HttpHeaders headers) {
-        MediaType contentType = headers.getContentType();
+        MediaType contentType;
+        try {
+            contentType = headers.getContentType();
+        } catch (InvalidMediaTypeException ex) {
+            // An unparseable type says nothing about whether the body is text, and guessing wrong in
+            // the permissive direction corrupts a binary response. Left alone.
+            return false;
+        }
         if (contentType == null) return false;
+        String subtype = contentType.getSubtype();
         boolean textual = "text".equals(contentType.getType())
-                || contentType.isCompatibleWith(MediaType.APPLICATION_JSON)
-                || contentType.getSubtype().endsWith("+json");
+                // json, +json, x-ndjson, jsonl — one test rather than a list that has to be kept
+                // level with the formats the gateway learns to read.
+                || subtype.contains("json")
+                // XML is as textual as JSON and echoes a credential just as readily: an upstream that
+                // quotes back the request it refused does it in whatever it speaks. This was missing
+                // for as long as nothing here read XML, which is no longer true.
+                || contentType.isCompatibleWith(MediaType.APPLICATION_XML)
+                || subtype.endsWith("+xml")
+                // A named format built out of text, carrying no "text" type to say so.
+                || contentType.isCompatibleWith(MediaType.APPLICATION_FORM_URLENCODED);
         if (!textual) return false;
         String encoding = headers.getFirst(HttpHeaders.CONTENT_ENCODING);
         return encoding == null || "identity".equalsIgnoreCase(encoding.trim());

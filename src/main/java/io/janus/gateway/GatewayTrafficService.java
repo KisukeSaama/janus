@@ -16,8 +16,11 @@ import org.springframework.web.util.UriUtils;
 import io.janus.credentials.Credential;
 import io.janus.credentials.RequestSigner;
 import io.janus.credentials.UpstreamTokenProvider;
+import io.janus.gateway.transform.ArrayPaths;
+import io.janus.gateway.transform.JsonNormalizer;
 import io.janus.openbao.OpenBaoClient;
 import io.janus.shared.CorrelationIdFilter;
+import io.janus.shared.ErrorCode;
 
 /**
  * Everything that happens after a call has been authorised and before its answer is written back:
@@ -63,6 +66,7 @@ public class GatewayTrafficService {
     private final ResponseCache cache;
     private final RateLimiter limiter;
     private final UpstreamCooldown cooldown;
+    private final JsonNormalizer normalizer;
     private final GatewayTrafficProperties properties;
     private final long responseTimeoutMillis;
 
@@ -77,6 +81,7 @@ public class GatewayTrafficService {
             ResponseCache cache,
             RateLimiter limiter,
             UpstreamCooldown cooldown,
+            JsonNormalizer normalizer,
             GatewayTrafficProperties properties,
             @Value("${janus.gateway.response-timeout-seconds:30}") long responseTimeoutSeconds) {
         this.web = gatewayWebClient;
@@ -86,6 +91,7 @@ public class GatewayTrafficService {
         this.cache = cache;
         this.limiter = limiter;
         this.cooldown = cooldown;
+        this.normalizer = normalizer;
         this.properties = properties;
         this.responseTimeoutMillis = Math.max(1_000, responseTimeoutSeconds * 1000);
     }
@@ -117,6 +123,7 @@ public class GatewayTrafficService {
                 exchange.grant().getRateLimitBurst());
         if (!client.allowed())
             throw new Throttled(
+                    ErrorCode.RATE_LIMIT_GRANT,
                     "Application rate limit for this provider exceeded",
                     client.retryAfterSeconds(),
                     rateLimitHeaders(client));
@@ -153,6 +160,7 @@ public class GatewayTrafficService {
                                 exchange.headers().getFirst(HttpHeaders.IF_NONE_MATCH), stored.etag());
                 cache.record(CacheStatus.HIT);
                 return complete(
+                        exchange,
                         new Delivery(
                                 unchanged ? HttpStatus.NOT_MODIFIED.value() : stored.status(),
                                 stored.headers(),
@@ -168,10 +176,10 @@ public class GatewayTrafficService {
 
         // Nothing fresh to answer a condition with, so the caller's exchange goes out as its own:
         // no stored validator mixed into it, and nothing kept from what comes back.
-        if (conditionalCaller) return complete(call(exchange, null, null), client);
+        if (conditionalCaller) return complete(exchange, call(exchange, null, null), client);
 
         try {
-            return complete(mayReuse ? coalesced(key, exchange, stored) : call(exchange, key, null), client);
+            return complete(exchange, mayReuse ? coalesced(key, exchange, stored) : call(exchange, key, null), client);
         } catch (Throttled throttled) {
             // A refusal owed to the provider still reports the caller's own standing, so one 429 is
             // enough to tell a client whether it is the one going too fast.
@@ -238,7 +246,10 @@ public class GatewayTrafficService {
         if (paused.isPresent())
             return stale(stored, "provider in cooldown")
                     .orElseThrow(() -> new Throttled(
-                            "Provider asked for a pause and Janus is honouring it", paused.get(), new HttpHeaders()));
+                            ErrorCode.PROVIDER_COOLDOWN,
+                            "Provider asked for a pause and Janus is honouring it",
+                            paused.get(),
+                            new HttpHeaders()));
 
         var ceiling = limiter.acquire(
                 "provider:" + provider.getId(),
@@ -248,7 +259,10 @@ public class GatewayTrafficService {
         if (!ceiling.allowed())
             return stale(stored, "provider allowance exhausted")
                     .orElseThrow(() -> new Throttled(
-                            "Provider rate limit reached", ceiling.retryAfterSeconds(), new HttpHeaders()));
+                            ErrorCode.RATE_LIMIT_PROVIDER,
+                            "Provider rate limit reached",
+                            ceiling.retryAfterSeconds(),
+                            new HttpHeaders()));
 
         // Authorisation is complete and the answer cannot come from anywhere else; only now does
         // credential material exist in this process — and for an open API, never: nothing was stored
@@ -506,8 +520,9 @@ public class GatewayTrafficService {
     }
 
     /** Stamps what Janus decided onto the response, so the caller can see it without asking. */
-    private GatewayOutcome complete(Delivery delivery, RateLimiter.Decision client) {
+    private GatewayOutcome complete(GatewayExchange exchange, Delivery delivery, RateLimiter.Decision client) {
         var headers = copy(delivery.headers());
+        var body = normalized(exchange, headers, delivery.body());
         headers.set(CACHE_HEADER, delivery.cacheStatus().name());
         if (delivery.ageSeconds() != null) headers.set(HttpHeaders.AGE, Long.toString(delivery.ageSeconds()));
         announceFreshness(headers, delivery.freshSeconds());
@@ -521,12 +536,49 @@ public class GatewayTrafficService {
         if (delivery.attempts() > 1)
             detail.append(", ").append(delivery.attempts()).append(" attempts");
         if (delivery.note() != null) detail.append(", ").append(delivery.note());
+        String transform = headers.getFirst(JsonNormalizer.TRANSFORM_HEADER);
+        if (transform != null) detail.append(", ").append(transform);
         return new GatewayOutcome(
-                HttpStatusCode.valueOf(delivery.status()),
+                HttpStatusCode.valueOf(delivery.status()), headers, body, delivery.cacheStatus(), detail.toString());
+    }
+
+    /**
+     * Restates the answer as JSON where the destination asks for it, whichever mechanism produced it.
+     *
+     * <p>Deliberately here, at the very end, and not in {@link #deliver}: what the store holds is the
+     * representation the upstream sent, addressed by the credential that fetched it. Converting
+     * before storing would mean a stored entry could not answer a caller that wanted the original,
+     * and Janus's own conditional revalidation would be sending the upstream a validator for a
+     * document it never issued. Storing the original costs one conversion per served response, and
+     * buys a store that stays truthful about what it holds.
+     */
+    private byte[] normalized(GatewayExchange exchange, HttpHeaders headers, byte[] body) {
+        if (!exchange.provider().isNormalizeJson() || !normalizer.isEnabled()) return body;
+
+        // Stated whether or not this particular response was converted. The answer now depends on
+        // the caller's Accept, and a cache in front of Janus that does not know it would hand one
+        // caller's XML to another caller's request for JSON.
+        if (!headers.getOrEmpty(HttpHeaders.VARY).contains(HttpHeaders.ACCEPT))
+            headers.add(HttpHeaders.VARY, HttpHeaders.ACCEPT);
+
+        var outcome = normalizer.normalize(
+                body,
                 headers,
-                delivery.body(),
-                delivery.cacheStatus(),
-                detail.toString());
+                exchange.headers(),
+                ArrayPaths.parse(exchange.provider().getJsonArrayPaths()));
+        if (outcome.note() != null) headers.set(JsonNormalizer.TRANSFORM_HEADER, outcome.note());
+        if (!outcome.converted()) return body;
+
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        // The upstream issued both for the document it sent, not for this one. Suffixing them so a
+        // caller could still revalidate would mean unpicking the suffix on the way back in, at every
+        // point that reads a condition — and getting that wrong means revalidating against the wrong
+        // representation. Dropping them costs the last hop its 304s and nothing else: the store keeps
+        // the original validators and goes on using them against the upstream, which is where a
+        // conditional request actually saves a body.
+        headers.remove(HttpHeaders.ETAG);
+        headers.remove(HttpHeaders.LAST_MODIFIED);
+        return outcome.body();
     }
 
     /**

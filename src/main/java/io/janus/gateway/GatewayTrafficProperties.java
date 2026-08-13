@@ -13,7 +13,8 @@ public record GatewayTrafficProperties(
         @DefaultValue Cache cache,
         @DefaultValue Throttle throttle,
         @DefaultValue Retry retry,
-        @DefaultValue Authorization authorization) {
+        @DefaultValue Authorization authorization,
+        @DefaultValue Transform transform) {
 
     /**
      * How long the registry reads behind an authorised call are held. Short by design: an
@@ -42,6 +43,21 @@ public record GatewayTrafficProperties(
             @DefaultValue("1048576") int maxEntryBytes,
             @DefaultValue("67108864") long maxTotalBytes,
             @DefaultValue("300") long staleIfErrorSeconds) {}
+
+    /**
+     * Restating a response as JSON, for destinations that answer in something else.
+     *
+     * <p>The size ceiling is separate from {@code max-response-bytes} and much lower, because the two
+     * bound different things. That one bounds what arrives; this one bounds what a conversion may be
+     * asked to build, and a conversion expands — an object per row, a key repeated per record, quotes
+     * around values XML left bare. A body that arrived within its own limit can leave several times
+     * larger, and it is that figure, multiplied by the calls in flight, which reaches the heap. Past
+     * the ceiling the original bytes are returned unchanged.
+     *
+     * @param enabled  master switch; when false no destination normalises, whatever its row says
+     * @param maxBytes largest body a conversion is attempted on
+     */
+    public record Transform(@DefaultValue("true") boolean enabled, @DefaultValue("2097152") int maxBytes) {}
 
     /**
      * @param maxWaitMillis      how long a request may wait for a provider allowance before being refused

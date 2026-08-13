@@ -29,6 +29,7 @@ import io.janus.audit.AuditService;
 import io.janus.credentials.CredentialAuthorizationService;
 import io.janus.gateway.GatewayCorsConfigurationSource;
 import io.janus.shared.CorrelationIdFilter;
+import io.janus.shared.ErrorCode;
 
 @Configuration
 public class SecurityConfig {
@@ -61,8 +62,12 @@ public class SecurityConfig {
     @Bean
     @Order(1)
     SecurityFilterChain gateway(
-            HttpSecurity http, ApiKeyAuthenticationFilter apiKey, GatewayCorsConfigurationSource gatewayCors)
+            HttpSecurity http,
+            ApiKeyAuthenticationFilter apiKey,
+            GatewayCorsConfigurationSource gatewayCors,
+            ObjectMapper mapper)
             throws Exception {
+        var problems = new ProblemAuthorizationHandler(mapper, ErrorCode.AUTHENTICATION_REQUIRED);
         return http.securityMatcher("/gateway/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(gatewayCors))
@@ -81,6 +86,11 @@ public class SecurityConfig {
                         .anyRequest()
                         .authenticated())
                 .addFilterBefore(apiKey, BasicAuthenticationFilter.class)
+                // The API-key filter answers almost everything before this point. What is left is the
+                // bare OPTIONS refused above, which would otherwise be the one gateway response that
+                // is not a problem document.
+                .exceptionHandling(exceptions ->
+                        exceptions.authenticationEntryPoint(problems).accessDeniedHandler(problems))
                 .headers(headers -> headers.frameOptions(frame -> frame.deny())
                         .referrerPolicy(
                                 referrer -> referrer.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER)))
@@ -202,8 +212,12 @@ public class SecurityConfig {
                 .addFilterAfter(new CsrfCookieFilter(), BasicAuthenticationFilter.class)
                 .httpBasic(basic -> basic.authenticationEntryPoint(entryPoint))
                 // The same refusal whether the credentials were wrong (Basic answers that itself) or
-                // never presented at all, which is what an ended console session looks like.
-                .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(entryPoint))
+                // never presented at all, which is what an ended console session looks like. Signed in
+                // without the role an endpoint asks for is a different answer, and one the console has
+                // to be able to read: hence a handler rather than the container's error page.
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint(entryPoint)
+                        .accessDeniedHandler(new ProblemAuthorizationHandler(mapper, ErrorCode.NOT_SIGNED_IN)))
                 .headers(headers -> headers.frameOptions(frame -> frame.deny())
                         .referrerPolicy(
                                 referrer -> referrer.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER))

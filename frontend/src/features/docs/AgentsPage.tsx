@@ -55,7 +55,11 @@ export function AgentsPage() {
       // Only what would be forwarded right now. An API behind a disabled record is one the file
       // would promise and the gateway would refuse.
       if (c.live && c.provider) {
-        service.apis.push({ name: c.grant.providerName, slug: c.provider.slug });
+        service.apis.push({
+          name: c.grant.providerName,
+          slug: c.provider.slug,
+          normalizeJson: c.provider.normalizeJson,
+        });
       }
       byService.set(service.id, service);
     }

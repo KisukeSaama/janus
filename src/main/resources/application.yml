@@ -152,6 +152,14 @@ janus:
       max-entry-bytes: ${JANUS_CACHE_MAX_ENTRY_BYTES:1048576}
       max-total-bytes: ${JANUS_CACHE_MAX_TOTAL_BYTES:67108864}
       stale-if-error-seconds: ${JANUS_CACHE_STALE_IF_ERROR_SECONDS:300}
+    # Restating a response as JSON, for destinations that answer in something else — XML for Plex, a
+    # Newznab indexer or a SOAP endpoint. Off per destination unless asked for; this only says whether
+    # the deployment offers it at all. The size ceiling is far below max-response-bytes on purpose:
+    # that one bounds what arrives, this one bounds what a conversion may be asked to build, and a
+    # conversion expands. Past it the upstream's own bytes are returned unchanged.
+    transform:
+      enabled: ${JANUS_TRANSFORM_ENABLED:true}
+      max-bytes: ${JANUS_MAX_TRANSFORM_BYTES:2097152}
     # The registry reads behind an authorised call — the destination and the grant — held briefly so
     # a proxied request does not pay for them every time. Administrative changes drop these entries
     # explicitly; the lifetime only bounds a change made on another instance.

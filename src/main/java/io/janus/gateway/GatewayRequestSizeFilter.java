@@ -1,16 +1,18 @@
 package io.janus.gateway;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 
 import jakarta.servlet.*;
 import jakarta.servlet.http.*;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import tools.jackson.databind.ObjectMapper;
+
+import io.janus.shared.ApiProblem;
+import io.janus.shared.ErrorCode;
 
 /**
  * Bounds the size of a proxied request body. Spring materialises the body as a byte array before the
@@ -29,9 +31,12 @@ public class GatewayRequestSizeFilter extends OncePerRequestFilter {
     }
 
     private final long maxRequestBytes;
+    private final ObjectMapper mapper;
 
-    public GatewayRequestSizeFilter(@Value("${janus.gateway.max-request-bytes:10485760}") long maxRequestBytes) {
+    public GatewayRequestSizeFilter(
+            @Value("${janus.gateway.max-request-bytes:10485760}") long maxRequestBytes, ObjectMapper mapper) {
         this.maxRequestBytes = maxRequestBytes;
+        this.mapper = mapper;
     }
 
     @Override
@@ -55,16 +60,21 @@ public class GatewayRequestSizeFilter extends OncePerRequestFilter {
         }
     }
 
+    /**
+     * The {@code reset()} discards whatever a handler had already written before the body ran out of
+     * room — and, with it, every header set so far, including the correlation identifier. {@link
+     * ApiProblem} puts that one back, which is why the reset happens before the document is written
+     * rather than after.
+     */
     private void refuse(HttpServletResponse response) throws IOException {
         if (response.isCommitted()) return;
         response.reset();
-        response.setStatus(HttpStatus.PAYLOAD_TOO_LARGE.value());
-        response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-        response.getOutputStream()
-                .write(
-                        ("""
-                {"title":"Payload Too Large","status":413,"detail":"Request body exceeds the configured limit"}""")
-                                .getBytes(StandardCharsets.UTF_8));
+        ApiProblem.write(
+                response,
+                mapper,
+                HttpStatus.PAYLOAD_TOO_LARGE,
+                ErrorCode.PAYLOAD_TOO_LARGE,
+                "Request body exceeds the configured limit");
     }
 
     private static final class LimitedRequest extends HttpServletRequestWrapper {

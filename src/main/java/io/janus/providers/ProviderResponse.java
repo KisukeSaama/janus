@@ -16,6 +16,10 @@ public record ProviderResponse(
         boolean allowPrivateDestination,
         boolean cacheEnabled,
         int cacheTtlSeconds,
+        /** Whether callers receive JSON whatever this destination answers in. */
+        boolean normalizeJson,
+        /** Elements that must always be arrays once converted, comma-separated. */
+        String jsonArrayPaths,
         int rateLimitPerMinute,
         int rateLimitBurst,
         AuthType authType,
@@ -51,6 +55,8 @@ public record ProviderResponse(
                 provider.isAllowPrivateDestination(),
                 provider.isCacheEnabled(),
                 provider.getCacheTtlSeconds(),
+                provider.isNormalizeJson(),
+                provider.getJsonArrayPaths(),
                 provider.getRateLimitPerMinute(),
                 provider.getRateLimitBurst(),
                 provider.getAuthType(),
