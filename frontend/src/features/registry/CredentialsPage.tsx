@@ -7,6 +7,7 @@ import {
   useDeleteCredential,
   useDeleteProvider,
   usePingProvider,
+  useProviderCapabilities,
   useProviderCatalog,
   useUpdateCredential,
   useUpdateProvider,
@@ -64,6 +65,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
   const { t, tEnum } = useI18n();
   const describe = useErrorMessage();
   const [, navigate] = useLocation();
+  const capabilities = useProviderCapabilities();
   const administrator = identity.role !== 'USER';
 
   const [query, setQuery] = useState('');
@@ -183,6 +185,9 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
       slug: String(form.get('slug') ?? ''),
       baseUrl: String(form.get('baseUrl') ?? ''),
       enabled: form.get('enabled') === 'on',
+      // Sent on every save. Omitting it read as no, so saving anything else on a local destination
+      // unset it and the address it already carried was refused.
+      allowPrivateDestination: form.get('allowPrivateDestination') === 'on',
       cacheEnabled: form.get('cacheEnabled') === 'on',
       cacheTtlSeconds: Number(form.get('cacheTtlSeconds') || 0),
       normalizeJson: form.get('normalizeJson') === 'on',
@@ -431,6 +436,19 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
             <Field label={t('providers.fieldName')} name="name" required defaultValue={panel.provider.name} />
             <Field label={t('providers.fieldSlug')} name="slug" required data defaultValue={panel.provider.slug} />
             <Field label={t('providers.fieldBaseUrl')} name="baseUrl" required data defaultValue={panel.provider.baseUrl} />
+            {/*
+              Shown when the deployment offers it, and also whenever this destination already carries
+              it — a deployment that withdraws the option must not leave a field the form silently
+              unsets.
+            */}
+            {(capabilities.data?.privateDestinations || panel.provider.allowPrivateDestination) && (
+              <CheckField
+                label={t('connect.lan')}
+                name="allowPrivateDestination"
+                defaultChecked={panel.provider.allowPrivateDestination}
+                hint={t('connect.lanHint')}
+              />
+            )}
             <SelectField
               label={t('credentials.fieldStrategy')}
               name="authType"
