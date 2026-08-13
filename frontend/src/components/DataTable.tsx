@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 import { useI18n } from '../i18n';
 import { useMediaQuery, WIDE } from '../hooks/useMediaQuery';
@@ -117,17 +117,13 @@ export function DataTable<T>({
         <li key={rowKey(row)} className="px-4 py-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">{primary.cell(row)}</div>
-            <div className="flex shrink-0 items-center gap-2">
-              {badges.map((c) => (
-                <Fragment key={c.key}>{c.cell(row)}</Fragment>
-              ))}
-            </div>
+            <div className="flex shrink-0 items-center gap-2">{badges.map((c) => c.cell(row))}</div>
           </div>
 
           {details.length > 0 && (
-            <dl className="mt-3 space-y-1.5 border-t border-line pt-3 text-xs">
+            <dl className="mt-3 grid grid-cols-[minmax(6rem,auto)_1fr] gap-x-4 gap-y-1.5 border-t border-line pt-3 text-xs">
               {details.map((c) => (
-                <div key={c.key} className="grid grid-cols-1 gap-x-4 gap-y-0.5 min-[24rem]:grid-cols-[minmax(6rem,auto)_1fr]">
+                <div key={c.key} className="contents">
                   <dt className="stamp self-center text-text-3">{c.label}</dt>
                   <dd className="min-w-0 break-words text-text-2">{c.cell(row)}</dd>
                 </div>

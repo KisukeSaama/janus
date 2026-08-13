@@ -42,6 +42,7 @@ services:
       JANUS_ADMIN_EMAIL: ${JANUS_ADMIN_EMAIL:-admin@localhost}
       JANUS_CORS_ORIGINS: http://localhost:5173
       JANUS_ALLOW_PRIVATE_DESTINATIONS: ${JANUS_ALLOW_PRIVATE_DESTINATIONS:-false}
+      JANUS_PRIVATE_DESTINATIONS_ENABLED: ${JANUS_PRIVATE_DESTINATIONS_ENABLED:-false}
     ports: ["8080:8080"]
     depends_on:
       postgres: {condition: service_healthy}

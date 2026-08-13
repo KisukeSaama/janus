@@ -39,6 +39,14 @@ public class Provider {
     @Column(nullable = false)
     private boolean enabled = true;
 
+    /**
+     * Whether this destination may resolve to an address on the local network. False everywhere
+     * unless an administrator says otherwise, and never enough to reach loopback or link-local —
+     * see {@link DestinationValidator}.
+     */
+    @Column(name = "allow_private_destination", nullable = false)
+    private boolean allowPrivateDestination;
+
     /** Whether Janus may reuse a response for this destination at all. */
     @Column(name = "cache_enabled", nullable = false)
     private boolean cacheEnabled = true;
@@ -115,10 +123,21 @@ public class Provider {
     protected Provider() {}
 
     public Provider(String name, String slug, String baseUrl, boolean enabled, TrafficPolicy traffic, Auth auth) {
+        this(name, slug, baseUrl, enabled, false, traffic, auth);
+    }
+
+    public Provider(
+            String name,
+            String slug,
+            String baseUrl,
+            boolean enabled,
+            boolean allowPrivateDestination,
+            TrafficPolicy traffic,
+            Auth auth) {
         this.id = UUID.randomUUID();
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
-        describe(name, slug, baseUrl, enabled);
+        describe(name, slug, baseUrl, enabled, allowPrivateDestination);
         applyTrafficPolicy(traffic);
         applyAuth(auth);
     }
@@ -180,10 +199,15 @@ public class Provider {
     }
 
     public void describe(String name, String slug, String baseUrl, boolean enabled) {
+        describe(name, slug, baseUrl, enabled, false);
+    }
+
+    public void describe(String name, String slug, String baseUrl, boolean enabled, boolean allowPrivateDestination) {
         this.name = name;
         this.slug = slug;
         this.baseUrl = baseUrl;
         this.enabled = enabled;
+        this.allowPrivateDestination = allowPrivateDestination;
     }
 
     public void applyTrafficPolicy(TrafficPolicy traffic) {
@@ -254,6 +278,10 @@ public class Provider {
 
     public boolean isEnabled() {
         return enabled;
+    }
+
+    public boolean isAllowPrivateDestination() {
+        return allowPrivateDestination;
     }
 
     public boolean isCacheEnabled() {

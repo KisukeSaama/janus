@@ -76,7 +76,7 @@ export function NotificationsMenu({ onNavigate }: { onNavigate?: () => void }) {
         <div
           role="dialog"
           aria-label={t('notifications.title')}
-          className="fixed inset-x-4 top-[calc(env(safe-area-inset-top)+4.5rem)] z-40 max-h-[calc(100svh-env(safe-area-inset-top)-5.5rem)] overflow-y-auto rounded-panel border border-line bg-surface shadow-overlay [animation:fade-in_140ms_var(--ease-out-quint)] sm:absolute sm:inset-x-auto sm:right-0 sm:top-[calc(100%+0.5rem)] sm:max-h-none sm:w-[min(24rem,calc(100vw-2rem))] sm:overflow-visible"
+          className="absolute right-0 top-[calc(100%+0.5rem)] z-40 w-[min(24rem,calc(100vw-2rem))] rounded-panel border border-line bg-surface shadow-overlay [animation:fade-in_140ms_var(--ease-out-quint)]"
         >
           <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
             <div>
@@ -103,7 +103,7 @@ export function NotificationsMenu({ onNavigate }: { onNavigate?: () => void }) {
               </div>
             </div>
           ) : (
-            <ul className="max-h-[min(26rem,calc(100svh-13rem))] divide-y divide-line overflow-y-auto">
+            <ul className="max-h-[26rem] divide-y divide-line overflow-y-auto">
               {items.map((item) => (
                 <li key={item.id} className="flex items-start gap-3 px-4 py-3">
                   <StageIcon notification={item} />

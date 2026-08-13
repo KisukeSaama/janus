@@ -15,6 +15,7 @@ import type {
   IssuedApplication,
   NotificationFeed,
   Provider,
+  ProviderCapabilities,
   ProviderPage,
   ProviderPing,
   ProviderInput,
@@ -39,6 +40,9 @@ export const keys = {
    */
   providers: ['providers'] as const,
   providerCatalog: (query: string, page: number, size: number) => ['providers', query, page, size] as const,
+  // Deliberately outside the `providers` key: an edit to a destination cannot change what the
+  // deployment allows, and invalidating the catalogue must not refetch this.
+  providerCapabilities: ['provider-capabilities'] as const,
   credentials: ['credentials'] as const,
   grants: ['grants'] as const,
   notifications: ['notifications'] as const,
@@ -97,6 +101,18 @@ export function useProviders() {
       return [first, ...rest].flatMap((page) => page.content);
     },
     staleTime: CATALOG_STALE_MS,
+  });
+}
+
+/**
+ * Answers from configuration and changes only when the deployment restarts, so it is fetched once
+ * and never refetched.
+ */
+export function useProviderCapabilities() {
+  return useQuery({
+    queryKey: keys.providerCapabilities,
+    queryFn: () => api<ProviderCapabilities>('/providers/capabilities'),
+    staleTime: Infinity,
   });
 }
 

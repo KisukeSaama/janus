@@ -129,7 +129,15 @@ janus:
       gateway-per-minute: ${JANUS_RATE_LIMIT_GATEWAY_PER_MINUTE:6000}
       gateway-burst: ${JANUS_RATE_LIMIT_GATEWAY_BURST:1200}
   gateway:
+    # Lifts the address check entirely, for development against a stack on the same machine. Nothing
+    # is refused while it is on — including loopback, which is where OpenBao and Janus itself answer.
     allow-private-destinations: ${JANUS_ALLOW_PRIVATE_DESTINATIONS:false}
+    # Whether a destination may be registered as living on the local network, for a self-hosted
+    # service that exists nowhere else — a media server, a home automation hub, a NAS. Off unless
+    # asked for, and the console hides the setting entirely when it is off. Unlike the flag above it
+    # is decided per destination, and it never admits loopback or link-local, so registering one LAN
+    # service leaves every other destination refusing what it refused before.
+    private-destinations-enabled: ${JANUS_PRIVATE_DESTINATIONS_ENABLED:false}
     max-response-bytes: ${JANUS_MAX_RESPONSE_BYTES:10485760}
     max-request-bytes: ${JANUS_MAX_REQUEST_BYTES:10485760}
     connect-timeout-millis: ${JANUS_CONNECT_TIMEOUT_MILLIS:5000}

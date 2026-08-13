@@ -12,6 +12,8 @@ public record ProviderResponse(
         String slug,
         String baseUrl,
         boolean enabled,
+        /** Whether this destination is registered as living on the local network. */
+        boolean allowPrivateDestination,
         boolean cacheEnabled,
         int cacheTtlSeconds,
         int rateLimitPerMinute,
@@ -46,6 +48,7 @@ public record ProviderResponse(
                 provider.getSlug(),
                 provider.getBaseUrl(),
                 provider.isEnabled(),
+                provider.isAllowPrivateDestination(),
                 provider.isCacheEnabled(),
                 provider.getCacheTtlSeconds(),
                 provider.getRateLimitPerMinute(),

@@ -24,25 +24,38 @@ import io.janus.gateway.GatewayHttpClientConfig;
 @Component
 public class UpstreamPing {
     private final WebClient web;
+    private final WebClient privateWeb;
     private final DestinationValidator destinations;
     private final Duration timeout;
 
     public UpstreamPing(
             WebClient gatewayWebClient,
+            WebClient gatewayPrivateWebClient,
             DestinationValidator destinations,
             @Value("${janus.gateway.ping-timeout-seconds:5}") long timeoutSeconds) {
         this.web = gatewayWebClient;
+        this.privateWeb = gatewayPrivateWebClient;
         this.destinations = destinations;
         this.timeout = Duration.ofSeconds(timeoutSeconds);
     }
 
     public ProviderPing reach(String baseUrl) {
+        return reach(baseUrl, false);
+    }
+
+    /**
+     * @param privateDestination whether this destination is registered as being on a local network,
+     *     which the probe must obey too — otherwise the console would report a LAN service as blocked
+     *     while the gateway reaches it perfectly well
+     */
+    public ProviderPing reach(String baseUrl, boolean privateDestination) {
         long started = System.nanoTime();
         try {
             // The shape only, as the gateway does on every request: where the name currently points
             // is checked at connection time, which is the check a probe cannot get out of date.
-            var target = destinations.validateShape(baseUrl);
-            var status = web.head()
+            var target = destinations.validateShape(baseUrl, privateDestination);
+            var status = (privateDestination ? privateWeb : web)
+                    .head()
                     .uri(target)
                     // Released rather than read: an answer's body is somebody's home page, and this
                     // asks a yes-or-no question.

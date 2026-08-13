@@ -36,7 +36,7 @@ class UpstreamPingTest {
 
     private UpstreamPing pingWith(Mono<ClientResponse> answer, long timeoutSeconds) {
         var web = WebClient.builder().exchangeFunction(request -> answer).build();
-        return new UpstreamPing(web, new DestinationValidator(false), timeoutSeconds);
+        return new UpstreamPing(web, web, new DestinationValidator(false, false), timeoutSeconds);
     }
 
     /** The question is whether anybody is listening, and a 401 is somebody listening. */

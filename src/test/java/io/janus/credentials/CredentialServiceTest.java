@@ -50,7 +50,7 @@ class CredentialServiceTest {
                 openBao,
                 secretDeletions,
                 traffic,
-                new DestinationValidator(false),
+                new DestinationValidator(false, false),
                 scope,
                 audit);
         when(scope.ownerFilter()).thenReturn(owner.getId());

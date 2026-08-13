@@ -21,25 +21,11 @@ export function Mark({ size = 16, accent = false }: { size?: number; accent?: bo
  * Set tight rather than spaced out. Wide letterspacing on a name is a lobby sign; this is a tool,
  * and it says its name once at the top of the window.
  */
-export function Wordmark({
-  subtitle,
-  accent = true,
-  compactOnSmall = false,
-}: {
-  subtitle?: string;
-  accent?: boolean;
-  compactOnSmall?: boolean;
-}) {
+export function Wordmark({ subtitle, accent = true }: { subtitle?: string; accent?: boolean }) {
   return (
     <span className="flex items-center gap-2.5">
       <Mark accent={accent} />
-      <span
-        className={`text-[0.9375rem] font-bold uppercase tracking-[0.055em] ${
-          compactOnSmall ? 'hidden min-[24rem]:inline' : ''
-        }`}
-      >
-        Janus
-      </span>
+      <span className="text-[0.9375rem] font-bold uppercase tracking-[0.055em]">Janus</span>
       {subtitle && (
         <span className="stamp hidden border-l border-current pl-2.5 text-text-3 sm:inline">{subtitle}</span>
       )}
@@ -56,15 +42,7 @@ export function Wordmark({
  * unsaved entry answers the click with a question first. It carries a label of its own, since
  * "Janus" names the product and not the place the click leads.
  */
-export function HomeLink({
-  subtitle,
-  onNavigate,
-  compactOnSmall = false,
-}: {
-  subtitle?: string;
-  onNavigate: () => void;
-  compactOnSmall?: boolean;
-}) {
+export function HomeLink({ subtitle, onNavigate }: { subtitle?: string; onNavigate: () => void }) {
   const { t } = useI18n();
   return (
     <button
@@ -73,7 +51,7 @@ export function HomeLink({
       aria-label={t('nav.home')}
       onClick={onNavigate}
     >
-      <Wordmark subtitle={subtitle} compactOnSmall={compactOnSmall} />
+      <Wordmark subtitle={subtitle} />
     </button>
   );
 }

@@ -67,7 +67,7 @@ class GatewayTrafficServiceTest {
                     return next == null ? Mono.just(cacheable("{}")) : next.get();
                 })
                 .build();
-        service = new GatewayTrafficService(web, bao, tokens, cache, limiter, cooldown, properties, 30);
+        service = new GatewayTrafficService(web, web, bao, tokens, cache, limiter, cooldown, properties, 30);
         when(bao.read(any())).thenReturn(SECRET);
     }
 
