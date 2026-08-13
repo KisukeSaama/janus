@@ -270,7 +270,7 @@ class ProviderAdminControllerTest {
     @Test
     void reportsWhatTheDestinationAnswered() throws Exception {
         var provider = existing();
-        when(ping.reach("https://api.spotify.com")).thenReturn(ProviderPing.answered(401, 42));
+        when(ping.reach("https://api.spotify.com", false)).thenReturn(ProviderPing.answered(401, 42));
 
         mvc.perform(post("/api/admin/providers/" + provider.getId() + "/ping"))
                 .andExpect(status().isOk())
@@ -283,7 +283,7 @@ class ProviderAdminControllerTest {
     @Test
     void namesWhyADestinationCouldNotBeReached() throws Exception {
         var provider = existing();
-        when(ping.reach("https://api.spotify.com"))
+        when(ping.reach("https://api.spotify.com", false))
                 .thenReturn(ProviderPing.failed(ProviderPing.Reason.TIMED_OUT, 5000));
 
         mvc.perform(post("/api/admin/providers/" + provider.getId() + "/ping"))
@@ -300,7 +300,7 @@ class ProviderAdminControllerTest {
         when(repository.findById(id)).thenReturn(Optional.empty());
 
         mvc.perform(post("/api/admin/providers/" + id + "/ping")).andExpect(status().isNotFound());
-        verify(ping, never()).reach(any());
+        verifyNoInteractions(ping);
     }
 
     // --- the shared catalogue -------------------------------------------------
