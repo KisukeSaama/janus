@@ -45,12 +45,15 @@ public record ProviderRequest(
         @Size(max = 100) String signatureParameter,
         @Size(max = 100) String timestampHeader,
         @Size(max = 100) String timestampParameter,
-        // Refused outright unless the deployment offers it; see DestinationValidator. Last in the
-        // record so every caller written before local networks were addressable still compiles.
-        boolean allowPrivateDestination) {
+        // Refused outright unless the deployment offers it; see DestinationValidator. Boxed like the
+        // traffic fields and for the same reason: a caller written before local networks were
+        // addressable states nothing here, and an unstated answer is no rather than a refused
+        // request. Last in the record so those callers still compile.
+        Boolean allowPrivateDestination) {
 
     public ProviderRequest {
         name = name == null ? null : name.trim();
+        allowPrivateDestination = allowPrivateDestination != null && allowPrivateDestination;
     }
 
     /** Compatibility overload for callers written before consent and signing were offered. */
