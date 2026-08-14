@@ -484,7 +484,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
             />
             {connectable && (
               <>
-                <Field label={t('credentials.authorizationUrl')} name="connectionAuthorizationUrl" required data defaultValue={panel.provider.connectionAuthorizationUrl} hint={t('credentials.authorizationUrlHint')} />
+                <Field label={t('credentials.fieldAuthorizationUrl')} name="connectionAuthorizationUrl" required data defaultValue={panel.provider.connectionAuthorizationUrl} hint={t('credentials.authorizationUrlHint')} />
                 <Field label={t('credentials.fieldTokenUrl')} name="connectionTokenUrl" required data defaultValue={panel.provider.connectionTokenUrl} />
                 <Field label={t('credentials.fieldTokenScopes')} name="connectionScopes" data defaultValue={panel.provider.connectionScopes} hint={t('credentials.tokenScopesHintUser')} />
                 <SelectField label={t('credentials.fieldTokenClientAuth')} name="connectionClientAuth" defaultValue={panel.provider.connectionClientAuth ?? 'BASIC'} options={[{ value: 'BASIC', label: t('credentials.tokenClientAuthBasic') }, { value: 'POST', label: t('credentials.tokenClientAuthPost') }]} />
