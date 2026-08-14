@@ -4,10 +4,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.*;
 
-import io.janus.credentials.Identity;
-
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
+
+import io.janus.credentials.Identity;
 
 class ResponseCacheTest {
     private static final UUID PROVIDER = UUID.randomUUID();

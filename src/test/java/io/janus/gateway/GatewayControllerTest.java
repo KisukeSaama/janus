@@ -437,7 +437,8 @@ class GatewayControllerTest {
         void admitsWhatIsUnderThePrefix() throws Exception {
             grant.applyScope(io.janus.grants.GrantScope.of("/v1/tracks", null));
 
-            mvc.perform(get("/gateway/spotify/v1/tracks/3cEYpjA9oz9GiPac4AsH4n")).andExpect(status().isOk());
+            mvc.perform(get("/gateway/spotify/v1/tracks/3cEYpjA9oz9GiPac4AsH4n"))
+                    .andExpect(status().isOk());
         }
 
         @Test

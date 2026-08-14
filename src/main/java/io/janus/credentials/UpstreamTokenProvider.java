@@ -180,7 +180,9 @@ public class UpstreamTokenProvider {
 
         if (response == null || !response.getStatusCode().is2xxSuccessful())
             return refuse(
-                    credential, identity, response == null ? 0 : response.getStatusCode().value());
+                    credential,
+                    identity,
+                    response == null ? 0 : response.getStatusCode().value());
 
         return read(credential, identity, response.getBody());
     }

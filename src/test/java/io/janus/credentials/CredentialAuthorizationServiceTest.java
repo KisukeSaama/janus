@@ -104,7 +104,16 @@ class CredentialAuthorizationServiceTest {
                 })
                 .build();
         authorizations = new CredentialAuthorizationService(
-                credentials, states, bao, tokens, web, new ObjectMapper(), scope, audit, traffic, "https://janus.example.com/");
+                credentials,
+                states,
+                bao,
+                tokens,
+                web,
+                new ObjectMapper(),
+                scope,
+                audit,
+                traffic,
+                "https://janus.example.com/");
     }
 
     private static ClientResponse json(String body) {

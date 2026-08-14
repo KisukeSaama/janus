@@ -165,7 +165,8 @@ class UpstreamTokenProviderTest {
                 .body("{\"error\":\"invalid_client\",\"description\":\"client-secret is wrong\"}")
                 .build());
 
-        assertThatThrownBy(() -> tokens.tokenFor(credential(TokenClientAuth.BASIC, null), Identity.APP, "client-id:client-secret"))
+        assertThatThrownBy(() -> tokens.tokenFor(
+                        credential(TokenClientAuth.BASIC, null), Identity.APP, "client-id:client-secret"))
                 .isInstanceOf(TokenExchangeException.class)
                 .hasMessageContaining("status 401")
                 .hasMessageNotContaining("client-secret");
@@ -198,7 +199,8 @@ class UpstreamTokenProviderTest {
     void treatsAnAnswerWithoutATokenAsARefusal() {
         willAnswer(json("{\"token_type\":\"Bearer\"}"));
 
-        assertThatThrownBy(() -> tokens.tokenFor(credential(TokenClientAuth.BASIC, null), Identity.APP, "client-id:client-secret"))
+        assertThatThrownBy(() -> tokens.tokenFor(
+                        credential(TokenClientAuth.BASIC, null), Identity.APP, "client-id:client-secret"))
                 .isInstanceOf(TokenExchangeException.class);
     }
 
@@ -209,7 +211,8 @@ class UpstreamTokenProviderTest {
                 .body("<html>login page</html>")
                 .build());
 
-        assertThatThrownBy(() -> tokens.tokenFor(credential(TokenClientAuth.BASIC, null), Identity.APP, "client-id:client-secret"))
+        assertThatThrownBy(() -> tokens.tokenFor(
+                        credential(TokenClientAuth.BASIC, null), Identity.APP, "client-id:client-secret"))
                 .isInstanceOf(TokenExchangeException.class);
     }
 
@@ -217,7 +220,8 @@ class UpstreamTokenProviderTest {
     void reportsAnUnreachableEndpointWithoutTheTransportDetail() {
         answers.add(() -> Mono.error(new IllegalStateException("Connection refused to 10.0.0.5:8443")));
 
-        assertThatThrownBy(() -> tokens.tokenFor(credential(TokenClientAuth.BASIC, null), Identity.APP, "client-id:client-secret"))
+        assertThatThrownBy(() -> tokens.tokenFor(
+                        credential(TokenClientAuth.BASIC, null), Identity.APP, "client-id:client-secret"))
                 .isInstanceOf(TokenExchangeException.class)
                 .hasMessage("The token endpoint could not be reached");
     }

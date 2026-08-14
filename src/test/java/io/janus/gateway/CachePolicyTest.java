@@ -4,10 +4,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.UUID;
 
-import io.janus.credentials.Identity;
-
 import org.junit.jupiter.api.Test;
 import org.springframework.http.*;
+
+import io.janus.credentials.Identity;
 
 class CachePolicyTest {
     private static final UUID PROVIDER = UUID.randomUUID();
@@ -162,7 +162,8 @@ class CachePolicyTest {
     @Test
     void theCredentialIsPartOfTheAddress() {
         String one = CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", route("/v1/orders"), new HttpHeaders());
-        String other = CachePolicy.key(PROVIDER, UUID.randomUUID(), Identity.APP, "GET", route("/v1/orders"), new HttpHeaders());
+        String other = CachePolicy.key(
+                PROVIDER, UUID.randomUUID(), Identity.APP, "GET", route("/v1/orders"), new HttpHeaders());
         assertNotEquals(one, other);
     }
 
@@ -190,9 +191,12 @@ class CachePolicyTest {
     @Test
     void aWriteCoversTheResourceAndItsMembersButNotItsNeighbours() {
         String prefix = CachePolicy.resourcePrefix(PROVIDER, CREDENTIAL, Identity.APP);
-        String collection = CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", route("/v1/orders"), new HttpHeaders());
-        String member = CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", route("/v1/orders/42"), new HttpHeaders());
-        String neighbour = CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", route("/v1/orders-archive"), new HttpHeaders());
+        String collection =
+                CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", route("/v1/orders"), new HttpHeaders());
+        String member =
+                CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", route("/v1/orders/42"), new HttpHeaders());
+        String neighbour = CachePolicy.key(
+                PROVIDER, CREDENTIAL, Identity.APP, "GET", route("/v1/orders-archive"), new HttpHeaders());
 
         assertTrue(CachePolicy.covers(collection, prefix, "/v1/orders"));
         assertTrue(CachePolicy.covers(member, prefix, "/v1/orders"));
@@ -203,7 +207,8 @@ class CachePolicyTest {
     @Test
     void anotherCredentialIsNeverCoveredByAWrite() {
         String otherPrefix = CachePolicy.resourcePrefix(PROVIDER, UUID.randomUUID(), Identity.APP);
-        String mine = CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", route("/v1/orders"), new HttpHeaders());
+        String mine =
+                CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", route("/v1/orders"), new HttpHeaders());
         assertFalse(CachePolicy.covers(mine, otherPrefix, "/v1/orders"));
     }
 

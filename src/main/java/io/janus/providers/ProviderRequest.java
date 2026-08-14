@@ -161,7 +161,8 @@ public record ProviderRequest(
     }
 
     public Provider.Auth auth() {
-        return new Provider.Auth(authType, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, signature());
+        return new Provider.Auth(
+                authType, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, signature());
     }
 
     /** What the API offers an account holder, or a connection offering nothing when it offers none. */

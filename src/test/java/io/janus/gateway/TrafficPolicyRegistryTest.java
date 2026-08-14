@@ -5,12 +5,11 @@ import static org.mockito.Mockito.*;
 
 import java.util.*;
 
-import io.janus.credentials.Identity;
-
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.http.HttpHeaders;
 
+import io.janus.credentials.Identity;
 import io.janus.credentials.UpstreamTokenCache;
 import io.janus.testing.Fixtures;
 

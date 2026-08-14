@@ -95,7 +95,8 @@ class IdentityMemoryTest {
         memory.remember(credential, "GET", "/me/playlists", Identity.ACCOUNT);
         for (int i = 0; i < 30_000; i++) {
             memory.remember(credential, "GET", "/section-" + Integer.toHexString(i) + "/items", Identity.APP);
-            if (i % 1_000 == 0) assertThat(memory.recall(credential, "GET", "/me/playlists")).contains(Identity.ACCOUNT);
+            if (i % 1_000 == 0)
+                assertThat(memory.recall(credential, "GET", "/me/playlists")).contains(Identity.ACCOUNT);
         }
 
         assertThat(memory.recall(credential, "GET", "/me/playlists")).contains(Identity.ACCOUNT);

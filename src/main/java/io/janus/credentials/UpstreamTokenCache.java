@@ -73,8 +73,7 @@ public class UpstreamTokenCache {
      */
     public void store(UUID credentialId, Identity identity, String token, Long expiresInSeconds) {
         long usable = usableSeconds(expiresInSeconds);
-        entries.put(
-                new Key(credentialId, identity), new Entry(token, 0, System.nanoTime() + usable * 1_000_000_000L));
+        entries.put(new Key(credentialId, identity), new Entry(token, 0, System.nanoTime() + usable * 1_000_000_000L));
     }
 
     /**

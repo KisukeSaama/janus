@@ -75,9 +75,8 @@ class GatewayTrafficServiceTest {
                     return next == null ? Mono.just(cacheable("{}")) : next.get();
                 })
                 .build();
-        service =
-                new GatewayTrafficService(
-                        web, web, bao, tokens, cache, limiter, cooldown, normalizer, identities, properties, 30);
+        service = new GatewayTrafficService(
+                web, web, bao, tokens, cache, limiter, cooldown, normalizer, identities, properties, 30);
         when(bao.read(any())).thenReturn(SECRET);
     }
 
@@ -819,7 +818,8 @@ class GatewayTrafficServiceTest {
 
             assertThat(outcome.headers().getFirst(GatewayTrafficService.IDENTITY_HEADER))
                     .isEqualTo("app");
-            assertThat(identities.recall(credential.getId(), "GET", "/v1/tracks")).isEmpty();
+            assertThat(identities.recall(credential.getId(), "GET", "/v1/tracks"))
+                    .isEmpty();
             assertThat(sent).hasSize(2);
         }
 
@@ -834,8 +834,7 @@ class GatewayTrafficServiceTest {
 
             service.forward(exchange(HttpMethod.GET, "/v1/me/playlists", credential, noStore()));
             sent.clear();
-            var second =
-                    service.forward(exchange(HttpMethod.GET, "/v1/me/playlists", credential, noStore()));
+            var second = service.forward(exchange(HttpMethod.GET, "/v1/me/playlists", credential, noStore()));
 
             assertThat(second.headers().getFirst(GatewayTrafficService.IDENTITY_HEADER))
                     .isEqualTo("account");
@@ -894,8 +893,7 @@ class GatewayTrafficServiceTest {
             var credential = connected();
             willAnswer(status(HttpStatus.FORBIDDEN));
 
-            var outcome =
-                    service.forward(exchange(HttpMethod.POST, "/v1/me/playlists", credential, new HttpHeaders()));
+            var outcome = service.forward(exchange(HttpMethod.POST, "/v1/me/playlists", credential, new HttpHeaders()));
 
             assertThat(outcome.status().value()).isEqualTo(403);
             assertThat(sent).hasSize(1);
@@ -910,8 +908,7 @@ class GatewayTrafficServiceTest {
             var credential = connected();
             willAnswer(status(HttpStatus.UNAUTHORIZED), status(HttpStatus.UNAUTHORIZED), cacheable("{\"id\":1}"));
 
-            var outcome =
-                    service.forward(exchange(HttpMethod.POST, "/v1/me/playlists", credential, new HttpHeaders()));
+            var outcome = service.forward(exchange(HttpMethod.POST, "/v1/me/playlists", credential, new HttpHeaders()));
 
             assertThat(outcome.status().value()).isEqualTo(200);
             assertThat(outcome.headers().getFirst(GatewayTrafficService.IDENTITY_HEADER))
@@ -925,8 +922,8 @@ class GatewayTrafficServiceTest {
             var credential = connected();
             willAnswer(status(HttpStatus.FORBIDDEN), status(HttpStatus.FORBIDDEN), status(HttpStatus.NO_CONTENT));
 
-            var outcome = service.forward(
-                    exchange(HttpMethod.DELETE, "/v1/me/playlists/3cEYpjA9oz9GiPac4AsH4n", credential, new HttpHeaders()));
+            var outcome = service.forward(exchange(
+                    HttpMethod.DELETE, "/v1/me/playlists/3cEYpjA9oz9GiPac4AsH4n", credential, new HttpHeaders()));
 
             assertThat(outcome.status().value()).isEqualTo(204);
             assertThat(sent).hasSize(3);
@@ -963,8 +960,8 @@ class GatewayTrafficServiceTest {
             // Same path, asked for as the application. Were the store blind to identity, this would be
             // answered from the entry above without a single byte leaving the process.
             var grant = Fixtures.grant(application, provider, credential);
-            var route = GatewayPath.parse(
-                    "/gateway/" + provider.getSlug() + "/v1/me/playlists", provider.getSlug(), null);
+            var route =
+                    GatewayPath.parse("/gateway/" + provider.getSlug() + "/v1/me/playlists", provider.getSlug(), null);
             var asApp = new GatewayExchange(
                     provider,
                     grant,

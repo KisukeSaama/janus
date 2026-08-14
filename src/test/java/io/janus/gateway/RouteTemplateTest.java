@@ -23,8 +23,7 @@ class RouteTemplateTest {
         // Spotify: base62.
         assertThat(RouteTemplate.of("/playlists/3cEYpjA9oz9GiPac4AsH4n")).isEqualTo("/playlists/*");
         // Discord: snowflakes.
-        assertThat(RouteTemplate.of("/channels/1071234567890123456/messages"))
-                .isEqualTo("/channels/*/messages");
+        assertThat(RouteTemplate.of("/channels/1071234567890123456/messages")).isEqualTo("/channels/*/messages");
         // Plain numeric, and UUIDs.
         assertThat(RouteTemplate.of("/orders/42")).isEqualTo("/orders/*");
         assertThat(RouteTemplate.of("/users/f81d4fae-7dec-11d0-a765-00a0c91e6bf6"))

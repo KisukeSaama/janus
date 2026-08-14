@@ -73,7 +73,8 @@ class GrantScopeTest {
     @Test
     void aPrefixThatCouldBeReadTwoWaysIsRefusedWhereItIsWritten() {
         assertThatThrownBy(() -> GrantScope.of("/library/../admin", null)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> GrantScope.of("/library//sections", null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> GrantScope.of("/library//sections", null))
+                .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> GrantScope.of("/library?token=x", null)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> GrantScope.of("/library#top", null)).isInstanceOf(IllegalArgumentException.class);
     }

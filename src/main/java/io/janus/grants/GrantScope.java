@@ -76,8 +76,7 @@ public record GrantScope(String pathPrefix, Set<String> methods) {
         if (pathPrefix == null) return true;
         if (decodedPath == null) return false;
         String path = decodedPath.startsWith("/") ? decodedPath : "/" + decodedPath;
-        return path.equals(pathPrefix)
-                || path.startsWith(pathPrefix.endsWith("/") ? pathPrefix : pathPrefix + "/");
+        return path.equals(pathPrefix) || path.startsWith(pathPrefix.endsWith("/") ? pathPrefix : pathPrefix + "/");
     }
 
     public boolean admitsMethod(String method) {

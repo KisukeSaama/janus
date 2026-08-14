@@ -120,14 +120,12 @@ public class GatewayTrafficService {
             Identity identity) {
 
         Delivery as(CacheStatus status) {
-            return new Delivery(
-                    this.status, headers, body, attempts, status, ageSeconds, freshSeconds, note, identity);
+            return new Delivery(this.status, headers, body, attempts, status, ageSeconds, freshSeconds, note, identity);
         }
 
         /** The same answer, with something the journal should say about how it was reached. */
         Delivery noting(String note) {
-            return new Delivery(
-                    status, headers, body, attempts, cacheStatus, ageSeconds, freshSeconds, note, identity);
+            return new Delivery(status, headers, body, attempts, cacheStatus, ageSeconds, freshSeconds, note, identity);
         }
     }
 
@@ -295,7 +293,8 @@ public class GatewayTrafficService {
         // Said in the journal rather than passed over quietly: this is the one refusal Janus could
         // have repaired and deliberately did not, and the caller's fix, pinning X-Janus-Identity, is
         // not one it can arrive at from the upstream's own 403.
-        if (!replayable) return delivery.noting("identity not replayed, " + exchange.method() + " may have taken effect");
+        if (!replayable)
+            return delivery.noting("identity not replayed, " + exchange.method() + " may have taken effect");
 
         // The store is addressed by identity, so the replay gets its own key — and no stored entry,
         // which belonged to the identity that was just refused.
@@ -303,10 +302,7 @@ public class GatewayTrafficService {
         if (refused(replayed.status())) return delivery;
 
         identities.remember(
-                credential.getId(),
-                exchange.method().name(),
-                exchange.route().decodedPath(),
-                other);
+                credential.getId(), exchange.method().name(), exchange.route().decodedPath(), other);
         log.info(
                 "{} {} answers to the {} identity; remembered [correlationId={}]",
                 exchange.method(),
@@ -414,7 +410,9 @@ public class GatewayTrafficService {
         }
         if (TRANSIENT.contains(upstream.getStatusCode().value())) {
             var rescued = stale(
-                    stored, identity, "upstream returned " + upstream.getStatusCode().value());
+                    stored,
+                    identity,
+                    "upstream returned " + upstream.getStatusCode().value());
             if (rescued.isPresent()) return rescued.get();
         }
         // Both values are scrubbed: what was sent, and what it was obtained with. An upstream that
