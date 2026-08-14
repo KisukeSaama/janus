@@ -74,6 +74,9 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
   const [panel, setPanel] = useState<Panel>(null);
   const [connecting, setConnecting] = useState(false);
   const [strategy, setStrategy] = useState<AuthType>('BEARER');
+  // The array declaration only means anything while normalisation is on, so it follows the switch
+  // rather than sitting there inert — and a saved form would have cleared it anyway.
+  const [normalizing, setNormalizing] = useState(false);
   const [formError, setFormError] = useState('');
   const [error, setError] = useState('');
 
@@ -114,6 +117,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
 
   function openApi(provider: Provider) {
     setStrategy(provider.authType);
+    setNormalizing(provider.normalizeJson ?? false);
     setPanel({ kind: 'api', provider });
   }
 
@@ -467,8 +471,10 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
             )}
             <CheckField label={t('providers.cacheLabel')} name="cacheEnabled" defaultChecked={panel.provider.cacheEnabled ?? true} />
             <Field label={t('providers.cacheTtlLabel')} name="cacheTtlSeconds" type="number" min={0} defaultValue={panel.provider.cacheTtlSeconds ?? 0} />
-            <CheckField label={t('providers.normalizeLabel')} name="normalizeJson" defaultChecked={panel.provider.normalizeJson ?? false} hint={t('providers.normalizeHint')} />
-            <Field label={t('providers.arrayPathsLabel')} name="jsonArrayPaths" data maxLength={1000} placeholder="MediaContainer.Directory, Location" defaultValue={panel.provider.jsonArrayPaths ?? ''} hint={t('providers.arrayPathsHint')} />
+            <CheckField label={t('providers.normalizeLabel')} name="normalizeJson" defaultChecked={panel.provider.normalizeJson ?? false} onChange={(e) => setNormalizing(e.currentTarget.checked)} hint={t('providers.normalizeHint')} />
+            {normalizing && (
+              <Field label={t('providers.arrayPathsLabel')} name="jsonArrayPaths" data autoComplete="off" maxLength={1000} placeholder="MediaContainer.Directory, Location" defaultValue={panel.provider.jsonArrayPaths ?? ''} hint={t('providers.arrayPathsHint')} />
+            )}
             <Field label={t('providers.rateLimitLabel')} name="rateLimitPerMinute" type="number" min={0} defaultValue={panel.provider.rateLimitPerMinute ?? 0} />
             <Field label={t('providers.burstLabel')} name="rateLimitBurst" type="number" min={0} defaultValue={panel.provider.rateLimitBurst ?? 0} />
             <CheckField label={t('providers.enabledLabel')} name="enabled" defaultChecked={panel.provider.enabled ?? true} />
