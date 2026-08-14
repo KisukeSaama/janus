@@ -1,4 +1,5 @@
 import { useId, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react';
+import { Search } from 'lucide-react';
 
 import { useI18n } from '../i18n';
 
@@ -59,6 +60,39 @@ export function Field({
       </label>
       <input id={id} className={`field ${data ? 'data' : ''}`} {...rest} />
       {hint && <p className="mt-1.5 text-xs text-text-2">{hint}</p>}
+    </div>
+  );
+}
+
+/**
+ * The one control above a list.
+ *
+ * <p>Its own element rather than a `Field`: there is no label above it — the placeholder says what
+ * it narrows and the magnifier says what it is — and it sits at the same height above every table so
+ * the rows below start on the same pixel from one page to the next.
+ */
+export function SearchField({
+  value,
+  onChange,
+  label,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+  placeholder: string;
+}) {
+  return (
+    <div className="relative mb-4 max-w-xl">
+      <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-3" />
+      <input
+        className="field w-full pl-9"
+        type="search"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        aria-label={label}
+      />
     </div>
   );
 }

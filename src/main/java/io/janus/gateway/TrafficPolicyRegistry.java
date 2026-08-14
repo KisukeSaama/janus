@@ -22,18 +22,21 @@ public class TrafficPolicyRegistry {
     private final RateLimiter limiter;
     private final UpstreamCooldown cooldown;
     private final UpstreamTokenCache tokens;
+    private final IdentityMemory identities;
 
     public TrafficPolicyRegistry(
             ResponseCache cache,
             AuthorizationCache authorizations,
             RateLimiter limiter,
             UpstreamCooldown cooldown,
-            UpstreamTokenCache tokens) {
+            UpstreamTokenCache tokens,
+            IdentityMemory identities) {
         this.cache = cache;
         this.authorizations = authorizations;
         this.limiter = limiter;
         this.cooldown = cooldown;
         this.tokens = tokens;
+        this.identities = identities;
     }
 
     /** @return how many stored responses were dropped */
@@ -49,14 +52,19 @@ public class TrafficPolicyRegistry {
     /**
      * Forgets everything held on behalf of one secret.
      *
-     * <p>Both stores, and the second one matters: a rotated client secret leaves behind a token that
-     * the provider may well keep honouring for an hour. Dropping the responses without dropping the
-     * token would take back the credential everywhere except where it is actually being used.
+     * <p>Every store, and the token one matters most: a rotated client secret leaves behind a token
+     * that the provider may well keep honouring for an hour. Dropping the responses without dropping
+     * the token would take back the credential everywhere except where it is actually being used.
+     *
+     * <p>What was learned about which identity each endpoint answers to goes as well. It was learned
+     * from what the upstream said to a particular pair of credentials, and this is the announcement
+     * that the pair is no longer what it was.
      *
      * @return how many stored responses were dropped
      */
     public int forgetCredential(UUID credentialId) {
         tokens.invalidate(credentialId);
+        identities.forget(credentialId);
         authorizations.forgetCredential(credentialId);
         return cache.invalidateCredential(credentialId);
     }

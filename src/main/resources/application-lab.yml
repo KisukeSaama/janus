@@ -1,0 +1,40 @@
+# The settings a self-hosted deployment changes anyway, in one profile, so that standing one up is a
+# decision about two secrets rather than a walk through forty variables.
+#
+# It relaxes nothing. Every address rule, every throttle and every ceiling is the one the default
+# profile sets; what is here is the handful of answers that are different when Janus runs on one host,
+# for one household, beside the services it proxies. Anything below can still be overridden by the
+# environment variable it names, because a profile is a starting point and not a verdict.
+#
+#   SPRING_PROFILES_ACTIVE=lab
+janus:
+  gateway:
+    # The reason this profile exists. Half of what is worth proxying at home answers on the local
+    # network and nowhere else: a media server, a home automation hub, a NAS. This lets such a
+    # destination be registered as being on one, decided per destination, and it never admits
+    # loopback or link-local whatever a row says. It is not allow-private-destinations, which lifts
+    # the whole check for everything and is for development.
+    private-destinations-enabled: ${JANUS_PRIVATE_DESTINATIONS_ENABLED:true}
+    cache:
+      # A household's traffic is a handful of services asking the same few questions on a timer, so
+      # the store earns its keep at a size a small host does not notice.
+      max-total-bytes: ${JANUS_CACHE_MAX_TOTAL_BYTES:134217728}
+      max-entries: ${JANUS_CACHE_MAX_ENTRIES:2000}
+  audit.retention:
+    # Same window the console offers without asking for exact dates. A year of rejected attempts is a
+    # scripted flood choosing the disk budget of a machine that also holds photographs.
+    traffic-days: ${JANUS_AUDIT_TRAFFIC_RETENTION_DAYS:30}
+    administrative-days: ${JANUS_AUDIT_RETENTION_DAYS:365}
+    # Both schedules read in the host's own zone: a nightly sweep at 3:45 means the quiet hours here,
+    # not the quiet hours at Greenwich.
+    zone: ${JANUS_AUDIT_SWEEP_ZONE:${TZ:UTC}}
+  notifications:
+    # Same reason, for the morning an expiry notice arrives in.
+    zone: ${JANUS_EXPIRY_CHECK_ZONE:${TZ:UTC}}
+spring:
+  datasource.hikari:
+    # One instance, a few services, and a PostgreSQL sharing the host with everything else it runs.
+    maximum-pool-size: ${JANUS_DATABASE_POOL_SIZE:5}
+server:
+  # A host that reboots for a kernel update should not answer a proxied call with a closed socket.
+  shutdown: graceful

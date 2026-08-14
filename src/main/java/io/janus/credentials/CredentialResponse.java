@@ -26,7 +26,12 @@ public record CredentialResponse(
         String tokenUrl,
         String tokenScopes,
         TokenClientAuth tokenClientAuth,
-        String authorizationUrl,
+        String connectionAuthorizationUrl,
+        String connectionTokenUrl,
+        String connectionScopes,
+        TokenClientAuth connectionClientAuth,
+        /** Whether the connection still needs an OAuth client of its own before anyone can be asked. */
+        boolean connectionAwaitingSecret,
         SignatureAlgorithm signatureAlgorithm,
         String signatureTemplate,
         SignatureEncoding signatureEncoding,
@@ -45,6 +50,7 @@ public record CredentialResponse(
 
     public static CredentialResponse of(Credential credential) {
         var signature = credential.signatureSettings();
+        var connection = credential.connection();
         return new CredentialResponse(
                 credential.getId(),
                 credential.getName(),
@@ -56,7 +62,11 @@ public record CredentialResponse(
                 credential.getTokenUrl(),
                 credential.getTokenScopes(),
                 credential.getTokenClientAuth(),
-                credential.getAuthorizationUrl(),
+                connection.authorizationUrl(),
+                connection.tokenUrl(),
+                connection.scopes(),
+                connection.clientAuth(),
+                credential.offersConnection() && !credential.connectionUsable(),
                 credential.getSignatureAlgorithm(),
                 signature == null ? null : signature.template().pattern(),
                 signature == null ? null : signature.encoding(),

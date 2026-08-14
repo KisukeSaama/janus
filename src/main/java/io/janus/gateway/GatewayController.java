@@ -13,6 +13,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import io.janus.audit.AuditOutcome;
 import io.janus.audit.AuditService;
+import io.janus.credentials.Identity;
 import io.janus.credentials.TokenExchangeException;
 import io.janus.grants.GrantRepository;
 import io.janus.providers.*;
@@ -26,10 +27,12 @@ import io.janus.shared.ErrorCode;
  * active grant, and only then read the credential. Reading the secret last means an unauthorised
  * call never causes a secret to leave OpenBao.
  *
- * <p>The path itself is not a decision. A grant admits a caller to a destination, and from there the
- * caller reaches whatever that destination exposes: the API's own authorisation is what says which
- * of its paths this credential may touch, and restating a subset of it here would only be a second,
- * staler copy of that answer.
+ * <p>The path is ordinarily not a decision. A grant admits a caller to a destination, and from there
+ * the caller reaches whatever that destination exposes: the API's own authorisation is what says
+ * which of its paths this credential may touch, and restating a subset of it here would only be a
+ * second, staler copy of that answer. Where a grant does narrow itself, which is what the keys no
+ * upstream can scope are for (see {@code GrantScope}), that ceiling is applied here, before the
+ * credential is read.
  *
  * <p>This class decides only who may call what. Once that is settled, {@link GatewayTrafficService}
  * owns the outbound half — reuse, allowances, retries — so a caller inherits all of it without
@@ -113,6 +116,21 @@ public class GatewayController {
             if (!grant.getCredential().isEnabled())
                 throw new Denied(HttpStatus.FORBIDDEN, ErrorCode.CREDENTIAL_DISABLED, "Credential is disabled");
 
+            // What of the destination this grant admits, which is ordinarily all of it. Refused here,
+            // before the credential is read and before anything is forwarded, so a call outside the
+            // ceiling costs the upstream nothing and leaves the secret where it is.
+            var scope = grant.getScope();
+            if (!scope.admitsMethod(method.name()))
+                throw new Denied(
+                        HttpStatus.FORBIDDEN,
+                        ErrorCode.METHOD_NOT_GRANTED,
+                        "This grant does not admit " + method.name() + " on this API");
+            if (!scope.admitsPath(route.decodedPath()))
+                throw new Denied(
+                        HttpStatus.FORBIDDEN,
+                        ErrorCode.PATH_NOT_GRANTED,
+                        "This grant admits only " + scope.pathPrefix() + " and what is under it");
+
             // Deliberately after the grant, and it used to be before it. A registered address can stop
             // satisfying the rules it was accepted under — the deployment stops offering local
             // destinations, or a base URL is edited — and what the validator says about that is
@@ -124,6 +142,16 @@ public class GatewayController {
                 throw new Denied(HttpStatus.BAD_GATEWAY, ErrorCode.PROVIDER_MISCONFIGURED, ex.getMessage());
             }
 
+            // Read from the raw request, never from the forwarded headers: the X-Janus- namespace is
+            // stripped on the way out, which is exactly the property wanted here. The caller states
+            // this to Janus, and no upstream ever sees that it did.
+            Identity pinned;
+            try {
+                pinned = Identity.parse(request.getHeader(GatewayTrafficService.IDENTITY_HEADER));
+            } catch (IllegalArgumentException ex) {
+                throw new Denied(HttpStatus.BAD_REQUEST, ErrorCode.BAD_REQUEST, ex.getMessage());
+            }
+
             var exchange = new GatewayExchange(
                     provider,
                     grant,
@@ -132,7 +160,8 @@ public class GatewayController {
                     route,
                     forwardedHeaders(request),
                     body,
-                    call.correlationId);
+                    call.correlationId,
+                    pinned);
             var outcome = traffic.forward(exchange);
 
             var headers = outcome.headers();

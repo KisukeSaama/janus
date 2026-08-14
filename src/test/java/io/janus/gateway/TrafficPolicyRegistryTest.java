@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.http.HttpHeaders;
 
+import io.janus.credentials.Identity;
 import io.janus.credentials.UpstreamTokenCache;
 import io.janus.testing.Fixtures;
 
@@ -31,7 +32,7 @@ class TrafficPolicyRegistryTest {
     private final UpstreamTokenCache tokens = Mockito.mock(UpstreamTokenCache.class);
 
     private final TrafficPolicyRegistry registry =
-            new TrafficPolicyRegistry(cache, authorizations, limiter, cooldown, tokens);
+            new TrafficPolicyRegistry(cache, authorizations, limiter, cooldown, tokens, new IdentityMemory());
 
     private final UUID provider = UUID.randomUUID();
     private final UUID credential = UUID.randomUUID();
@@ -39,7 +40,7 @@ class TrafficPolicyRegistryTest {
     private void store(UUID providerId, UUID credentialId, String path) {
         long now = System.currentTimeMillis();
         var route = GatewayPath.parse("/gateway/slug" + path, "slug", null);
-        var key = CachePolicy.key(providerId, credentialId, "GET", route, new HttpHeaders());
+        var key = CachePolicy.key(providerId, credentialId, Identity.APP, "GET", route, new HttpHeaders());
         cache.store(
                 key,
                 new ResponseCache.Entry(

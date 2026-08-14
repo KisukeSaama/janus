@@ -46,7 +46,7 @@ public class Credential {
     @Column(name = "query_parameter", length = 100)
     private String queryParameter;
 
-    /** Where credentials are exchanged, for the two strategies that exchange anything. */
+    /** Where the application's own credentials are exchanged, for the strategy that exchanges them. */
     @Column(name = "token_url", length = 500)
     private String tokenUrl;
 
@@ -57,9 +57,29 @@ public class Credential {
     @Column(name = "token_client_auth", length = 16)
     private TokenClientAuth tokenClientAuth;
 
-    /** Where a person is sent to agree, for {@link AuthType#OAUTH2_AUTHORIZATION_CODE}. */
-    @Column(name = "authorization_url", length = 500)
-    private String authorizationUrl;
+    /**
+     * The account connection's contract, copied from the provider like the strategy above it, so an
+     * outbound request is built without reading two rows. Null throughout when the API offers none.
+     */
+    @Column(name = "connection_authorization_url", length = 500)
+    private String connectionAuthorizationUrl;
+
+    @Column(name = "connection_token_url", length = 500)
+    private String connectionTokenUrl;
+
+    @Column(name = "connection_scopes", length = 500)
+    private String connectionScopes;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "connection_client_auth", length = 16)
+    private TokenClientAuth connectionClientAuth;
+
+    /**
+     * Whether an OAuth client of the connection's own has been supplied. Only consulted when the
+     * connection does not share the application's stored secret; see {@link #connectionSecretPath()}.
+     */
+    @Column(name = "connection_provisioned", nullable = false)
+    private boolean connectionProvisioned;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "signature_algorithm", length = 16)
@@ -149,20 +169,31 @@ public class Credential {
                 provider.getTokenUrl(),
                 provider.getTokenScopes(),
                 provider.getTokenClientAuth(),
-                provider.getAuthorizationUrl(),
                 provider.signatureSettings());
     }
 
     /** Keeps personal credential metadata aligned with the administrator-owned API contract. */
     public void adoptProviderStrategy(AuthType previousType) {
+        adoptProviderStrategy(previousType, connection());
+    }
+
+    /**
+     * @param previousConnection what this credential was connected under before the API was edited
+     */
+    public void adoptProviderStrategy(AuthType previousType, Provider.Connection previousConnection) {
         describe(name, strategyOf(provider), expiresAt, enabled);
+        applyConnection(provider.connection());
         if (previousType != provider.getAuthType()) {
             enabled = false;
             requiresReprovision = !provider.getAuthType().anonymous();
-            // Consent was given for the old contract. Whatever it authorised, it did not authorise
-            // this, so the credential goes back to unauthorised rather than carrying a stale approval.
-            forgetAuthorization();
         }
+        // Consent was given for the old contract. An authorisation page or a token endpoint that moved
+        // means whatever was agreed to was agreed to somewhere else, so the credential goes back to
+        // unauthorised rather than carrying a stale approval. Scopes changing does not: a narrower
+        // grant is a real state, and the endpoint that needs more will say so.
+        var current = provider.connection();
+        if (!Objects.equals(previousConnection.authorizationUrl(), current.authorizationUrl())
+                || !Objects.equals(previousConnection.tokenUrl(), current.tokenUrl())) forgetAuthorization();
     }
 
     /**
@@ -183,10 +214,9 @@ public class Credential {
             String tokenUrl,
             String tokenScopes,
             TokenClientAuth tokenClientAuth,
-            String authorizationUrl,
             SignatureSettings signature) {
 
-        /** For the strategies that were the whole vocabulary before consent and signing were added. */
+        /** For the strategies that were the whole vocabulary before signing was added. */
         public Strategy(
                 AuthType authType,
                 String headerName,
@@ -194,7 +224,7 @@ public class Credential {
                 String tokenUrl,
                 String tokenScopes,
                 TokenClientAuth tokenClientAuth) {
-            this(authType, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, null, null);
+            this(authType, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, null);
         }
 
         /** For the types that need nothing beyond the stored value. */
@@ -229,11 +259,32 @@ public class Credential {
         this.tokenScopes = type.exchanged() ? blankToNull(strategy.tokenScopes()) : null;
         this.tokenClientAuth =
                 type.exchanged() ? Objects.requireNonNullElse(strategy.tokenClientAuth(), TokenClientAuth.BASIC) : null;
-        this.authorizationUrl = type.consented() ? strategy.authorizationUrl() : null;
         applySignature(type, strategy.signature());
 
         this.enabled = enabled;
-        setExpiresAt(type.anonymous() ? null : expiresAt);
+        // A destination that stores nothing for the application may still hold a connection, whose
+        // client secret does expire. The deadline belongs to whatever is actually stored.
+        setExpiresAt(type.anonymous() && !offersConnection() ? null : expiresAt);
+    }
+
+    /**
+     * Copies the API's account connection onto this credential.
+     *
+     * <p>Losing a connection clears the consent with it. A refresh token is worthless once the
+     * exchange that would spend it is gone, and leaving the record claiming an authorisation nothing
+     * could act on is the state the check constraint exists to forbid.
+     */
+    public void applyConnection(Provider.Connection connection) {
+        boolean offered = connection != null && connection.offered();
+        this.connectionAuthorizationUrl = offered ? connection.authorizationUrl() : null;
+        this.connectionTokenUrl = offered ? connection.tokenUrl() : null;
+        this.connectionScopes = offered ? blankToNull(connection.scopes()) : null;
+        this.connectionClientAuth =
+                offered ? Objects.requireNonNullElse(connection.clientAuth(), TokenClientAuth.BASIC) : null;
+        if (!offered) {
+            this.connectionProvisioned = false;
+            forgetAuthorization();
+        }
     }
 
     private void applySignature(AuthType type, SignatureSettings signature) {
@@ -295,8 +346,30 @@ public class Credential {
         return tokenClientAuth;
     }
 
-    public String getAuthorizationUrl() {
-        return authorizationUrl;
+    /** This credential's copy of the API's account connection; never null, possibly offering nothing. */
+    public Provider.Connection connection() {
+        return new Provider.Connection(
+                connectionAuthorizationUrl, connectionTokenUrl, connectionScopes, connectionClientAuth);
+    }
+
+    public boolean offersConnection() {
+        return connectionAuthorizationUrl != null && connectionTokenUrl != null;
+    }
+
+    public String getConnectionAuthorizationUrl() {
+        return connectionAuthorizationUrl;
+    }
+
+    public String getConnectionTokenUrl() {
+        return connectionTokenUrl;
+    }
+
+    public String getConnectionScopes() {
+        return connectionScopes;
+    }
+
+    public TokenClientAuth getConnectionClientAuth() {
+        return connectionClientAuth;
     }
 
     public SignatureAlgorithm getSignatureAlgorithm() {
@@ -330,6 +403,42 @@ public class Credential {
         return secretPath + "/refresh";
     }
 
+    /**
+     * Where the OAuth client the connection exchanges with lives.
+     *
+     * <p>Usually it is the one already stored. When the application presents a client id and secret of
+     * its own, that is the same OAuth client the person will agree to — Spotify and Twitch issue one
+     * pair and mint both kinds of token from it, so asking for it twice would be asking somebody to
+     * copy a value from one field into another. When the application presents anything else, the two
+     * have nothing in common — a Discord bot token is not an OAuth client — and the connection needs
+     * its own, which is what {@code connection_provisioned} records. An open destination stores nothing
+     * for the application, so the ordinary path is free for the connection to use.
+     */
+    public String connectionSecretPath() {
+        return connectionSharesApplicationSecret() ? secretPath : secretPath + "/connection";
+    }
+
+    /** Whether the connection exchanges with the credential the application already stores. */
+    public boolean connectionSharesApplicationSecret() {
+        return authType.anonymous() || authType == AuthType.OAUTH2_CLIENT_CREDENTIALS;
+    }
+
+    /**
+     * Whether there is an OAuth client to send somebody to the provider with. Distinct from consent:
+     * this is about the application's half being on file, before anyone has been asked to agree.
+     */
+    public boolean connectionUsable() {
+        return offersConnection() && (connectionSharesApplicationSecret() || connectionProvisioned);
+    }
+
+    public boolean isConnectionProvisioned() {
+        return connectionProvisioned;
+    }
+
+    public void markConnectionProvisioned() {
+        this.connectionProvisioned = true;
+    }
+
     public boolean isEnabled() {
         return enabled;
     }
@@ -351,11 +460,16 @@ public class Credential {
     }
 
     /**
-     * Whether this credential still needs somebody to agree at the provider before it can be used.
-     * Only ever true for the one strategy that asks a person rather than an administrator.
+     * Whether the account identity is offered here but nobody has agreed to it yet. Not a failure:
+     * it is the one state the console repairs with a button rather than a form.
      */
     public boolean awaitingAuthorization() {
-        return authType.consented() && authorizedAt == null;
+        return offersConnection() && authorizedAt == null;
+    }
+
+    /** Whether this credential can present the account identity right now. */
+    public boolean connected() {
+        return connectionUsable() && authorizedAt != null;
     }
 
     /** Records that consent was given, and whom the provider says it was given by. */

@@ -13,7 +13,9 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.util.UriUtils;
 
+import io.janus.credentials.AuthType;
 import io.janus.credentials.Credential;
+import io.janus.credentials.Identity;
 import io.janus.credentials.RequestSigner;
 import io.janus.credentials.UpstreamTokenProvider;
 import io.janus.gateway.transform.ArrayPaths;
@@ -43,6 +45,7 @@ public class GatewayTrafficService {
     private static final Logger log = LoggerFactory.getLogger(GatewayTrafficService.class);
 
     public static final String CACHE_HEADER = "X-Janus-Cache";
+    public static final String IDENTITY_HEADER = "X-Janus-Identity";
     public static final String LIMIT_HEADER = "X-Janus-RateLimit-Limit";
     public static final String REMAINING_HEADER = "X-Janus-RateLimit-Remaining";
     public static final String RESET_HEADER = "X-Janus-RateLimit-Reset";
@@ -67,6 +70,7 @@ public class GatewayTrafficService {
     private final RateLimiter limiter;
     private final UpstreamCooldown cooldown;
     private final JsonNormalizer normalizer;
+    private final IdentityMemory identities;
     private final GatewayTrafficProperties properties;
     private final long responseTimeoutMillis;
 
@@ -82,6 +86,7 @@ public class GatewayTrafficService {
             RateLimiter limiter,
             UpstreamCooldown cooldown,
             JsonNormalizer normalizer,
+            IdentityMemory identities,
             GatewayTrafficProperties properties,
             @Value("${janus.gateway.response-timeout-seconds:30}") long responseTimeoutSeconds) {
         this.web = gatewayWebClient;
@@ -92,6 +97,7 @@ public class GatewayTrafficService {
         this.limiter = limiter;
         this.cooldown = cooldown;
         this.normalizer = normalizer;
+        this.identities = identities;
         this.properties = properties;
         this.responseTimeoutMillis = Math.max(1_000, responseTimeoutSeconds * 1000);
     }
@@ -110,11 +116,23 @@ public class GatewayTrafficService {
             CacheStatus cacheStatus,
             Long ageSeconds,
             Long freshSeconds,
-            String note) {}
+            String note,
+            Identity identity) {
+
+        Delivery as(CacheStatus status) {
+            return new Delivery(this.status, headers, body, attempts, status, ageSeconds, freshSeconds, note, identity);
+        }
+
+        /** The same answer, with something the journal should say about how it was reached. */
+        Delivery noting(String note) {
+            return new Delivery(status, headers, body, attempts, cacheStatus, ageSeconds, freshSeconds, note, identity);
+        }
+    }
 
     public GatewayOutcome forward(GatewayExchange exchange) {
         var provider = exchange.provider();
         var credential = exchange.grant().getCredential();
+        var identity = chosen(exchange, credential);
 
         // 1. The caller's own allowance. Never waited out: this limit exists to be felt.
         var client = limiter.tryAcquire(
@@ -145,6 +163,7 @@ public class GatewayTrafficService {
                 ? CachePolicy.key(
                         provider.getId(),
                         credential.getId(),
+                        identity,
                         exchange.method().name(),
                         exchange.route(),
                         exchange.headers())
@@ -169,17 +188,21 @@ public class GatewayTrafficService {
                                 CacheStatus.HIT,
                                 stored.ageSeconds(now),
                                 stored.lifetimeSeconds(),
-                                null),
+                                null,
+                                identity),
                         client);
             }
         }
 
         // Nothing fresh to answer a condition with, so the caller's exchange goes out as its own:
         // no stored validator mixed into it, and nothing kept from what comes back.
-        if (conditionalCaller) return complete(exchange, call(exchange, null, null), client);
+        if (conditionalCaller) return complete(exchange, call(exchange, identity, null, null), client);
 
         try {
-            return complete(exchange, mayReuse ? coalesced(key, exchange, stored) : call(exchange, key, null), client);
+            return complete(
+                    exchange,
+                    mayReuse ? coalesced(key, exchange, identity, stored) : call(exchange, identity, key, null),
+                    client);
         } catch (Throttled throttled) {
             // A refusal owed to the provider still reports the caller's own standing, so one 429 is
             // enough to tell a client whether it is the one going too fast.
@@ -191,17 +214,23 @@ public class GatewayTrafficService {
     /**
      * Runs the call once for however many identical requests arrive while it is running. Followers
      * neither read the credential nor spend a provider permit; they receive what the first caller
-     * received. A follower that waits longer than the response timeout stops waiting and calls for
-     * itself, so a stuck leader delays nobody indefinitely.
+     * received.
+     *
+     * <p>A leader that has taken longer than a response is allowed to take is not going to answer
+     * this request either, so it is stood down and the attempt is made again. Stood down rather than
+     * merely abandoned: whoever notices first removes it, and the followers behind then coalesce on
+     * the one that replaces it. Leaving it in place and calling directly would mean every request that
+     * had been waiting on a stuck leader hitting the provider at the same moment, turning a stall into
+     * a burst against exactly the upstream that was already struggling.
      */
-    private Delivery coalesced(String key, GatewayExchange exchange, ResponseCache.Entry stored) {
+    private Delivery coalesced(String key, GatewayExchange exchange, Identity identity, ResponseCache.Entry stored) {
         while (true) {
             var leader = inFlight.get(key);
             if (leader == null) {
                 var mine = new CompletableFuture<Delivery>();
                 if (inFlight.putIfAbsent(key, mine) != null) continue;
                 try {
-                    var delivery = call(exchange, key, stored);
+                    var delivery = call(exchange, identity, key, stored);
                     mine.complete(delivery);
                     return delivery;
                 } catch (RuntimeException ex) {
@@ -214,17 +243,10 @@ public class GatewayTrafficService {
             try {
                 var delivery = leader.get(responseTimeoutMillis, TimeUnit.MILLISECONDS);
                 cache.record(CacheStatus.COALESCED);
-                return new Delivery(
-                        delivery.status(),
-                        delivery.headers(),
-                        delivery.body(),
-                        delivery.attempts(),
-                        CacheStatus.COALESCED,
-                        delivery.ageSeconds(),
-                        delivery.freshSeconds(),
-                        delivery.note());
+                return delivery.as(CacheStatus.COALESCED);
             } catch (TimeoutException ex) {
-                return call(exchange, key, stored);
+                inFlight.remove(key, leader);
+                continue;
             } catch (ExecutionException ex) {
                 throw ex.getCause() instanceof RuntimeException runtime
                         ? runtime
@@ -236,15 +258,69 @@ public class GatewayTrafficService {
         }
     }
 
+    /**
+     * One call, and the recovery from the one failure a gateway holding two identities can repair.
+     *
+     * <p>A refusal is not read as an answer about the endpoint until the obvious explanation has been
+     * ruled out. An expired token is refused exactly like the wrong identity is, and the two are told
+     * apart the only way they can be: by dropping the held token and asking again as the same
+     * identity. Skipping that step means a token that merely aged out teaches Janus that an endpoint
+     * belongs to somebody else, and it would go on sending it there.
+     *
+     * <p>Only then is the other identity tried, and only if it succeeds is anything learned. Two
+     * refusals mean the endpoint refuses this credential, which is a fact about the credential rather
+     * than about which of its identities to present — so the caller receives the first answer, the one
+     * for the identity that was actually meant, and nothing is remembered.
+     *
+     * <p>None of it happens where sending the request twice could mean doing the thing twice; see
+     * {@link #replayable}.
+     */
+    private Delivery call(GatewayExchange exchange, Identity identity, String key, ResponseCache.Entry stored) {
+        var credential = exchange.grant().getCredential();
+        var delivery = attempt(exchange, identity, key, stored);
+        if (!refused(delivery.status()) || exchange.pinned() != null) return delivery;
+        boolean replayable = replayable(exchange.method(), delivery.status());
+
+        // A held token may simply have aged out. Costs one call, and only on a refusal.
+        if (replayable && exchanges(credential, identity)) {
+            tokens.invalidate(credential.getId(), identity);
+            delivery = attempt(exchange, identity, key, null);
+            if (!refused(delivery.status())) return delivery;
+        }
+
+        var other = identity == Identity.APP ? Identity.ACCOUNT : Identity.APP;
+        if (!available(credential, other)) return delivery;
+        // Said in the journal rather than passed over quietly: this is the one refusal Janus could
+        // have repaired and deliberately did not, and the caller's fix, pinning X-Janus-Identity, is
+        // not one it can arrive at from the upstream's own 403.
+        if (!replayable)
+            return delivery.noting("identity not replayed, " + exchange.method() + " may have taken effect");
+
+        // The store is addressed by identity, so the replay gets its own key — and no stored entry,
+        // which belonged to the identity that was just refused.
+        var replayed = attempt(exchange, other, replayKey(exchange, key, other), null);
+        if (refused(replayed.status())) return delivery;
+
+        identities.remember(
+                credential.getId(), exchange.method().name(), exchange.route().decodedPath(), other);
+        log.info(
+                "{} {} answers to the {} identity; remembered [correlationId={}]",
+                exchange.method(),
+                RouteTemplate.of(exchange.route().decodedPath()),
+                other.wire(),
+                exchange.correlationId());
+        return replayed;
+    }
+
     /** Everything from "may we call this provider" to "what do we do when it will not answer". */
-    private Delivery call(GatewayExchange exchange, String key, ResponseCache.Entry stored) {
+    private Delivery attempt(GatewayExchange exchange, Identity identity, String key, ResponseCache.Entry stored) {
         var provider = exchange.provider();
         var credential = exchange.grant().getCredential();
         String cooldownKey = UpstreamCooldown.key(provider.getId(), credential.getId());
 
         var paused = cooldown.remaining(cooldownKey);
         if (paused.isPresent())
-            return stale(stored, "provider in cooldown")
+            return stale(stored, identity, "provider in cooldown")
                     .orElseThrow(() -> new Throttled(
                             ErrorCode.PROVIDER_COOLDOWN,
                             "Provider asked for a pause and Janus is honouring it",
@@ -257,7 +333,7 @@ public class GatewayTrafficService {
                 provider.getRateLimitBurst(),
                 properties.throttle().maxWaitMillis());
         if (!ceiling.allowed())
-            return stale(stored, "provider allowance exhausted")
+            return stale(stored, identity, "provider allowance exhausted")
                     .orElseThrow(() -> new Throttled(
                             ErrorCode.RATE_LIMIT_PROVIDER,
                             "Provider rate limit reached",
@@ -265,15 +341,23 @@ public class GatewayTrafficService {
                             new HttpHeaders()));
 
         // Authorisation is complete and the answer cannot come from anywhere else; only now does
-        // credential material exist in this process — and for an open API, never: nothing was stored
-        // for it, so nothing is fetched, and the call goes out as anonymous as it was meant to be.
-        String secret = credential.getAuthType().anonymous() ? null : bao.read(credential.getSecretPath());
-        // What actually travels. For most strategies it is the stored value; for a client-credentials
-        // exchange it is the bearer token Janus obtained with it, held until close to its expiry.
+        // credential material exist in this process — and for an open API called as itself, never:
+        // nothing was stored for it, so nothing is fetched, and the call goes out as anonymous as it
+        // was meant to be.
+        //
+        // Which stored value is read follows from whom the call speaks for. The account identity
+        // exchanges with the connection's OAuth client, which is usually the very same value the
+        // application stores and occasionally one of its own.
+        boolean asAccount = identity == Identity.ACCOUNT;
+        String secretPath = asAccount ? credential.connectionSecretPath() : credential.getSecretPath();
+        boolean stores = asAccount || !credential.getAuthType().anonymous();
+        String secret = stores ? bao.read(secretPath) : null;
+        // What actually travels. For most strategies it is the stored value; for an exchange it is the
+        // bearer token Janus obtained with it, held until close to its expiry.
         //
         // Fails closed: a failed exchange throws rather than sending the request without credentials,
         // which is the one outcome that would look to the upstream like an anonymous call.
-        String presented = credential.getAuthType().exchanged() ? tokens.tokenFor(credential, secret) : secret;
+        String presented = exchanges(credential, identity) ? tokens.tokenFor(credential, identity, secret) : secret;
         boolean revalidating = stored != null && stored.revalidatable();
 
         int attempts = 0;
@@ -283,7 +367,7 @@ public class GatewayTrafficService {
         while (true) {
             attempts++;
             try {
-                upstream = send(exchange, credential, presented, revalidating ? stored : null);
+                upstream = send(exchange, credential, identity, presented, revalidating ? stored : null);
                 transportFailure = null;
             } catch (GatewayHttpClientConfig.BlockedDestinationException ex) {
                 throw ex;
@@ -300,7 +384,7 @@ public class GatewayTrafficService {
 
             int status = upstream.getStatusCode().value();
             if (status == HttpStatus.NOT_MODIFIED.value() && revalidating)
-                return revalidated(key, stored, upstream, exchange, attempts, presented, secret);
+                return revalidated(key, stored, upstream, exchange, identity, attempts, presented, secret);
             if (!TRANSIENT.contains(status)) break;
 
             Long retryAfter = CachePolicy.retryAfterSeconds(upstream.getHeaders());
@@ -319,19 +403,21 @@ public class GatewayTrafficService {
         }
 
         if (transportFailure != null) {
-            var rescued = stale(stored, "upstream unreachable");
+            var rescued = stale(stored, identity, "upstream unreachable");
             if (rescued.isEmpty()) throw transportFailure;
             log.warn("Serving a stale response after an upstream failure [correlationId={}]", exchange.correlationId());
             return rescued.get();
         }
         if (TRANSIENT.contains(upstream.getStatusCode().value())) {
             var rescued = stale(
-                    stored, "upstream returned " + upstream.getStatusCode().value());
+                    stored,
+                    identity,
+                    "upstream returned " + upstream.getStatusCode().value());
             if (rescued.isPresent()) return rescued.get();
         }
         // Both values are scrubbed: what was sent, and what it was obtained with. An upstream that
         // echoes either one back must not have it stored or returned.
-        return deliver(upstream, exchange, key, attempts, presented, secret);
+        return deliver(upstream, exchange, identity, key, attempts, presented, secret);
     }
 
     /**
@@ -344,8 +430,15 @@ public class GatewayTrafficService {
     }
 
     private ResponseEntity<byte[]> send(
-            GatewayExchange exchange, Credential credential, String secret, ResponseCache.Entry validator) {
-        var type = credential.getAuthType();
+            GatewayExchange exchange,
+            Credential credential,
+            Identity identity,
+            String secret,
+            ResponseCache.Entry validator) {
+        // Speaking for a person means presenting a bearer token, whatever the application itself
+        // presents. A destination whose key travels in the query string does not put somebody's
+        // access token there too.
+        var type = identity == Identity.ACCOUNT ? AuthType.BEARER : credential.getAuthType();
         var address = exchange.route().toTargetUri(exchange.provider().getBaseUrl());
         if (type.inQuery()) address = withQueryParameter(address, credential.getQueryParameter(), secret);
 
@@ -359,7 +452,7 @@ public class GatewayTrafficService {
 
         var spec = client(exchange).method(exchange.method()).uri(target).headers(headers -> {
             headers.addAll(exchange.headers());
-            injectCredential(headers, credential, secret);
+            injectCredential(headers, type, credential, secret);
             if (signed != null) signed.headers().forEach(headers::set);
             headers.set(CorrelationIdFilter.REQUEST_HEADER, exchange.correlationId());
             if (validator != null) {
@@ -391,7 +484,12 @@ public class GatewayTrafficService {
 
     /** Turns an upstream answer into what the caller gets, and decides whether to keep a copy. */
     private Delivery deliver(
-            ResponseEntity<byte[]> upstream, GatewayExchange exchange, String key, int attempts, String... secrets) {
+            ResponseEntity<byte[]> upstream,
+            GatewayExchange exchange,
+            Identity identity,
+            String key,
+            int attempts,
+            String... secrets) {
         var provider = exchange.provider();
         var credential = exchange.grant().getCredential();
         // Both halves of the answer are scrubbed, not just the body: an upstream that reflects what
@@ -422,7 +520,7 @@ public class GatewayTrafficService {
         }
         var outcome = key == null ? CacheStatus.BYPASS : CacheStatus.MISS;
         cache.record(outcome);
-        return new Delivery(status, headers, body, attempts, outcome, null, freshSeconds, null);
+        return new Delivery(status, headers, body, attempts, outcome, null, freshSeconds, null, identity);
     }
 
     /** A 304 confirms what is stored; the stored body is returned and its freshness restarted. */
@@ -431,6 +529,7 @@ public class GatewayTrafficService {
             ResponseCache.Entry stored,
             ResponseEntity<byte[]> upstream,
             GatewayExchange exchange,
+            Identity identity,
             int attempts,
             String... secrets) {
         var storability = CachePolicy.evaluate(
@@ -470,7 +569,8 @@ public class GatewayTrafficService {
                 CacheStatus.REVALIDATED,
                 0L,
                 fresh,
-                null);
+                null,
+                identity);
     }
 
     /** The upstream's value when it restated one, the stored one otherwise; null when neither exists. */
@@ -479,7 +579,7 @@ public class GatewayTrafficService {
     }
 
     /** The last resort before an error: an expired answer is usually better than no answer. */
-    private Optional<Delivery> stale(ResponseCache.Entry stored, String reason) {
+    private Optional<Delivery> stale(ResponseCache.Entry stored, Identity identity, String reason) {
         long now = System.currentTimeMillis();
         if (stored == null || !stored.servableStale(now)) return Optional.empty();
         cache.record(CacheStatus.STALE);
@@ -493,7 +593,8 @@ public class GatewayTrafficService {
                 CacheStatus.STALE,
                 stored.ageSeconds(now),
                 null,
-                reason));
+                reason,
+                identity));
     }
 
     private ResponseCache.Entry entry(
@@ -524,6 +625,7 @@ public class GatewayTrafficService {
         var headers = copy(delivery.headers());
         var body = normalized(exchange, headers, delivery.body());
         headers.set(CACHE_HEADER, delivery.cacheStatus().name());
+        headers.set(IDENTITY_HEADER, delivery.identity().wire());
         if (delivery.ageSeconds() != null) headers.set(HttpHeaders.AGE, Long.toString(delivery.ageSeconds()));
         announceFreshness(headers, delivery.freshSeconds());
         if (delivery.attempts() > 1) headers.set(ATTEMPTS_HEADER, Integer.toString(delivery.attempts()));
@@ -612,11 +714,11 @@ public class GatewayTrafficService {
      * <p>Exhaustive over the enum and without a default, deliberately: adding a strategy should stop
      * the compiler here rather than silently send a request with no credential on it.
      */
-    private void injectCredential(HttpHeaders headers, Credential credential, String secret) {
-        switch (credential.getAuthType()) {
+    private void injectCredential(HttpHeaders headers, AuthType type, Credential credential, String secret) {
+        switch (type) {
                 // An obtained token is a bearer token; what differs is only where it came from — a
                 // client secret of the application's, or a person's consent.
-            case BEARER, OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE -> headers.setBearerAuth(secret);
+            case BEARER, OAUTH2_CLIENT_CREDENTIALS -> headers.setBearerAuth(secret);
             case API_KEY_HEADER -> headers.set(credential.getHeaderName(), secret);
                 // The secret half signed the request and does not travel. The key half identifies who
                 // signed it, which is what lets the upstream pick the secret to verify against.
@@ -633,6 +735,87 @@ public class GatewayTrafficService {
                 // Nothing to present. The request travels with the caller's forwarded headers alone.
             case NONE -> {}
         }
+    }
+
+    /**
+     * Whom this call speaks for.
+     *
+     * <p>A caller that named an identity gets it, whatever else is known. Otherwise what was learned
+     * about this endpoint decides, and where nothing was learned the application goes first — not out
+     * of caution, but because its answers are the ones that can be shared. A catalogue fetched with
+     * one person's token is a catalogue stored for that person alone, and the store is most of what a
+     * gateway is for.
+     *
+     * <p>The exception is a destination that stores nothing for the application and offers a
+     * connection: an anonymous call there is not a lesser attempt, it is a meaningless one.
+     */
+    private Identity chosen(GatewayExchange exchange, Credential credential) {
+        if (exchange.pinned() != null) {
+            // Refused rather than quietly downgraded to the application. A caller that named an
+            // identity did so because the other one answers differently, and silently sending the
+            // wrong one would return somebody else's data or a confusing 401 from the API.
+            if (exchange.pinned() == Identity.ACCOUNT && !credential.connected())
+                throw new GatewayController.Denied(
+                        HttpStatus.FORBIDDEN,
+                        ErrorCode.CONNECTION_NOT_AUTHORISED,
+                        "This call asked to speak for the connected account, and no account is connected");
+            return exchange.pinned();
+        }
+        if (!credential.connected()) return Identity.APP;
+        var learned = identities.recall(
+                credential.getId(), exchange.method().name(), exchange.route().decodedPath());
+        if (learned.isPresent()) return learned.get();
+        return credential.getAuthType().anonymous() ? Identity.ACCOUNT : Identity.APP;
+    }
+
+    /** Whether this credential can present that identity at all right now. */
+    private static boolean available(Credential credential, Identity identity) {
+        return identity == Identity.ACCOUNT ? credential.connected() : true;
+    }
+
+    /** Whether presenting that identity means holding a token that can quietly age out. */
+    private static boolean exchanges(Credential credential, Identity identity) {
+        return identity == Identity.ACCOUNT || credential.getAuthType().exchanged();
+    }
+
+    /** Statuses that mean "not you", and which the other identity might therefore answer. */
+    private static boolean refused(int status) {
+        return status == HttpStatus.UNAUTHORIZED.value() || status == HttpStatus.FORBIDDEN.value();
+    }
+
+    /**
+     * Whether a refused request may be sent a second time, refreshed or as the other identity.
+     *
+     * <p>The question is not whether the replay would help. It is whether the first attempt could
+     * already have done something, because a replay that repeats it charges a card twice or posts a
+     * message twice, and no amount of convenience is worth that.
+     *
+     * <p>A {@code 401} settles it whatever the method: RFC 9110 §15.5.2 is a refusal to accept the
+     * request at all, pronounced before it was acted on. A {@code 403} does not. It means understood
+     * and refused, and an API is perfectly entitled to accept a write, act on part of it, and then
+     * refuse on a rule of its own: a quota, a read-only key, a resource belonging to somebody else.
+     * So a {@code 403} is only replayed where a second identical request is harmless anyway: the
+     * methods HTTP already defines as idempotent, which are the same ones this class retries.
+     *
+     * <p>What that costs is one case: the first {@code POST} to an endpoint that wanted the connected
+     * account is refused rather than repaired, and nothing is learned from it. The caller pins
+     * {@code X-Janus-Identity: account} and it works from then on. A {@code GET} on the same endpoint
+     * teaches nothing here either, because a route is remembered per method.
+     */
+    private static boolean replayable(HttpMethod method, int status) {
+        return status == HttpStatus.UNAUTHORIZED.value() || IDEMPOTENT.contains(method);
+    }
+
+    /** The same request's key under the identity it is about to be replayed as. */
+    private static String replayKey(GatewayExchange exchange, String key, Identity identity) {
+        if (key == null) return null;
+        return CachePolicy.key(
+                exchange.provider().getId(),
+                exchange.grant().getCredential().getId(),
+                identity,
+                exchange.method().name(),
+                exchange.route(),
+                exchange.headers());
     }
 
     private boolean retryable(HttpMethod method, int attempts) {

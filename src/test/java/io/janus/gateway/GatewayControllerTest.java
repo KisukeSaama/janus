@@ -423,6 +423,68 @@ class GatewayControllerTest {
         verify(destinations, never()).validateShape(any(), anyBoolean());
     }
 
+    // --- a grant that admits only part of a destination ----------------------
+
+    /**
+     * A ceiling for the keys no upstream can narrow. What matters as much as the refusal is where it
+     * happens: before the credential is read, so a call outside the ceiling never causes a secret to
+     * leave OpenBao and never reaches the provider.
+     */
+    @Nested
+    class ScopedGrants {
+
+        @Test
+        void admitsWhatIsUnderThePrefix() throws Exception {
+            grant.applyScope(io.janus.grants.GrantScope.of("/v1/tracks", null));
+
+            mvc.perform(get("/gateway/spotify/v1/tracks/3cEYpjA9oz9GiPac4AsH4n"))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void refusesAPathTheGrantDoesNotName() throws Exception {
+            grant.applyScope(io.janus.grants.GrantScope.of("/v1/tracks", null));
+
+            mvc.perform(get("/gateway/spotify/v1/me/playlists"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("path_not_granted"))
+                    .andExpect(header().string(io.janus.shared.ApiProblem.HEADER, "path_not_granted"));
+
+            verify(traffic, never()).forward(any());
+            assertThat(recordedEvent().outcome()).isEqualTo(AuditOutcome.DENIED);
+        }
+
+        /** Read-only access to an API whose own key has no such notion. */
+        @Test
+        void refusesAMethodTheGrantDoesNotName() throws Exception {
+            grant.applyScope(io.janus.grants.GrantScope.of(null, "GET,HEAD"));
+
+            mvc.perform(delete("/gateway/spotify/v1/tracks/3cEYpjA9oz9GiPac4AsH4n"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("method_not_granted"));
+
+            verify(traffic, never()).forward(any());
+        }
+
+        /** Two refusals a caller must act on differently never share one code. */
+        @Test
+        void tellsAPathItMayNotReachApartFromAMethodItMayNotUse() throws Exception {
+            grant.applyScope(io.janus.grants.GrantScope.of("/v1/tracks", "GET"));
+
+            mvc.perform(get("/gateway/spotify/v1/albums"))
+                    .andExpect(jsonPath("$.code").value("path_not_granted"));
+            mvc.perform(delete("/gateway/spotify/v1/tracks/1"))
+                    .andExpect(jsonPath("$.code").value("method_not_granted"));
+        }
+
+        /** Every grant written before this existed, and every one that wants the whole API. */
+        @Test
+        void aGrantThatNarrowsNothingBehavesExactlyAsItAlwaysDid() throws Exception {
+            mvc.perform(get("/gateway/spotify/v1/anything/at/all")).andExpect(status().isOk());
+            mvc.perform(delete("/gateway/spotify/v1/anything")).andExpect(status().isOk());
+        }
+    }
+
     // --- what is measured ---------------------------------------------------
 
     /**

@@ -13,7 +13,6 @@ export function secretLabel(authType: AuthType, t: (key: MessageKey) => string):
     case 'BASIC':
       return t('credentials.fieldSecretBasic');
     case 'OAUTH2_CLIENT_CREDENTIALS':
-    case 'OAUTH2_AUTHORIZATION_CODE':
       return t('credentials.fieldSecretClient');
     case 'HMAC_SIGNATURE':
       return t('connect.signSecret');
@@ -31,7 +30,6 @@ export function secretPlaceholder(authType: AuthType, t: (key: MessageKey) => st
     case 'BASIC':
       return t('connect.secretBasic');
     case 'OAUTH2_CLIENT_CREDENTIALS':
-    case 'OAUTH2_AUTHORIZATION_CODE':
       return 'client_id:client_secret';
     case 'HMAC_SIGNATURE':
       return 'key:secret';

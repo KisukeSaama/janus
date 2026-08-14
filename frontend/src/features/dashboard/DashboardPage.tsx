@@ -130,7 +130,6 @@ export function DashboardPage({
         section={t('nav.console')}
         title={t('dashboard.title')}
         intro={t('dashboard.lead')}
-        action={connectButton}
       />
 
       {/* Held open at its own height while the records load, so the sections below do not step down

@@ -12,8 +12,20 @@ export type AuthType =
   | 'API_KEY_QUERY'
   | 'BASIC'
   | 'OAUTH2_CLIENT_CREDENTIALS'
-  | 'OAUTH2_AUTHORIZATION_CODE'
   | 'HMAC_SIGNATURE';
+
+/**
+ * The account connection an API may offer beside whatever its application identity is. Null
+ * throughout when it offers none. Deliberately not another AuthType: the two are set together, which
+ * is what lets one API be one entry in the registry.
+ */
+export type ConnectionFields = {
+  /** Where the person signs in and agrees. Its presence is what "offers a connection" means. */
+  connectionAuthorizationUrl?: string;
+  connectionTokenUrl?: string;
+  connectionScopes?: string;
+  connectionClientAuth?: TokenClientAuth;
+};
 
 /** How Janus proves who it is at an upstream token endpoint. Basic is what RFC 6749 requires. */
 export type TokenClientAuth = 'BASIC' | 'POST';
@@ -77,13 +89,12 @@ export type Provider = {
   tokenUrl?: string;
   tokenScopes?: string;
   tokenClientAuth?: TokenClientAuth;
-  /** Where the account holder is sent to agree, for OAUTH2_AUTHORIZATION_CODE. */
-  authorizationUrl?: string;
   /** Whether the signed-in account has provisioned its personal credential for this API. */
   activated: boolean;
   createdAt: string;
   updatedAt?: string;
-} & SignatureFields;
+} & SignatureFields &
+  ConnectionFields;
 
 /**
  * Why a probe ended the way it did, as the backend names it. `ANSWERED` is the only one that means
@@ -119,11 +130,12 @@ export type Credential = {
   authType: AuthType;
   headerName?: string;
   queryParameter?: string;
-  /** Where credentials are exchanged, for the two strategies that exchange anything. */
+  /** Where the application's own credentials are exchanged, for the strategy that exchanges them. */
   tokenUrl?: string;
   tokenScopes?: string;
   tokenClientAuth?: TokenClientAuth;
-  authorizationUrl?: string;
+  /** Whether the connection still needs an OAuth client of its own before anyone can be asked. */
+  connectionAwaitingSecret?: boolean;
   /** Where the value lives, never the value. Absent for NONE, which stores none. */
   secretRef?: string;
   enabled: boolean;
@@ -139,7 +151,8 @@ export type Credential = {
   expiresAt?: string;
   createdAt: string;
   updatedAt?: string;
-} & SignatureFields;
+} & SignatureFields &
+  ConnectionFields;
 
 export type Grant = {
   id: string;
@@ -153,9 +166,18 @@ export type Grant = {
   /** What this application may ask of this provider per minute. Zero is no ceiling. */
   rateLimitPerMinute: number;
   rateLimitBurst: number;
+  /** The path this grant admits calls under. Absent is the whole destination. */
+  pathPrefix?: string;
+  /** The methods it admits. Empty is all of them. */
+  methods: HttpMethod[];
   createdAt: string;
   updatedAt?: string;
 };
+
+/** The methods the gateway forwards, in the order the console offers them. */
+export const HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+
+export type HttpMethod = (typeof HTTP_METHODS)[number];
 
 export type Audit = {
   id: string;
@@ -271,6 +293,11 @@ export type ProviderInput = {
   tokenUrl?: string | null;
   tokenScopes?: string | null;
   tokenClientAuth?: TokenClientAuth | null;
+  /** The account connection, or null throughout when the API offers none. */
+  connectionAuthorizationUrl?: string | null;
+  connectionTokenUrl?: string | null;
+  connectionScopes?: string | null;
+  connectionClientAuth?: TokenClientAuth | null;
 };
 
 export type CredentialInput = {
@@ -282,7 +309,11 @@ export type CredentialInput = {
   tokenUrl?: string | null;
   tokenScopes?: string | null;
   tokenClientAuth?: TokenClientAuth | null;
-  authorizationUrl?: string | null;
+  /**
+   * The OAuth client the account connection exchanges with, when the API does not already store one
+   * for the application itself. Left out whenever the two are the same client.
+   */
+  connectionSecret?: string | null;
   /** The signing recipe, repeated from the API that states it. Null on every other strategy. */
   signatureAlgorithm?: SignatureAlgorithm | null;
   signatureTemplate?: string | null;
@@ -304,6 +335,9 @@ export type GrantInput = {
   enabled: boolean;
   rateLimitPerMinute?: number;
   rateLimitBurst?: number;
+  /** Empty on both counts is the whole destination, which is what a grant has always meant. */
+  pathPrefix?: string | null;
+  methods?: HttpMethod[];
 };
 
 /* ── Who may sign in ────────────────────────────────────────────────────── */

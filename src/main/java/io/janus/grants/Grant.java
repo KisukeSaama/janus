@@ -12,10 +12,12 @@ import io.janus.providers.Provider;
 /**
  * Binds one application to one provider credential.
  *
- * <p>A grant carries no route allowlist. Registering an API is a statement about a destination, not
- * about a subset of its surface: once a service holds a grant it may reach any path the provider
- * exposes, exactly as it would were it holding the key itself. What Janus still decides is who
- * calls, with which secret, and how often.
+ * <p>A grant admits a caller to a destination rather than to a subset of its surface: unless it says
+ * otherwise, a service holding one reaches any path the provider exposes, exactly as it would were
+ * it holding the key itself. What Janus decides is who calls, with which secret, and how often.
+ *
+ * <p>It may say otherwise, and that is all {@link GrantScope} is: a ceiling for the credential the
+ * upstream cannot narrow itself. It is empty by default and empty means everything.
  */
 @Entity
 @Table(
@@ -50,6 +52,23 @@ public class Grant {
     /** How much of that allowance may be spent at once. Zero derives a tenth of the allowance. */
     @Column(name = "rate_limit_burst", nullable = false)
     private int rateLimitBurst;
+
+    /** The path under which this grant admits calls. Null is the whole destination. */
+    @Column(name = "path_prefix", length = 512)
+    private String pathPrefix;
+
+    /** The methods it admits, comma separated. Null is all of them. */
+    @Column(name = "allowed_methods", length = 128)
+    private String allowedMethods;
+
+    /**
+     * The two columns above, read once rather than on every proxied call. Held here because a grant
+     * is what the gateway's authorisation cache keeps, so this is parsed once per cached grant rather
+     * than once per request. Two threads racing to fill it build the same immutable value and one of
+     * them wins, which is why it needs nothing stronger than a plain field.
+     */
+    @Transient
+    private GrantScope scope;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
@@ -107,6 +126,20 @@ public class Grant {
     public void applyQuota(Quota quota) {
         this.rateLimitPerMinute = quota.perMinute();
         this.rateLimitBurst = quota.burst();
+    }
+
+    /** Narrows what of the destination this grant admits, or widens it back to all of it. */
+    public void applyScope(GrantScope scope) {
+        scope.validate();
+        this.pathPrefix = scope.storedPrefix();
+        this.allowedMethods = scope.storedMethods();
+        this.scope = scope;
+    }
+
+    public GrantScope getScope() {
+        var held = scope;
+        if (held == null) this.scope = held = GrantScope.of(pathPrefix, allowedMethods);
+        return held;
     }
 
     public void setEnabled(boolean enabled) {

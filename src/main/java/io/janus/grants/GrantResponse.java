@@ -1,6 +1,7 @@
 package io.janus.grants;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /** One application's access to one provider, as the console sees it. */
@@ -15,10 +16,13 @@ public record GrantResponse(
         boolean enabled,
         int rateLimitPerMinute,
         int rateLimitBurst,
+        String pathPrefix,
+        List<String> methods,
         Instant createdAt,
         Instant updatedAt) {
 
     public static GrantResponse of(Grant grant) {
+        var scope = grant.getScope();
         return new GrantResponse(
                 grant.getId(),
                 grant.getApplication().getId(),
@@ -30,6 +34,10 @@ public record GrantResponse(
                 grant.isEnabled(),
                 grant.getRateLimitPerMinute(),
                 grant.getRateLimitBurst(),
+                scope.pathPrefix(),
+                // A list rather than the stored string: the console offers one checkbox per method,
+                // and nothing outside this class should have to know how a column spells a set.
+                scope.orderedMethods(),
                 grant.getCreatedAt(),
                 grant.getUpdatedAt());
     }

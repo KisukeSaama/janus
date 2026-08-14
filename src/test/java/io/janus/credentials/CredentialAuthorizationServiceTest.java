@@ -18,6 +18,7 @@ import tools.jackson.databind.ObjectMapper;
 import io.janus.accounts.AccessScope;
 import io.janus.audit.AuditAction;
 import io.janus.audit.AuditService;
+import io.janus.gateway.TrafficPolicyRegistry;
 import io.janus.openbao.OpenBaoClient;
 import io.janus.providers.Provider;
 import io.janus.shared.NotFoundException;
@@ -39,6 +40,7 @@ class CredentialAuthorizationServiceTest {
     private final AuditService audit = mock(AuditService.class);
     private final UpstreamTokenCache tokens = new UpstreamTokenCache();
     private final AuthorizationStateRepository states = mock(AuthorizationStateRepository.class);
+    private final TrafficPolicyRegistry traffic = mock(TrafficPolicyRegistry.class);
 
     /** What the repository would be holding. Asserted on directly, which a mock alone would not allow. */
     private final Map<String, AuthorizationState> pending = new LinkedHashMap<>();
@@ -57,19 +59,17 @@ class CredentialAuthorizationServiceTest {
             "https://api.spotify.com",
             true,
             new Provider.TrafficPolicy(true, 0, 0, 0),
-            new Provider.Auth(
-                    AuthType.OAUTH2_AUTHORIZATION_CODE,
-                    null,
-                    null,
+            Provider.Auth.none(),
+            new Provider.Connection(
+                    "https://accounts.spotify.com/authorize",
                     "https://accounts.spotify.com/api/token",
                     "playlist-read-private",
-                    TokenClientAuth.BASIC,
-                    "https://accounts.spotify.com/authorize",
-                    null));
+                    TokenClientAuth.BASIC));
 
     @BeforeEach
     void setUp() {
         credential = new Credential(ACCOUNT, provider, "spotify-secret", Credential.strategyOf(provider), null, true);
+        credential.applyConnection(provider.connection());
 
         when(scope.ownerFilter()).thenReturn(ACCOUNT);
         when(scope.accountId()).thenReturn(ACCOUNT);
@@ -104,7 +104,16 @@ class CredentialAuthorizationServiceTest {
                 })
                 .build();
         authorizations = new CredentialAuthorizationService(
-                credentials, states, bao, tokens, web, new ObjectMapper(), scope, audit, "https://janus.example.com/");
+                credentials,
+                states,
+                bao,
+                tokens,
+                web,
+                new ObjectMapper(),
+                scope,
+                audit,
+                traffic,
+                "https://janus.example.com/");
     }
 
     private static ClientResponse json(String body) {
@@ -167,13 +176,31 @@ class CredentialAuthorizationServiceTest {
             verify(audit).recordAdmin(eq(AuditAction.CREDENTIAL_AUTHORIZATION_STARTED), any(), anyString());
         }
 
+        /**
+         * What is refused is an API offering no connection — not a particular auth type. The two are
+         * orthogonal now, and a bearer-key destination that also lets an account holder connect theirs
+         * is exactly the shape this change exists to allow.
+         */
         @Test
-        void refuses_a_strategy_that_nobody_has_to_agree_to() {
+        void refuses_an_api_that_offers_no_account_connection() {
             credential.describe("bearer", Credential.Strategy.of(AuthType.BEARER), null, true);
+            credential.applyConnection(Provider.Connection.none());
 
             assertThatThrownBy(() -> authorizations.start(credential.getId()))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("does not need an authorisation");
+                    .hasMessageContaining("does not offer an account connection");
+        }
+
+        /** A key of its own is presented to the API; the connection still exchanges as an OAuth client. */
+        @Test
+        void starts_for_a_destination_whose_application_identity_is_not_oauth() {
+            credential.describe("bearer", Credential.Strategy.of(AuthType.BEARER), null, true);
+            credential.markConnectionProvisioned();
+            when(bao.read(credential.connectionSecretPath())).thenReturn("client-abc:secret-xyz");
+
+            assertThat(authorizations.start(credential.getId()).authorizationUrl())
+                    .startsWith("https://accounts.spotify.com/authorize?")
+                    .contains("client_id=client-abc");
         }
 
         @Test
@@ -215,7 +242,7 @@ class CredentialAuthorizationServiceTest {
             verify(bao).write(credential.refreshTokenPath(), "rt-1");
             // The access token that came with it is kept, so the first call after consent does not
             // pay for a refresh round trip.
-            assertThat(tokens.lookup(credential.getId())).contains("at-1");
+            assertThat(tokens.lookup(credential.getId(), Identity.ACCOUNT)).contains("at-1");
             verify(audit).recordAdmin(eq(AuditAction.CREDENTIAL_AUTHORIZED), any(), contains("someone@example.com"));
         }
 
@@ -299,7 +326,10 @@ class CredentialAuthorizationServiceTest {
             authorizations.revoke(credential.getId());
 
             assertThat(credential.awaitingAuthorization()).isTrue();
-            assertThat(tokens.lookup(credential.getId())).isEmpty();
+            // Held tokens, stored responses, and what was learned about which endpoints answer to whom
+            // all went with it. The registry owns that sweep and is tested where it lives; what
+            // matters here is that revoking asks for it at all.
+            verify(traffic, atLeastOnce()).forgetCredential(credential.getId());
             verify(bao).delete(credential.refreshTokenPath());
             verify(audit).recordAdmin(eq(AuditAction.CREDENTIAL_AUTHORIZATION_REVOKED), any(), anyString());
         }
@@ -314,8 +344,8 @@ class CredentialAuthorizationServiceTest {
         }
 
         @Test
-        void refuses_a_strategy_that_carries_no_consent() {
-            credential.describe("bearer", Credential.Strategy.of(AuthType.BEARER), null, true);
+        void refuses_a_credential_that_carries_no_connection() {
+            credential.applyConnection(Provider.Connection.none());
 
             assertThatThrownBy(() -> authorizations.revoke(credential.getId()))
                     .isInstanceOf(IllegalArgumentException.class)

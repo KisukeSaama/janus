@@ -27,7 +27,7 @@ Requests run on virtual threads. A proxied call spends nearly all of its life wa
 - One deployment holds one environment. Janus runs as a separate instance per environment, each with its own database and OpenBao, so no record carries an environment discriminator and no request can be pointed at the wrong side by getting a field wrong.
 - Upstream URLs come only from enabled Providers. URLs with user info, queries, fragments, non-HTTPS schemes, or private/local DNS results are rejected. The address a request is actually about to connect to is checked again at connection time, which closes the DNS rebinding window that a registration-time check leaves open. Upstream redirects are never followed.
 - A destination on the local network is the one exception to that, and reaching it takes two separate decisions: the deployment must offer the setting at all with `JANUS_PRIVATE_DESTINATIONS_ENABLED`, and the destination itself must be registered as being on one. It is a property of a single catalogue entry, so admitting a media server leaves every other provider refusing exactly what it refused before, and the console hides the setting entirely where the deployment does not offer it. Loopback, link-local, and the unspecified address stay refused whatever a row says — from inside a container the first is Janus and the OpenBao it reads credentials from, and the second is where a cloud host answers with instance credentials. Such a destination may be plain HTTP, because no certificate authority issues for an address only one network resolves. This is not `JANUS_ALLOW_PRIVATE_DESTINATIONS`, which lifts the whole check for the whole deployment and is meant for development.
-- A grant admits one application to one provider, not to a subset of its surface: once granted, every path and method under that slug is forwarded. What the API itself permits for the credential Janus presents is the limit, and an allowlist here would only be a second, staler copy of that answer. Authorization is decided before OpenBao is read, and the request is forwarded with its original encoding. Encoded path separators are rejected, and any request URI containing an empty or dot segment is refused before routing, so no two layers can disagree about which path was requested.
+- A grant admits one application to one provider, and by default to the whole of it: every path and method under that slug is forwarded. What the API itself permits for the credential Janus presents is the limit, and an allowlist here would only be a second, staler copy of that answer. A grant may still name a path prefix and a set of methods, for the keys that answer cannot be had from: a media server's token is its administrator, a home automation hub issues one key for the whole house, and there no upstream can say "this service may only read". Empty on both counts is the default and means everything, the ceiling is applied before OpenBao is read, and a call outside it is refused with `path_not_granted` or `method_not_granted` rather than reaching the API. Authorization is decided before OpenBao is read, and the request is forwarded with its original encoding. Encoded path separators are rejected, and any request URI containing an empty or dot segment is refused before routing, so no two layers can disagree about which path was requested.
 - Client authorization, cookies, hop-by-hop headers, inbound-hop headers, and Janus authentication headers are not forwarded. Authentication response headers and cookies are not returned. Textual responses — JSON, XML, form-encoded, plain text — are scrubbed if they echo the credential.
 - Request and response bodies are size-bounded, and outbound calls have connect and response timeouts.
 - Stored responses are addressed by the credential they were fetched with, never by the calling application, and authorization is decided before the store is consulted. An application whose grant was revoked cannot be served from an entry it once caused. Nothing marked `private`, nothing carrying a cookie, and nothing with `Vary: *` is stored at all.
@@ -77,6 +77,8 @@ For local backend work without Docker, run PostgreSQL and OpenBao from the devel
 ## Configuration
 
 Everything below has a working default for development; the ones without a safe default are marked.
+
+**Running it at home?** `SPRING_PROFILES_ACTIVE=lab` sets the handful of these that a self-hosted deployment changes anyway: destinations on the local network may be registered, the response store is sized for a household, both nightly schedules run in the host's own `TZ`, the connection pool is sized for one instance, and shutdown is graceful. It relaxes no address rule, no throttle and no ceiling, and every value it sets can still be overridden by the variable named in the table. Combine it with `prod` (`SPRING_PROFILES_ACTIVE=prod,lab`) when the deployment reads its secrets from files.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -297,6 +299,7 @@ Every request is answered with headers stating what was done, so the behaviour i
 | Header | Meaning |
 |---|---|
 | `X-Janus-Cache` | `HIT`, `MISS`, `REVALIDATED`, `STALE`, `COALESCED`, or `BYPASS` |
+| `X-Janus-Identity` | `app` or `account`: whom the call spoke for |
 | `Age` | seconds since the served response was fetched |
 | `X-Janus-RateLimit-Limit` / `-Remaining` / `-Reset` | the calling application's own allowance, when one is set |
 | `X-Janus-Upstream-Attempts` | present when Janus retried |
@@ -304,6 +307,16 @@ Every request is answered with headers stating what was done, so the behaviour i
 | `Retry-After` | always present on a 429 |
 
 **Reuse.** Enabled per provider, on by default. Janus obeys the upstream's `Cache-Control`, `Expires`, `ETag`, and `Vary`; a provider that states nothing is only cached if you give it a default freshness. `GET` and `HEAD` only. A stale entry with a validator is revalidated conditionally, so an unchanged resource costs a 304 rather than a body. A successful write invalidates that resource and everything under it. A caller can opt out per request with `Cache-Control: no-cache` or `no-store`. A served hit reads no credential: the secret never leaves OpenBao.
+
+**Two identities, one API.** A provider publishes one API and issues one client id, and that one client obtains two different tokens: one speaking for the application, one speaking for a person who agreed at the provider's own site. Spotify calls them the catalogue and somebody's playlists. Both live under a single registered destination — its auth type says how the application presents itself, and an optional account connection says where a person goes to agree.
+
+Nothing in a URL says which of the two an endpoint wants. **So say it: `X-Janus-Identity: app` or `account`, on every call to a destination that has both.** The header never reaches the upstream, the response repeats what was used, and the call behaves the same the first time as the thousandth. Asking for `account` when nobody has connected one is refused with `connection_not_authorised` rather than being quietly downgraded, which is the answer a caller can act on.
+
+Leaving it off works, and is a recovery rather than the way in. Janus presents the application first, because its answers are the ones that can be shared between every caller. When an endpoint answers `401` or `403`, the held token is dropped and the same identity asks once more, because a token that merely expired is refused exactly like the wrong identity is, and only then is the connected account replayed. If that succeeds, the endpoint is remembered and every later call goes out right the first time. Two refusals mean the credential is refused, so the caller receives the first answer and nothing is learned.
+
+That recovery costs a round trip against the provider's own quota, and it does not always happen. A request that could already have taken effect is never sent twice: a `401` refuses a request before it is acted on, whatever the method, but a `403` means understood and refused, which an API may say after acting on part of a write. So a `403` is only replayed for the methods HTTP already calls idempotent. A `POST` or `PATCH` that meets one is handed back as it came, with the reason in the journal, and pinning the header is what fixes it.
+
+What is remembered is the endpoint's shape, not the path: `/playlists/3cEYpjA9oz9GiPac` is learned once for every playlist. It lives in memory, per instance, so a restart costs one replay per endpoint. Stored responses are addressed by identity, so an answer fetched for one person is never served to a call made as the application.
 
 **Rate limiting**, in three independent layers:
 
@@ -323,7 +336,7 @@ The setting says only *whether*, never *from what*: the converter is chosen from
 
 Two things follow from the mapping. XML carries no types, so every value stays a string — inferring them would turn the identifier `"0123"` into `123`. And XML cannot say "this is a list", so an element seen once is indistinguishable from a list of one: a library holding one section would return an object where the same library holding two returns an array, and the client breaks on the day a section is added. Declare those elements on the provider — `Directory` applies wherever it appears, `MediaContainer.Directory` at that one place — and they are arrays whatever the data does. A caller can have the original for one request with `Accept: application/xml`, which is also why a normalised response carries `Vary: Accept`. It carries no `ETag`: the upstream issued that for the document it sent, and Janus goes on using it against the upstream rather than handing a caller a validator for a representation it never received.
 
-Policy is set on the provider (reuse, default freshness, JSON normalisation, outbound limit, burst) and on the grant (the application's own limit and burst). `GET /api/admin/gateway/traffic` reports what is held, how often it spared a call, and which providers are paused; `DELETE /api/admin/providers/{id}/cache` and `DELETE /api/admin/gateway/cache` drop stored responses when data changed upstream without Janus having changed it.
+Policy is set on the provider (reuse, default TTL, JSON normalisation, rate limit, burst) and on the grant (the application's own limit and burst, and optionally the path prefix and methods it may use). `GET /api/admin/gateway/traffic` reports what is held, how often it spared a call, and which providers are paused; `DELETE /api/admin/providers/{id}/cache` and `DELETE /api/admin/gateway/cache` drop stored responses when data changed upstream without Janus having changed it.
 
 Revoking access does not require deleting a record. Clearing **Active** on an application, credential, or grant stops gateway calls immediately while preserving the audit trail, and rotating an application key invalidates the previous one at once.
 
@@ -354,6 +367,7 @@ Everything Janus refuses is `application/problem+json`, in one shape, whichever 
 | `provider_unavailable` | 404 | No enabled provider under that slug — unknown and disabled are deliberately the same answer |
 | `grant_missing` | 403 | This application has no active grant for that provider |
 | `credential_disabled` | 403 | The grant exists; the credential behind it was switched off |
+| `path_not_granted` / `method_not_granted` | 403 | The grant admits only part of this API, and this path or method is outside it |
 | `rate_limit_client` / `rate_limit_grant` / `rate_limit_provider` | 429 | Which of the three allowances was hit — your own, or one shared with every other caller |
 | `provider_cooldown` | 429 | The provider asked for a pause and Janus is honouring it for everyone |
 | `path_ambiguous` / `path_invalid` | 400 | The request path is not one that can be routed unambiguously |

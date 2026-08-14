@@ -61,6 +61,7 @@ public class GrantService {
                 credential(request.credentialId()));
         grant.setEnabled(request.enabled());
         grant.applyQuota(request.quota());
+        grant.applyScope(request.scope());
         repository.save(grant);
         audit.recordAdmin(
                 AuditAction.GRANT_CREATED,
@@ -78,7 +79,9 @@ public class GrantService {
                 credential(request.credentialId()));
         grant.setEnabled(request.enabled());
         grant.applyQuota(request.quota());
-        // A new allowance must not inherit the tokens the old one had left.
+        grant.applyScope(request.scope());
+        // A new allowance must not inherit the tokens the old one had left, and a narrowed grant must
+        // not go on being authorised by the copy the gateway is holding.
         traffic.forgetGrant(id);
         audit.recordAdmin(
                 AuditAction.GRANT_UPDATED,

@@ -7,6 +7,8 @@ import java.util.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 
+import io.janus.credentials.Identity;
+
 class ResponseCacheTest {
     private static final UUID PROVIDER = UUID.randomUUID();
     private static final UUID CREDENTIAL = UUID.randomUUID();
@@ -38,6 +40,7 @@ class ResponseCacheTest {
         return CachePolicy.key(
                 PROVIDER,
                 CREDENTIAL,
+                Identity.APP,
                 "GET",
                 GatewayPath.parse("/gateway/billing" + path, "billing", null),
                 new HttpHeaders());
@@ -174,6 +177,7 @@ class ResponseCacheTest {
         String otherCredential = CachePolicy.key(
                 PROVIDER,
                 UUID.randomUUID(),
+                Identity.APP,
                 "GET",
                 GatewayPath.parse("/gateway/billing/v1/orders", "billing", null),
                 new HttpHeaders());

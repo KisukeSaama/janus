@@ -100,9 +100,22 @@ public class Provider {
     @Column(name = "token_client_auth", length = 16)
     private TokenClientAuth tokenClientAuth;
 
-    /** Where a person is sent to agree, for an authorisation-code destination. */
-    @Column(name = "authorization_url", length = 500)
-    private String authorizationUrl;
+    /**
+     * Where a person is sent to agree, when this destination lets an account holder connect theirs.
+     * Null means it does not, and the three columns below are null with it.
+     */
+    @Column(name = "connection_authorization_url", length = 500)
+    private String connectionAuthorizationUrl;
+
+    @Column(name = "connection_token_url", length = 500)
+    private String connectionTokenUrl;
+
+    @Column(name = "connection_scopes", length = 500)
+    private String connectionScopes;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "connection_client_auth", length = 16)
+    private TokenClientAuth connectionClientAuth;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "signature_algorithm", length = 16)
@@ -145,15 +158,39 @@ public class Provider {
             String slug,
             String baseUrl,
             boolean enabled,
+            TrafficPolicy traffic,
+            Auth auth,
+            Connection connection) {
+        this(name, slug, baseUrl, enabled, false, traffic, auth, connection);
+    }
+
+    public Provider(
+            String name,
+            String slug,
+            String baseUrl,
+            boolean enabled,
             boolean allowPrivateDestination,
             TrafficPolicy traffic,
             Auth auth) {
+        this(name, slug, baseUrl, enabled, allowPrivateDestination, traffic, auth, Connection.none());
+    }
+
+    public Provider(
+            String name,
+            String slug,
+            String baseUrl,
+            boolean enabled,
+            boolean allowPrivateDestination,
+            TrafficPolicy traffic,
+            Auth auth,
+            Connection connection) {
         this.id = UUID.randomUUID();
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
         describe(name, slug, baseUrl, enabled, allowPrivateDestination);
         applyTrafficPolicy(traffic);
         applyAuth(auth);
+        applyConnection(connection);
     }
 
     /** Compatibility constructor for tests and migration-era callers. */
@@ -206,10 +243,9 @@ public class Provider {
             String tokenUrl,
             String tokenScopes,
             TokenClientAuth tokenClientAuth,
-            String authorizationUrl,
             SignatureSettings signature) {
 
-        /** For the strategies that were the whole vocabulary before consent and signing were added. */
+        /** For the strategies that were the whole vocabulary before signing was added. */
         public Auth(
                 AuthType type,
                 String headerName,
@@ -217,11 +253,37 @@ public class Provider {
                 String tokenUrl,
                 String tokenScopes,
                 TokenClientAuth tokenClientAuth) {
-            this(type, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, null, null);
+            this(type, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, null);
         }
 
         public static Auth none() {
             return new Auth(AuthType.NONE, null, null, null, null, null);
+        }
+    }
+
+    /**
+     * The second identity a destination may offer: the one belonging to whoever connects their
+     * account, rather than to the application.
+     *
+     * <p>Deliberately not another {@link AuthType}. It was one, and that is what forced Spotify to be
+     * registered twice — a destination has one auth type, so an API offering both identities could not
+     * be one row. Here the two are orthogonal: any application identity may carry a connection beside
+     * it, including none at all, and including a Discord bot token that has nothing to do with OAuth.
+     *
+     * @param authorizationUrl where the person signs in and agrees; not the token endpoint
+     * @param tokenUrl         where their code, and later their refresh token, is exchanged
+     * @param scopes           what they will be granting, space separated; null takes the client's own
+     * @param clientAuth       how Janus proves who it is at that token endpoint
+     */
+    public record Connection(String authorizationUrl, String tokenUrl, String scopes, TokenClientAuth clientAuth) {
+
+        /** The destination offers no account connection at all. */
+        public static Connection none() {
+            return new Connection(null, null, null, null);
+        }
+
+        public boolean offered() {
+            return authorizationUrl != null && tokenUrl != null;
         }
     }
 
@@ -269,8 +331,17 @@ public class Provider {
         this.tokenClientAuth = type.exchanged()
                 ? java.util.Objects.requireNonNullElse(auth.tokenClientAuth(), TokenClientAuth.BASIC)
                 : null;
-        this.authorizationUrl = type.consented() ? auth.authorizationUrl() : null;
         applySignature(type, auth.signature());
+    }
+
+    /** Applied on its own, because a connection is independent of whatever the application presents. */
+    public void applyConnection(Connection connection) {
+        boolean offered = connection != null && connection.offered();
+        this.connectionAuthorizationUrl = offered ? connection.authorizationUrl() : null;
+        this.connectionTokenUrl = offered ? connection.tokenUrl() : null;
+        this.connectionScopes = offered ? blankToNull(connection.scopes()) : null;
+        this.connectionClientAuth =
+                offered ? java.util.Objects.requireNonNullElse(connection.clientAuth(), TokenClientAuth.BASIC) : null;
     }
 
     private void applySignature(AuthType type, SignatureSettings signature) {
@@ -370,8 +441,13 @@ public class Provider {
         return tokenClientAuth;
     }
 
-    public String getAuthorizationUrl() {
-        return authorizationUrl;
+    /** The account connection this destination offers, or {@link Connection#none()} when it offers none. */
+    public Connection connection() {
+        return new Connection(connectionAuthorizationUrl, connectionTokenUrl, connectionScopes, connectionClientAuth);
+    }
+
+    public boolean offersConnection() {
+        return connectionAuthorizationUrl != null && connectionTokenUrl != null;
     }
 
     public SignatureAlgorithm getSignatureAlgorithm() {

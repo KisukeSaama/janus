@@ -23,6 +23,7 @@ import tools.jackson.databind.ObjectMapper;
 import io.janus.accounts.AccessScope;
 import io.janus.audit.AuditAction;
 import io.janus.audit.AuditService;
+import io.janus.gateway.TrafficPolicyRegistry;
 import io.janus.openbao.OpenBaoClient;
 import io.janus.shared.NotFoundException;
 
@@ -58,6 +59,7 @@ public class CredentialAuthorizationService {
     private final ObjectMapper mapper;
     private final AccessScope scope;
     private final AuditService audit;
+    private final TrafficPolicyRegistry traffic;
     private final String publicUrl;
 
     public CredentialAuthorizationService(
@@ -69,6 +71,7 @@ public class CredentialAuthorizationService {
             ObjectMapper mapper,
             AccessScope scope,
             AuditService audit,
+            TrafficPolicyRegistry traffic,
             @Value("${janus.public-url:http://localhost:8080}") String publicUrl) {
         this.credentials = credentials;
         this.states = states;
@@ -78,6 +81,7 @@ public class CredentialAuthorizationService {
         this.mapper = mapper;
         this.scope = scope;
         this.audit = audit;
+        this.traffic = traffic;
         this.publicUrl = publicUrl.endsWith("/") ? publicUrl.substring(0, publicUrl.length() - 1) : publicUrl;
         // Said once, at startup, because the symptom otherwise appears much later and elsewhere: a
         // provider refusing an authorisation for a redirect nobody registered, with no indication
@@ -108,8 +112,11 @@ public class CredentialAuthorizationService {
         var credential = credentials
                 .findOwnedBy(credentialId, scope.ownerFilter())
                 .orElseThrow(() -> new NotFoundException("Credential not found"));
-        if (!credential.getAuthType().consented())
-            throw new IllegalArgumentException("This connection does not need an authorisation");
+        if (!credential.offersConnection())
+            throw new IllegalArgumentException("This API does not offer an account connection");
+        if (!credential.connectionUsable())
+            throw new IllegalArgumentException(
+                    "This connection has no OAuth client yet. Supply its client id and secret first.");
 
         // The client id is half of the stored pair. Reading it here rather than storing it separately
         // keeps one copy of the client's identity, in the one place that is meant to hold it.
@@ -121,7 +128,7 @@ public class CredentialAuthorizationService {
 
         states.save(new AuthorizationState(state, credential.getId(), scope.accountId(), verifier, redirect));
 
-        var url = UriComponentsBuilder.fromUriString(credential.getAuthorizationUrl())
+        var url = UriComponentsBuilder.fromUriString(credential.getConnectionAuthorizationUrl())
                 .queryParam("response_type", "code")
                 .queryParam("client_id", clientId)
                 .queryParam("redirect_uri", redirect)
@@ -130,7 +137,7 @@ public class CredentialAuthorizationService {
                 // it costs one hash and closes the window where an intercepted code is worth having.
                 .queryParam("code_challenge", challenge(verifier))
                 .queryParam("code_challenge_method", "S256");
-        if (credential.getTokenScopes() != null) url.queryParam("scope", credential.getTokenScopes());
+        if (credential.getConnectionScopes() != null) url.queryParam("scope", credential.getConnectionScopes());
 
         audit.recordAdmin(
                 AuditAction.CREDENTIAL_AUTHORIZATION_STARTED,
@@ -174,12 +181,20 @@ public class CredentialAuthorizationService {
 
         String subject = subjectOf(response);
         credential.authorized(subject);
+        // Endpoints that refused the application's identity while nobody was connected were learned
+        // when nothing could be done about them. Something can be now, so what was learned goes —
+        // along with the stored responses, which were fetched as somebody else.
+        //
+        // Before the token below is kept, not after: this clears held tokens too, and clearing one
+        // that was stored a line earlier would throw away the round trip it exists to save.
+        traffic.forgetCredential(credential.getId());
+
         // The access token is good now, so it is kept: a person who has just consented should not wait
         // for a refresh round trip on their first call.
         String access = response.path("access_token").asString(null);
         if (access != null && !access.isBlank()) {
             var expires = response.path("expires_in");
-            tokens.store(credential.getId(), access, expires.isNumber() ? expires.asLong() : null);
+            tokens.store(credential.getId(), Identity.ACCOUNT, access, expires.isNumber() ? expires.asLong() : null);
         }
 
         audit.recordAdmin(
@@ -201,11 +216,14 @@ public class CredentialAuthorizationService {
         var credential = credentials
                 .findOwnedBy(credentialId, scope.ownerFilter())
                 .orElseThrow(() -> new NotFoundException("Credential not found"));
-        if (!credential.getAuthType().consented())
+        if (!credential.offersConnection())
             throw new IllegalArgumentException("This connection carries no authorisation");
 
         credential.forgetAuthorization();
-        tokens.invalidate(credential.getId());
+        // What an endpoint answered while somebody was connected says nothing about what it answers
+        // now. Left in place, every route learned as the account's would keep being sent there, and
+        // every response fetched as them would still be served.
+        traffic.forgetCredential(credential.getId());
         try {
             bao.delete(credential.refreshTokenPath());
         } catch (RuntimeException ex) {
@@ -221,7 +239,7 @@ public class CredentialAuthorizationService {
 
     /** Swaps the code for tokens. Failures never carry the provider's body, which quotes what it was sent. */
     private tools.jackson.databind.JsonNode redeem(Credential credential, String code, AuthorizationState pending) {
-        String stored = bao.read(credential.getSecretPath());
+        String stored = bao.read(credential.connectionSecretPath());
         int separator = stored.indexOf(':');
         if (separator < 0)
             throw new IllegalStateException("The stored secret is not in the form client_id:client_secret");
@@ -233,7 +251,7 @@ public class CredentialAuthorizationService {
         form.add("code", code);
         form.add("redirect_uri", pending.getRedirectUri());
         form.add("code_verifier", pending.getCodeVerifier());
-        if (credential.getTokenClientAuth() == TokenClientAuth.POST) {
+        if (credential.getConnectionClientAuth() == TokenClientAuth.POST) {
             form.add("client_id", clientId);
             form.add("client_secret", clientSecret);
         }
@@ -241,11 +259,11 @@ public class CredentialAuthorizationService {
         byte[] body;
         try {
             body = web.post()
-                    .uri(credential.getTokenUrl())
+                    .uri(credential.getConnectionTokenUrl())
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .headers(headers -> {
                         headers.setAccept(List.of(MediaType.APPLICATION_JSON));
-                        if (credential.getTokenClientAuth() != TokenClientAuth.POST)
+                        if (credential.getConnectionClientAuth() != TokenClientAuth.POST)
                             headers.setBasicAuth(Base64.getEncoder()
                                     .encodeToString((clientId + ":" + clientSecret).getBytes(StandardCharsets.UTF_8)));
                     })
@@ -291,7 +309,7 @@ public class CredentialAuthorizationService {
     private String clientId(Credential credential) {
         String stored;
         try {
-            stored = bao.read(credential.getSecretPath());
+            stored = bao.read(credential.connectionSecretPath());
         } catch (RuntimeException ex) {
             throw new IllegalArgumentException("This connection has no client id and secret stored yet");
         }

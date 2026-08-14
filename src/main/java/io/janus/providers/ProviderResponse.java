@@ -28,7 +28,11 @@ public record ProviderResponse(
         String tokenUrl,
         String tokenScopes,
         TokenClientAuth tokenClientAuth,
-        String authorizationUrl,
+        /** The account connection this API offers, null throughout when it offers none. */
+        String connectionAuthorizationUrl,
+        String connectionTokenUrl,
+        String connectionScopes,
+        TokenClientAuth connectionClientAuth,
         SignatureAlgorithm signatureAlgorithm,
         String signatureTemplate,
         SignatureEncoding signatureEncoding,
@@ -46,6 +50,7 @@ public record ProviderResponse(
 
     public static ProviderResponse of(Provider provider, boolean activated) {
         var signature = provider.signatureSettings();
+        var connection = provider.connection();
         return new ProviderResponse(
                 provider.getId(),
                 provider.getName(),
@@ -65,7 +70,10 @@ public record ProviderResponse(
                 provider.getTokenUrl(),
                 provider.getTokenScopes(),
                 provider.getTokenClientAuth(),
-                provider.getAuthorizationUrl(),
+                connection.authorizationUrl(),
+                connection.tokenUrl(),
+                connection.scopes(),
+                connection.clientAuth(),
                 provider.getSignatureAlgorithm(),
                 signature == null ? null : signature.template().pattern(),
                 signature == null ? null : signature.encoding(),

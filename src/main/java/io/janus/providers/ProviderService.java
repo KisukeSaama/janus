@@ -97,7 +97,8 @@ public class ProviderService {
                 request.enabled(),
                 request.allowPrivateDestination(),
                 request.trafficPolicy(),
-                auth(request));
+                auth(request),
+                connection(request));
         provider.applyNormalization(request.normalization());
         repository.save(provider);
         audit.recordAdmin(AuditAction.PROVIDER_CREATED, provider.getId(), provider.getSlug());
@@ -111,6 +112,7 @@ public class ProviderService {
         if (!provider.getSlug().equals(request.slug()) && repository.existsBySlug(request.slug()))
             throw new IllegalArgumentException("An API with that slug already exists");
         var previousAuth = provider.getAuthType();
+        var previousConnection = provider.connection();
         provider.describe(
                 request.name(),
                 request.slug(),
@@ -120,11 +122,20 @@ public class ProviderService {
         provider.applyTrafficPolicy(request.trafficPolicy());
         provider.applyNormalization(request.normalization());
         provider.applyAuth(auth(request));
+        provider.applyConnection(connection(request));
         var personalCredentials = credentials.findAllByProviderId(id);
-        if (!previousAuth.anonymous() && provider.getAuthType().anonymous())
+        // An anonymous destination that still offers a connection keeps its stored value: with nothing
+        // of the application's in the way, that is the very path the connection's OAuth client uses.
+        if (!previousAuth.anonymous() && provider.getAuthType().anonymous() && !provider.offersConnection())
             secretDeletions.enqueueAll(
                     personalCredentials.stream().map(Credential::getSecretPath).toList());
-        personalCredentials.forEach(credential -> credential.adoptProviderStrategy(previousAuth));
+        // A connection withdrawn leaves its own client secret behind when it had one of its own.
+        if (previousConnection.offered() && !provider.offersConnection())
+            secretDeletions.enqueueAll(personalCredentials.stream()
+                    .filter(credential -> !credential.connectionSharesApplicationSecret())
+                    .map(Credential::connectionSecretPath)
+                    .toList());
+        personalCredentials.forEach(credential -> credential.adoptProviderStrategy(previousAuth, previousConnection));
         traffic.forgetProvider(id);
         audit.recordAdmin(AuditAction.PROVIDER_UPDATED, provider.getId(), provider.getSlug());
         return ProviderResponse.of(provider);
@@ -224,24 +235,6 @@ public class ProviderService {
                         auth.tokenScopes(),
                         auth.tokenClientAuth());
             }
-            case OAUTH2_AUTHORIZATION_CODE -> {
-                if (auth.tokenUrl() == null || auth.tokenUrl().isBlank())
-                    throw new IllegalArgumentException("A token endpoint is required");
-                if (auth.authorizationUrl() == null || auth.authorizationUrl().isBlank())
-                    throw new IllegalArgumentException("An authorisation page is required, where the account holder "
-                            + "agrees — such as https://accounts.spotify.com/authorize");
-                // Both are destinations Janus will send somebody or something to, so both are checked
-                // by the same rules that admit any other URL: no private address, no redirect chain.
-                auth = new Provider.Auth(
-                        auth.type(),
-                        null,
-                        null,
-                        destinations.validate(auth.tokenUrl()).toString(),
-                        auth.tokenScopes(),
-                        auth.tokenClientAuth(),
-                        destinations.validate(auth.authorizationUrl()).toString(),
-                        null);
-            }
             case HMAC_SIGNATURE -> {
                 if (auth.headerName() != null && !auth.headerName().matches("[A-Za-z0-9-]{1,100}"))
                     throw new IllegalArgumentException("A valid header name is required for the key");
@@ -254,6 +247,36 @@ public class ProviderService {
             }
         }
         return auth;
+    }
+
+    /**
+     * The account connection, or one offering nothing.
+     *
+     * <p>Half a connection is refused rather than quietly dropped. An authorisation page with nowhere
+     * to exchange the code fails at the moment somebody has already agreed at the provider's site,
+     * which is the worst possible time to discover a form was incomplete.
+     */
+    private Provider.Connection connection(ProviderRequest request) {
+        var connection = request.connection();
+        boolean authorization = hasText(connection.authorizationUrl());
+        boolean token = hasText(connection.tokenUrl());
+        if (!authorization && !token) return Provider.Connection.none();
+        if (!authorization)
+            throw new IllegalArgumentException("An authorisation page is required, where the account holder agrees "
+                    + "— such as https://accounts.spotify.com/authorize");
+        if (!token) throw new IllegalArgumentException("A token endpoint is required for an account connection");
+
+        // Both are destinations Janus will send somebody or something to, so both are checked by the
+        // same rules that admit any other URL: no private address, no redirect chain.
+        return new Provider.Connection(
+                destinations.validate(connection.authorizationUrl()).toString(),
+                destinations.validate(connection.tokenUrl()).toString(),
+                connection.scopes(),
+                connection.clientAuth());
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private void requireAdministrator() {
