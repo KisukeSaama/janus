@@ -23,6 +23,7 @@ import {
   type Grant,
   type Identity,
   type Provider,
+  type ProviderInput,
 } from '../../api';
 import {
   Block,
@@ -476,25 +477,7 @@ function DestinationPanel({
 }: {
   provider: Provider;
   onClose: () => void;
-  onSave: (input: {
-    name: string;
-    slug: string;
-    baseUrl: string;
-    enabled: boolean;
-    allowPrivateDestination: boolean;
-    cacheEnabled: boolean;
-    cacheTtlSeconds: number;
-    normalizeJson: boolean;
-    jsonArrayPaths: string;
-    rateLimitPerMinute: number;
-    rateLimitBurst: number;
-    authType: Provider['authType'];
-    headerName?: string;
-    queryParameter?: string;
-    tokenUrl?: string;
-    tokenScopes?: string;
-    tokenClientAuth?: Provider['tokenClientAuth'];
-  }) => Promise<void>;
+  onSave: (input: ProviderInput) => Promise<void>;
 }) {
   const { t } = useI18n();
   const describe = useErrorMessage();
@@ -517,7 +500,7 @@ function DestinationPanel({
         cacheEnabled: form.get('cacheEnabled') === 'on',
         cacheTtlSeconds: Number(form.get('cacheTtlSeconds') || 0),
         normalizeJson: form.get('normalizeJson') === 'on',
-        jsonArrayPaths: String(form.get('jsonArrayPaths') ?? ''),
+        jsonArrayPaths: String(form.get('jsonArrayPaths') ?? '') || null,
         rateLimitPerMinute: Number(form.get('rateLimitPerMinute') || 0),
         rateLimitBurst: Number(form.get('rateLimitBurst') || 0),
         authType: provider.authType,
