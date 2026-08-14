@@ -55,6 +55,20 @@ public enum ErrorCode {
     GRANT_MISSING,
     /** A grant exists, but the credential behind it has been disabled. */
     CREDENTIAL_DISABLED,
+    /**
+     * The grant admits only part of this destination, and the path asked for is outside it. Its own
+     * code rather than the one above: the caller does hold a grant, and what has to change is which
+     * paths it names, which is an administrative decision rather than a missing one.
+     */
+    PATH_NOT_GRANTED,
+    /** The grant admits this path and not this method. Read-only access is the usual reason. */
+    METHOD_NOT_GRANTED,
+    /**
+     * The call asked to speak for the connected account, and nobody has connected one. Its own code
+     * rather than a refusal from upstream: this is repaired by one person agreeing once, in the
+     * console, and a caller that reads codes can say so instead of reporting a failure.
+     */
+    CONNECTION_NOT_AUTHORISED,
 
     // Allowances.
     /** The per-address ceiling on calls to Janus itself. */

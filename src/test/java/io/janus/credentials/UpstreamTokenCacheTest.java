@@ -12,8 +12,8 @@ class UpstreamTokenCacheTest {
 
     @Test
     void servesAHeldTokenBackUntilItIsWorthReplacing() {
-        cache.store(credential, "upstream-token", 3600L);
-        assertThat(cache.lookup(credential)).contains("upstream-token");
+        cache.store(credential, Identity.APP, "upstream-token", 3600L);
+        assertThat(cache.lookup(credential, Identity.APP)).contains("upstream-token");
     }
 
     /**
@@ -36,16 +36,16 @@ class UpstreamTokenCacheTest {
 
     @Test
     void aProviderThatStatesNoLifetimeGetsAConservativeOne() {
-        cache.store(credential, "unstated", null);
-        assertThat(cache.lookup(credential)).contains("unstated");
+        cache.store(credential, Identity.APP, "unstated", null);
+        assertThat(cache.lookup(credential, Identity.APP)).contains("unstated");
         assertThat(UpstreamTokenCache.usableSeconds(null))
                 .isEqualTo(UpstreamTokenCache.ASSUMED_LIFETIME_SECONDS - UpstreamTokenCache.SAFETY_MARGIN_SECONDS);
     }
 
     @Test
     void anUnknownCredentialHoldsNothing() {
-        assertThat(cache.lookup(UUID.randomUUID())).isEmpty();
-        assertThat(cache.recentFailure(UUID.randomUUID())).isEmpty();
+        assertThat(cache.lookup(UUID.randomUUID(), Identity.APP)).isEmpty();
+        assertThat(cache.recentFailure(UUID.randomUUID(), Identity.APP)).isEmpty();
     }
 
     /**
@@ -54,26 +54,74 @@ class UpstreamTokenCacheTest {
      */
     @Test
     void aRefusalIsRememberedSoItIsNotRetriedOnEveryRequest() {
-        cache.storeFailure(credential, 401);
+        cache.storeFailure(credential, Identity.APP, 401);
 
-        assertThat(cache.recentFailure(credential)).hasValue(401);
-        assertThat(cache.lookup(credential)).isEmpty();
+        assertThat(cache.recentFailure(credential, Identity.APP)).hasValue(401);
+        assertThat(cache.lookup(credential, Identity.APP)).isEmpty();
     }
 
     /** A rotated secret leaves behind a token the provider may honour for another hour. */
     @Test
     void invalidatingACredentialDropsWhateverIsHeldForIt() {
-        cache.store(credential, "issued-with-the-old-secret", 3600L);
+        cache.store(credential, Identity.APP, "issued-with-the-old-secret", 3600L);
         cache.invalidate(credential);
-        assertThat(cache.lookup(credential)).isEmpty();
+        assertThat(cache.lookup(credential, Identity.APP)).isEmpty();
     }
 
     @Test
     void aStoredTokenReplacesARememberedFailure() {
-        cache.storeFailure(credential, 401);
-        cache.store(credential, "it-works-now", 3600L);
+        cache.storeFailure(credential, Identity.APP, 401);
+        cache.store(credential, Identity.APP, "it-works-now", 3600L);
 
-        assertThat(cache.recentFailure(credential)).isEmpty();
-        assertThat(cache.lookup(credential)).contains("it-works-now");
+        assertThat(cache.recentFailure(credential, Identity.APP)).isEmpty();
+        assertThat(cache.lookup(credential, Identity.APP)).contains("it-works-now");
+    }
+
+    /**
+     * The whole reason the key carries an identity. One credential holds both tokens, obtained from
+     * one client id at one token endpoint; keyed by credential alone the second would evict the first,
+     * and a call meant to go out as the application would go out as whoever connected their account.
+     */
+    @Test
+    void theTwoIdentitiesTokensDoNotDisplaceEachOther() {
+        cache.store(credential, Identity.APP, "the-applications-token", 3600L);
+        cache.store(credential, Identity.ACCOUNT, "somebodys-own-token", 3600L);
+
+        assertThat(cache.lookup(credential, Identity.APP)).contains("the-applications-token");
+        assertThat(cache.lookup(credential, Identity.ACCOUNT)).contains("somebodys-own-token");
+    }
+
+    /** A refusal for one identity says nothing about the other, and must not silence it. */
+    @Test
+    void aRefusalIsRememberedAgainstOneIdentityOnly() {
+        cache.storeFailure(credential, Identity.ACCOUNT, 401);
+        cache.store(credential, Identity.APP, "still-good", 3600L);
+
+        assertThat(cache.recentFailure(credential, Identity.APP)).isEmpty();
+        assertThat(cache.lookup(credential, Identity.APP)).contains("still-good");
+    }
+
+    /** What the gateway does on a refusal: drop the one that was refused, keep the other. */
+    @Test
+    void invalidatingOneIdentityLeavesTheOther() {
+        cache.store(credential, Identity.APP, "the-applications-token", 3600L);
+        cache.store(credential, Identity.ACCOUNT, "somebodys-own-token", 3600L);
+
+        cache.invalidate(credential, Identity.APP);
+
+        assertThat(cache.lookup(credential, Identity.APP)).isEmpty();
+        assertThat(cache.lookup(credential, Identity.ACCOUNT)).contains("somebodys-own-token");
+    }
+
+    /** A rotated secret invalidates both: it is the client both of them were obtained with. */
+    @Test
+    void invalidatingTheCredentialDropsBothIdentities() {
+        cache.store(credential, Identity.APP, "one", 3600L);
+        cache.store(credential, Identity.ACCOUNT, "two", 3600L);
+
+        cache.invalidate(credential);
+
+        assertThat(cache.lookup(credential, Identity.APP)).isEmpty();
+        assertThat(cache.lookup(credential, Identity.ACCOUNT)).isEmpty();
     }
 }

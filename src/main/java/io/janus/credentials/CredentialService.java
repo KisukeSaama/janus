@@ -78,9 +78,11 @@ public class CredentialService {
                 Credential.strategyOf(provider),
                 request.expiresAt(),
                 request.enabled());
+        credential.applyConnection(provider.connection());
         // An anonymous destination reserves its path and stores nothing at it, so that changing its
         // mind later is a write rather than a new record with a new identity.
         if (request.carriesSecret()) openBao.write(credential.getSecretPath(), request.secret());
+        storeConnectionSecret(credential, request);
         repository.save(credential);
         audit.recordAdmin(
                 AuditAction.CREDENTIAL_CREATED,
@@ -100,10 +102,12 @@ public class CredentialService {
             throw new IllegalArgumentException("New credentials are required because the API authentication changed");
         credential.describe(
                 provider.getSlug(), Credential.strategyOf(provider), request.expiresAt(), request.enabled());
+        credential.applyConnection(provider.connection());
         if (request.carriesSecret()) {
             openBao.write(credential.getSecretPath(), request.secret());
             credential.markProvisioned();
         }
+        storeConnectionSecret(credential, request);
         // Stored responses are addressed by credential. A rotated secret can mean a different
         // identity upstream, so nothing fetched with the old one may be served after it.
         traffic.forgetCredential(id);
@@ -163,5 +167,23 @@ public class CredentialService {
                 // The stored value travels as supplied.
             }
         }
+    }
+
+    /**
+     * Writes the OAuth client an account connection exchanges with, when it needs one of its own.
+     *
+     * <p>Refused rather than ignored where the connection shares the application's stored value: two
+     * fields writing to one path would mean whichever was filled in last silently replaced the other,
+     * and an operator who typed a client secret into the wrong one would have no way of telling.
+     */
+    private void storeConnectionSecret(Credential credential, CredentialRequest request) {
+        if (!request.carriesConnectionSecret()) return;
+        if (!credential.offersConnection())
+            throw new IllegalArgumentException("This API does not offer an account connection");
+        if (credential.connectionSharesApplicationSecret())
+            throw new IllegalArgumentException(
+                    "This API's account connection uses the credentials already stored for it");
+        openBao.write(credential.connectionSecretPath(), request.connectionSecret());
+        credential.markConnectionProvisioned();
     }
 }

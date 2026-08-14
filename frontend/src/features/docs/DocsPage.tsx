@@ -168,6 +168,7 @@ export function DocsPage() {
                 mono
                 items={[
                   { term: 'X-Janus-Cache', note: t('docs.handled.cache') },
+                  { term: 'X-Janus-Identity', note: t('docs.handled.identity') },
                   { term: 'Age', note: t('docs.handled.age') },
                   { term: 'X-Janus-RateLimit-Limit / -Remaining / -Reset', note: t('docs.handled.limit') },
                   { term: 'X-Janus-Upstream-Attempts', note: t('docs.handled.attempts') },
@@ -204,6 +205,7 @@ export function DocsPage() {
               <ul className="space-y-2">
                 <Bullet>{t('docs.sound.one')}</Bullet>
                 <Bullet>{t('docs.sound.narrow')}</Bullet>
+                <Bullet>{t('docs.sound.identity')}</Bullet>
                 <Bullet>{t('docs.sound.rotate')}</Bullet>
                 <Bullet>{t('docs.sound.browser')}</Bullet>
                 <Bullet>{t('docs.sound.environments')}</Bullet>

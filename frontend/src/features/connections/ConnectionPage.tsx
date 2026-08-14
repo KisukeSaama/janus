@@ -19,8 +19,10 @@ import {
   useOAuthCallback,
   useUpdateGrant,
   useUpdateProvider,
+  HTTP_METHODS,
   type Credential,
   type Grant,
+  type HttpMethod,
   type Identity,
   type Provider,
   type ProviderInput,
@@ -88,7 +90,7 @@ export function ConnectionPage({
   const pingProvider = usePingProvider();
   const rotateKey = useRotateApplicationKey();
 
-  const [panel, setPanel] = useState<'closed' | 'destination' | 'quota' | 'secret'>('closed');
+  const [panel, setPanel] = useState<'closed' | 'destination' | 'quota' | 'scope' | 'secret'>('closed');
   const [issuedKey, setIssuedKey] = useState('');
   const [error, setError] = useState('');
 
@@ -120,7 +122,15 @@ export function ConnectionPage({
   const curl = curlFor(provider?.slug ?? '', '/', grant.applicationId, '$JANUS_API_KEY');
 
   /** Every grant write sends the whole record: the endpoint replaces, it does not patch. */
-  const writeGrant = (changes: Partial<{ enabled: boolean; perMinute: number; burst: number }>) =>
+  const writeGrant = (
+    changes: Partial<{
+      enabled: boolean;
+      perMinute: number;
+      burst: number;
+      pathPrefix: string;
+      methods: HttpMethod[];
+    }>,
+  ) =>
     updateGrant.mutateAsync({
       id: grant.id,
       input: {
@@ -130,6 +140,8 @@ export function ConnectionPage({
         enabled: changes.enabled ?? grant.enabled,
         rateLimitPerMinute: changes.perMinute ?? grant.rateLimitPerMinute,
         rateLimitBurst: changes.burst ?? grant.rateLimitBurst,
+        pathPrefix: changes.pathPrefix ?? grant.pathPrefix ?? null,
+        methods: changes.methods ?? grant.methods,
       },
     });
 
@@ -278,6 +290,33 @@ export function ConnectionPage({
           </dl>
         </Block>
 
+        {/* A grant admits the whole destination unless somebody narrows it, so this block reads as
+            "everything" until it does. It is the ceiling for a key the API itself cannot scope. */}
+        <Block
+          title={t('detail.scopeTitle')}
+          lead={t('detail.scopeLead')}
+          aside={
+            <button className="btn btn-sm btn-secondary" onClick={() => setPanel('scope')}>
+              {t('detail.scopeEdit')}
+            </button>
+          }
+        >
+          <dl className="panel divide-y divide-line text-sm">
+            <div className="flex flex-wrap items-baseline justify-between gap-4 px-4 py-3">
+              <dt className="text-text-2">{t('detail.scopePathLabel')}</dt>
+              <dd className={grant.pathPrefix ? 'data break-all text-right' : 'text-text-3'}>
+                {grant.pathPrefix ?? t('detail.scopeAllPaths')}
+              </dd>
+            </div>
+            <div className="flex flex-wrap items-baseline justify-between gap-4 px-4 py-3">
+              <dt className="text-text-2">{t('detail.scopeMethodsLabel')}</dt>
+              <dd className={grant.methods.length > 0 ? 'data' : 'text-text-3'}>
+                {grant.methods.length > 0 ? grant.methods.join(', ') : t('detail.scopeAllMethods')}
+              </dd>
+            </div>
+          </dl>
+        </Block>
+
         {/* An open API has nothing held for it, so there is nothing to replace and no date to watch.
             The block stays, because "what does Janus present here" is still worth an answer. */}
         {credential && credential.authType === 'NONE' && (
@@ -309,7 +348,7 @@ export function ConnectionPage({
         {/* The one thing on this page that an administrator cannot do by editing a field: somebody
             has to agree, at the provider, in their own browser. So it gets its own block rather than
             a line in the one above, and it says which of the two states it is in. */}
-        {credential && credential.authType === 'OAUTH2_AUTHORIZATION_CODE' && (
+        {credential && credential.connectionAuthorizationUrl && (
           <AuthorizationBlock credential={credential} />
         )}
 
@@ -380,6 +419,16 @@ export function ConnectionPage({
           onClose={() => setPanel('closed')}
           onSave={async (perMinute, burst) => {
             await writeGrant({ perMinute, burst });
+            setPanel('closed');
+          }}
+        />
+      )}
+      {panel === 'scope' && (
+        <ScopePanel
+          grant={grant}
+          onClose={() => setPanel('closed')}
+          onSave={async (pathPrefix, methods) => {
+            await writeGrant({ pathPrefix, methods });
             setPanel('closed');
           }}
         />
@@ -669,6 +718,74 @@ function QuotaPanel({
           onChange={(e) => setBurst(Number(e.target.value || 0))}
           hint={t('detail.burstHint')}
         />
+      </FormLayout>
+    </SidePanel>
+  );
+}
+
+/**
+ * The ceiling a grant may put on itself, for the keys the API behind it cannot scope.
+ *
+ * Both fields empty is the default and means the whole destination, so the panel opens saying that
+ * rather than presenting two blanks a reader has to guess the meaning of. Nothing here is an access
+ * model: one prefix, a set of methods, and no order or precedence to work out.
+ */
+function ScopePanel({
+  grant,
+  onClose,
+  onSave,
+}: {
+  grant: Grant;
+  onClose: () => void;
+  onSave: (pathPrefix: string, methods: HttpMethod[]) => Promise<void>;
+}) {
+  const { t } = useI18n();
+  const describe = useErrorMessage();
+  const [pathPrefix, setPathPrefix] = useState(grant.pathPrefix ?? '');
+  const [methods, setMethods] = useState<HttpMethod[]>(grant.methods);
+  const [error, setError] = useState('');
+
+  async function submit(_e: FormEvent<HTMLFormElement>) {
+    setError('');
+    try {
+      await onSave(pathPrefix, methods);
+    } catch (x) {
+      setError(describe(x));
+    }
+  }
+
+  const toggle = (method: HttpMethod) =>
+    setMethods((held) => (held.includes(method) ? held.filter((m) => m !== method) : [...held, method]));
+
+  return (
+    <SidePanel title={t('detail.scopeEdit')} intro={t('detail.scopeLead')} onClose={onClose}>
+      <FormLayout onSubmit={submit} submitLabel={t('common.saveChanges')} error={error}>
+        <Field
+          label={t('detail.scopePathLabel')}
+          data
+          placeholder={t('detail.scopeAllPaths')}
+          value={pathPrefix}
+          onChange={(e) => setPathPrefix(e.target.value)}
+          hint={t('detail.scopePathHint')}
+        />
+        <fieldset>
+          <legend className="text-sm">{t('detail.scopeMethodsLabel')}</legend>
+          {/* Says what none-ticked means, which is the state it opens in and the one a reader would
+              otherwise take for "no access at all". */}
+          <p className="mt-1 text-xs text-text-2">
+            {methods.length > 0 ? t('detail.scopeMethodsHint') : t('detail.scopeAllMethods')}
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {HTTP_METHODS.map((method) => (
+              <CheckField
+                key={method}
+                label={method}
+                checked={methods.includes(method)}
+                onChange={() => toggle(method)}
+              />
+            ))}
+          </div>
+        </fieldset>
       </FormLayout>
     </SidePanel>
   );

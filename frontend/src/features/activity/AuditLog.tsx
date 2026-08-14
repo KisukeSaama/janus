@@ -247,6 +247,11 @@ export function AuditLog() {
               page={events.data.page}
               totalPages={events.data.totalPages}
               totalElements={events.data.totalElements}
+              unit={t('pager.events')}
+              // Ordered newest first, so the page before this one is the newer one: position labels
+              // would point backwards in the list and forwards in time.
+              previous={t('audit.newer')}
+              next={t('audit.older')}
               busy={events.isFetching}
               onPage={setPage}
             />

@@ -37,7 +37,6 @@ public record ProviderRequest(
         @Size(max = 500) String tokenUrl,
         @Size(max = 500) String tokenScopes,
         TokenClientAuth tokenClientAuth,
-        @Size(max = 500) String authorizationUrl,
         SignatureAlgorithm signatureAlgorithm,
         @Size(max = SignatureTemplate.MAX_LENGTH) String signatureTemplate,
         SignatureEncoding signatureEncoding,
@@ -60,7 +59,14 @@ public record ProviderRequest(
                 @Pattern(
                         regexp = "[\\p{L}\\p{N}_.:, -]*",
                         message = "must be element names or dotted paths, separated by commas")
-                String jsonArrayPaths) {
+                String jsonArrayPaths,
+        // The account connection, set beside whatever the application itself presents. Last in the
+        // record for the same reason as the fields above: a caller written before an API could offer
+        // two identities states nothing here, and an unstated answer is "it offers one".
+        @Size(max = 500) String connectionAuthorizationUrl,
+        @Size(max = 500) String connectionTokenUrl,
+        @Size(max = 500) String connectionScopes,
+        TokenClientAuth connectionClientAuth) {
 
     public ProviderRequest {
         name = name == null ? null : name.trim();
@@ -106,9 +112,12 @@ public record ProviderRequest(
                 null,
                 null,
                 null,
+                false,
+                false,
                 null,
-                false,
-                false,
+                null,
+                null,
+                null,
                 null);
     }
 
@@ -152,15 +161,13 @@ public record ProviderRequest(
     }
 
     public Provider.Auth auth() {
-        return new Provider.Auth(
-                authType,
-                headerName,
-                queryParameter,
-                tokenUrl,
-                tokenScopes,
-                tokenClientAuth,
-                authorizationUrl,
-                signature());
+        return new Provider.Auth(authType, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, signature());
+    }
+
+    /** What the API offers an account holder, or a connection offering nothing when it offers none. */
+    public Provider.Connection connection() {
+        return new Provider.Connection(
+                connectionAuthorizationUrl, connectionTokenUrl, connectionScopes, connectionClientAuth);
     }
 
     /** The signing recipe, or null when this strategy does not sign. */

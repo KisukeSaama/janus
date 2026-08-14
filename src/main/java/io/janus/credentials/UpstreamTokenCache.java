@@ -5,11 +5,16 @@ import java.util.*;
 import org.springframework.stereotype.Component;
 
 /**
- * The tokens Janus holds on its callers' behalf, one per credential.
+ * The tokens Janus holds on its callers' behalf, one per credential and identity.
  *
  * <p>This is the reason a client service does not implement a clock. A token obtained for a
  * credential is reused for every call made with it, by every application that credential authorises,
  * until it is close enough to expiring to be worth replacing.
+ *
+ * <p>Keyed by identity as well as by credential, and that is not an optimisation. One credential now
+ * holds two tokens — what the application obtained, and what a person granted — from one client id at
+ * one token endpoint. Keyed by credential alone, the second to be fetched would evict the first, and
+ * a call meant to go out as the application would go out as somebody in particular.
  *
  * <p>Two things are remembered, not one. A <em>failure</em> is cached too, briefly: a wrong client
  * secret would otherwise call the provider's token endpoint once per proxied request, which is how a
@@ -39,22 +44,25 @@ public class UpstreamTokenCache {
         }
     }
 
-    private final Map<UUID, Entry> entries = Collections.synchronizedMap(new LinkedHashMap<>(64, 0.75f, true) {
+    /** One credential's tokens are two entries, told apart by whom each speaks for. */
+    private record Key(UUID credentialId, Identity identity) {}
+
+    private final Map<Key, Entry> entries = Collections.synchronizedMap(new LinkedHashMap<>(64, 0.75f, true) {
         @Override
-        protected boolean removeEldestEntry(Map.Entry<UUID, Entry> eldest) {
+        protected boolean removeEldestEntry(Map.Entry<Key, Entry> eldest) {
             return size() > MAX_ENTRIES;
         }
     });
 
     /** A token still far enough from its expiry to be worth sending. */
-    public Optional<String> lookup(UUID credentialId) {
-        var entry = live(credentialId);
+    public Optional<String> lookup(UUID credentialId, Identity identity) {
+        var entry = live(new Key(credentialId, identity));
         return entry == null || entry.failed() ? Optional.empty() : Optional.of(entry.token());
     }
 
     /** The status of a recent refusal, while its cooldown lasts. Never the provider's response body. */
-    public OptionalInt recentFailure(UUID credentialId) {
-        var entry = live(credentialId);
+    public OptionalInt recentFailure(UUID credentialId, Identity identity) {
+        var entry = live(new Key(credentialId, identity));
         return entry != null && entry.failed() ? OptionalInt.of(entry.failureStatus()) : OptionalInt.empty();
     }
 
@@ -63,9 +71,10 @@ public class UpstreamTokenCache {
      *
      * @param expiresInSeconds what the provider said, or null when it said nothing
      */
-    public void store(UUID credentialId, String token, Long expiresInSeconds) {
+    public void store(UUID credentialId, Identity identity, String token, Long expiresInSeconds) {
         long usable = usableSeconds(expiresInSeconds);
-        entries.put(credentialId, new Entry(token, 0, System.nanoTime() + usable * 1_000_000_000L));
+        entries.put(
+                new Key(credentialId, identity), new Entry(token, 0, System.nanoTime() + usable * 1_000_000_000L));
     }
 
     /**
@@ -80,28 +89,37 @@ public class UpstreamTokenCache {
         return Math.max(1, lifetime - SAFETY_MARGIN_SECONDS);
     }
 
-    public void storeFailure(UUID credentialId, int status) {
+    public void storeFailure(UUID credentialId, Identity identity, int status) {
         entries.put(
-                credentialId, new Entry(null, status, System.nanoTime() + FAILURE_COOLDOWN_SECONDS * 1_000_000_000L));
+                new Key(credentialId, identity),
+                new Entry(null, status, System.nanoTime() + FAILURE_COOLDOWN_SECONDS * 1_000_000_000L));
     }
 
     /**
-     * Forgets what is held for this credential. Called when the stored secret changes, because the
-     * token it produced belongs to the previous secret and may well outlive it upstream.
+     * Forgets what is held for this credential, both identities together. Called when the stored
+     * secret changes, because the token it produced belongs to the previous secret and may well
+     * outlive it upstream.
      */
     public void invalidate(UUID credentialId) {
-        entries.remove(credentialId);
+        synchronized (entries) {
+            entries.keySet().removeIf(key -> key.credentialId().equals(credentialId));
+        }
+    }
+
+    /** Forgets one identity's token, leaving the other's. Used when a call is refused with it. */
+    public void invalidate(UUID credentialId, Identity identity) {
+        entries.remove(new Key(credentialId, identity));
     }
 
     public void clear() {
         entries.clear();
     }
 
-    private Entry live(UUID credentialId) {
-        var entry = entries.get(credentialId);
+    private Entry live(Key key) {
+        var entry = entries.get(key);
         if (entry == null) return null;
         if (System.nanoTime() - entry.usableUntilNanos() >= 0) {
-            entries.remove(credentialId, entry);
+            entries.remove(key, entry);
             return null;
         }
         return entry;

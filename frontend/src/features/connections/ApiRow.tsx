@@ -89,7 +89,7 @@ export function ApiRow({
               e.preventDefault();
               if (activation.secret !== '' && activation.busy === null) void activate();
             }}
-            hint={provider.authType === 'OAUTH2_AUTHORIZATION_CODE' ? t('service.activateConsent') : undefined}
+            hint={provider.connectionAuthorizationUrl ? t('service.activateConsent') : undefined}
           />
           {activation.error && (
             <p role="alert" className="text-sm text-bad">

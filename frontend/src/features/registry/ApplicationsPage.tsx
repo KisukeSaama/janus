@@ -28,8 +28,10 @@ import {
   KeyIssued,
   Notice,
   PageHead,
+  Pager,
   RecordCell,
   RowMenu,
+  SearchField,
   SidePanel,
   SkeletonRows,
   TextAreaField,
@@ -41,6 +43,7 @@ import { useApiActivation } from '../connections/activation';
 import { ApiRow } from '../connections/ApiRow';
 import { ServiceFlow } from '../connections/ServiceFlow';
 import { useI18n } from '../../i18n';
+import { useListView } from '../../hooks/useListView';
 import { isKeyStale } from '../../lib/attention';
 import { useErrorMessage } from '../../lib/errors';
 
@@ -126,6 +129,19 @@ export function ApplicationsPage() {
     return byApp;
   }, [grants.data, providers.data]);
 
+  /**
+   * Narrowed by what the row itself shows: its name, what it is for, its identifier, and the APIs it
+   * may call — that last one is the column this page is usually opened to check.
+   */
+  const view = useListView(rows, (application, needle) =>
+    [
+      application.name,
+      application.description ?? '',
+      application.id,
+      ...(reachable.get(application.id) ?? []).map((api) => api.name),
+    ].some((value) => value.toLowerCase().includes(needle)),
+  );
+
   function open(application: Application) {
     setJustActivated([]);
     setPanel(application);
@@ -191,6 +207,11 @@ export function ApplicationsPage() {
               enabled: true,
               rateLimitPerMinute: existing?.rateLimitPerMinute ?? 0,
               rateLimitBurst: existing?.rateLimitBurst ?? 0,
+              // Carried through rather than defaulted. This form says which APIs a service may reach
+              // and nothing about how much of each; the endpoint replaces the whole record, so a
+              // narrowed grant re-enabled from here would silently widen back to everything.
+              pathPrefix: existing?.pathPrefix ?? null,
+              methods: existing?.methods ?? [],
             };
             if (!existing) return createGrant.mutateAsync(grantInput);
             if (existing.credentialId !== credential!.id || !existing.enabled) {
@@ -302,67 +323,88 @@ export function ApplicationsPage() {
       ) : rows.length === 0 ? (
         <Empty headline={t('applications.emptyTitle')} hint={t('applications.emptyHint')} action={newButton} />
       ) : (
-        <DataTable
-          columns={columns}
-          rows={rows}
-          rowKey={(r) => r.id}
-          /*
-           * What this row is for stays in the row; everything else is one control away. Rotation is
-           * the exception, and only while the key is past the threshold: the console recommends it
-           * there, and a recommendation nobody can see is not one.
-           */
-          actions={(r) => {
-            const stale = isKeyStale(r);
-            const rotateKey = () =>
-              act(async () => {
-                const issued = await rotate.mutateAsync(r.id);
-                setIssuedKey(issued.apiKey);
-              });
-            const menu: RowAction[] = [
-              { key: 'edit', label: t('common.edit'), onSelect: () => open(r) },
-              ...(stale
-                ? []
-                : [
+        <>
+          <SearchField
+            value={view.query}
+            onChange={view.search}
+            label={t('applications.searchLabel')}
+            placeholder={t('applications.searchPlaceholder')}
+          />
+          {view.rows.length === 0 ? (
+            <Empty headline={t('applications.noResults')} hint={t('applications.noResultsHint')} />
+          ) : (
+            <>
+              <DataTable
+                columns={columns}
+                rows={view.rows}
+                rowKey={(r) => r.id}
+                /*
+                 * What this row is for stays in the row; everything else is one control away. Rotation is
+                 * the exception, and only while the key is past the threshold: the console recommends it
+                 * there, and a recommendation nobody can see is not one.
+                 */
+                actions={(r) => {
+                  const stale = isKeyStale(r);
+                  const rotateKey = () =>
+                    act(async () => {
+                      const issued = await rotate.mutateAsync(r.id);
+                      setIssuedKey(issued.apiKey);
+                    });
+                  const menu: RowAction[] = [
+                    { key: 'edit', label: t('common.edit'), onSelect: () => open(r) },
+                    ...(stale
+                      ? []
+                      : [
+                          {
+                            key: 'rotate',
+                            label: t('applications.rotate'),
+                            consequence: t('applications.rotateDescription', { name: r.name }),
+                            confirm: t('applications.rotateConfirm'),
+                            pending: t('applications.rotating'),
+                            onConfirm: rotateKey,
+                          } satisfies RowAction,
+                        ]),
                     {
-                      key: 'rotate',
-                      label: t('applications.rotate'),
-                      consequence: t('applications.rotateDescription', { name: r.name }),
-                      confirm: t('applications.rotateConfirm'),
-                      pending: t('applications.rotating'),
-                      onConfirm: rotateKey,
-                    } satisfies RowAction,
-                  ]),
-              {
-                key: 'delete',
-                label: t('common.delete'),
-                destructive: true,
-                consequence: `${t('common.delete')} ${r.name}. ${t('applications.deleteConsequence')}`,
-                confirm: t('common.confirmDelete'),
-                pending: t('common.deleting'),
-                onConfirm: () => act(() => remove.mutateAsync(r.id)),
-              },
-            ];
-            return (
-              <>
-                <button className="btn btn-sm btn-secondary" onClick={() => setAccess(r)}>
-                  {t('applications.access')}
-                  <span className="sr-only"> {r.name}</span>
-                </button>
-                {stale && (
-                  <ConfirmAction
-                    trigger={t('applications.rotate')}
-                    confirm={t('applications.rotateConfirm')}
-                    pending={t('applications.rotating')}
-                    description={t('applications.rotateDescription', { name: r.name })}
-                    prominent
-                    onConfirm={rotateKey}
-                  />
-                )}
-                <RowMenu label={r.name} actions={menu} />
-              </>
-            );
-          }}
-        />
+                      key: 'delete',
+                      label: t('common.delete'),
+                      destructive: true,
+                      consequence: `${t('common.delete')} ${r.name}. ${t('applications.deleteConsequence')}`,
+                      confirm: t('common.confirmDelete'),
+                      pending: t('common.deleting'),
+                      onConfirm: () => act(() => remove.mutateAsync(r.id)),
+                    },
+                  ];
+                  return (
+                    <>
+                      <button className="btn btn-sm btn-secondary" onClick={() => setAccess(r)}>
+                        {t('applications.access')}
+                        <span className="sr-only"> {r.name}</span>
+                      </button>
+                      {stale && (
+                        <ConfirmAction
+                          trigger={t('applications.rotate')}
+                          confirm={t('applications.rotateConfirm')}
+                          pending={t('applications.rotating')}
+                          description={t('applications.rotateDescription', { name: r.name })}
+                          prominent
+                          onConfirm={rotateKey}
+                        />
+                      )}
+                      <RowMenu label={r.name} actions={menu} />
+                    </>
+                  );
+                }}
+              />
+              <Pager
+                page={view.page}
+                totalPages={view.totalPages}
+                totalElements={view.totalElements}
+                unit={t('pager.applications')}
+                onPage={view.setPage}
+              />
+            </>
+          )}
+        </>
       )}
 
       {panel !== 'closed' && (

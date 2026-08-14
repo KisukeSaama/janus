@@ -87,8 +87,14 @@ export function ConnectFlow({
   const [headerName, setHeaderName] = useState('X-Api-Key');
   const [queryParameter, setQueryParameter] = useState('api_key');
   const [tokenUrl, setTokenUrl] = useState('');
-  const [authorizationUrl, setAuthorizationUrl] = useState('');
   const [tokenScopes, setTokenScopes] = useState('');
+  // The account connection, set beside whatever the application itself presents rather than instead
+  // of it. One API is one entry here, however many identities it happens to offer.
+  const [connectable, setConnectable] = useState(false);
+  const [authorizationUrl, setAuthorizationUrl] = useState('');
+  const [connectionTokenUrl, setConnectionTokenUrl] = useState('');
+  const [connectionScopes, setConnectionScopes] = useState('');
+  const [connectionSecret, setConnectionSecret] = useState('');
   const [signing, setSigning] = useState<Signing>(NO_SIGNING);
   const [activate, setActivate] = useState(false);
   const [secret, setSecret] = useState('');
@@ -107,7 +113,10 @@ export function ConnectFlow({
   const leave = (exit: () => void) => (started ? setLeaving(() => exit) : exit());
 
   const signs = authType === 'HMAC_SIGNATURE';
-  const exchanges = authType === 'OAUTH2_CLIENT_CREDENTIALS' || authType === 'OAUTH2_AUTHORIZATION_CODE';
+  const exchanges = authType === 'OAUTH2_CLIENT_CREDENTIALS';
+  // Whether the connection needs an OAuth client of its own. It does not when the application
+  // already stores one, which is every API that mints both kinds of token from a single client id.
+  const connectionNeedsSecret = connectable && authType !== 'NONE' && !exchanges;
 
   const complete: Record<Step, boolean> = {
     1: apiName.trim() !== '' && effectiveSlug.length >= 3 && baseUrl.trim() !== '',
@@ -116,12 +125,13 @@ export function ConnectFlow({
       (authType !== 'API_KEY_HEADER' || headerName.trim() !== '') &&
       (authType !== 'API_KEY_QUERY' || queryParameter.trim() !== '') &&
       (!exchanges || tokenUrl.trim() !== '') &&
-      (authType !== 'OAUTH2_AUTHORIZATION_CODE' || authorizationUrl.trim() !== '') &&
+      (!connectable || (authorizationUrl.trim() !== '' && connectionTokenUrl.trim() !== '')) &&
       // A signature travels in exactly one place, which is the one rule a reader can get wrong here.
       (!signs ||
         (signing.template.trim() !== '' &&
           (signing.signatureHeader.trim() !== '') !== (signing.signatureParameter.trim() !== ''))) &&
-      (!activate || authType === 'NONE' || secret !== ''),
+      (!activate || authType === 'NONE' || secret !== '') &&
+      (!activate || !connectionNeedsSecret || connectionSecret !== ''),
   };
 
   /** The authentication contract, in the shape both endpoints take it. */
@@ -133,7 +143,6 @@ export function ConnectFlow({
       queryParameter: authType === 'API_KEY_QUERY' ? queryParameter.trim() : null,
       tokenUrl: exchanges ? tokenUrl.trim() : null,
       tokenScopes: exchanges ? tokenScopes.trim() || null : null,
-      authorizationUrl: authType === 'OAUTH2_AUTHORIZATION_CODE' ? authorizationUrl.trim() : null,
       signatureAlgorithm: signs ? 'HMAC_SHA256' : null,
       signatureTemplate: signs ? signing.template.trim() : null,
       signatureEncoding: signs ? signing.encoding : null,
@@ -141,6 +150,16 @@ export function ConnectFlow({
       signatureParameter: signs ? signing.signatureParameter.trim() || null : null,
       timestampHeader: signs ? signing.timestampHeader.trim() || null : null,
       timestampParameter: signs ? signing.timestampParameter.trim() || null : null,
+    };
+  }
+
+  /** What the API offers an account holder, cleared as a block when it offers nothing. */
+  function connection() {
+    return {
+      connectionAuthorizationUrl: connectable ? authorizationUrl.trim() : null,
+      connectionTokenUrl: connectable ? connectionTokenUrl.trim() : null,
+      connectionScopes: connectable ? connectionScopes.trim() || null : null,
+      connectionClientAuth: connectable ? 'BASIC' : null,
     };
   }
 
@@ -175,6 +194,7 @@ export function ConnectFlow({
         enabled: true,
         allowPrivateDestination: onLan,
         ...contract(),
+        ...connection(),
       });
       undo.push(() => del(`/providers/${provider.id}`));
 
@@ -189,6 +209,8 @@ export function ConnectFlow({
           providerId: provider.id,
           ...contract(),
           secret: authType === 'NONE' ? null : secret,
+          // Only where the connection does not share what the application already stores.
+          connectionSecret: connectionNeedsSecret ? connectionSecret : null,
           // Empty is a supported answer: many upstream keys have no published end date. Converting
           // only here keeps the form in the operator's calendar while the API receives an instant.
           expiresAt: authType === 'NONE' ? null : fromDateInput(expiresAt),
@@ -220,40 +242,45 @@ export function ConnectFlow({
               <span key={n} className={`h-1 w-6 rounded-[1px] ${n <= step ? 'bg-accent' : 'bg-line'}`} />
             ))}
           </span>
+        </div>
+      }
+      /* Leaving sits at the far end of the bar from the button that carries on: the two answers to
+         the same question, told apart by distance and by weight rather than by corner. */
+      footer={
+        <>
           <button
-            className="btn btn-sm btn-quiet"
+            type="button"
+            className="btn btn-quiet"
             aria-haspopup={started ? 'dialog' : undefined}
             onClick={() => leave(onClose)}
           >
             {t('connect.abandon')}
           </button>
-        </div>
-      }
-      footer={
-        <>
-          {step > 1 && (
-            <button className="btn btn-secondary" type="button" onClick={() => setStep((step - 1) as Step)}>
-              <ArrowLeft size={15} strokeWidth={2.25} />
-              {t('common.back')}
-            </button>
-          )}
-          <button
-            type="submit"
-            form="connect"
-            className="btn btn-primary ml-auto min-w-[12rem]"
-            disabled={!complete[step] || busy}
-          >
-            {step < 2 ? (
-              <>
-                {t('common.next')}
-                <ArrowRight size={15} strokeWidth={2.25} />
-              </>
-            ) : busy ? (
-              t('connect.creating')
-            ) : (
-              t('connect.submit')
+          <div className="ml-auto flex items-center gap-3">
+            {step > 1 && (
+              <button className="btn btn-secondary" type="button" onClick={() => setStep((step - 1) as Step)}>
+                <ArrowLeft size={15} strokeWidth={2.25} />
+                {t('common.back')}
+              </button>
             )}
-          </button>
+            <button
+              type="submit"
+              form="connect"
+              className="btn btn-primary min-w-[12rem]"
+              disabled={!complete[step] || busy}
+            >
+              {step < 2 ? (
+                <>
+                  {t('common.next')}
+                  <ArrowRight size={15} strokeWidth={2.25} />
+                </>
+              ) : busy ? (
+                t('connect.creating')
+              ) : (
+                t('connect.submit')
+              )}
+            </button>
+          </div>
         </>
       }
     >
@@ -338,11 +365,6 @@ export function ConnectFlow({
                   label: t('connect.authOauth2'),
                   hint: t('connect.authOauth2Hint'),
                 },
-                {
-                  value: 'OAUTH2_AUTHORIZATION_CODE',
-                  label: t('connect.authOauthUser'),
-                  hint: t('connect.authOauthUserHint'),
-                },
                 // Last of those that send something: a reader only picks it knowing they need it.
                 { value: 'HMAC_SIGNATURE', label: t('connect.authHmac'), hint: t('connect.authHmacHint') },
                 // Last overall, because it is the one case where this step asks for nothing.
@@ -371,22 +393,6 @@ export function ConnectFlow({
                 onChange={(e) => setQueryParameter(e.target.value)}
               />
             )}
-            {/* Registering this with the provider is a step outside Janus, and the one nobody is told
-                about until the authorisation is refused for a redirect that was never declared. */}
-            {authType === 'OAUTH2_AUTHORIZATION_CODE' && <CallbackToRegister />}
-            {authType === 'OAUTH2_AUTHORIZATION_CODE' && (
-              <Field
-                label={t('connect.authorizationUrl')}
-                type="url"
-                required
-                data
-                autoComplete="off"
-                placeholder="https://accounts.spotify.com/authorize"
-                value={authorizationUrl}
-                onChange={(e) => setAuthorizationUrl(e.target.value)}
-                hint={t('connect.authorizationUrlHint')}
-              />
-            )}
             {exchanges && (
               <>
                 <Field
@@ -406,15 +412,60 @@ export function ConnectFlow({
                   autoComplete="off"
                   value={tokenScopes}
                   onChange={(e) => setTokenScopes(e.target.value)}
-                  hint={
-                    authType === 'OAUTH2_AUTHORIZATION_CODE'
-                      ? t('connect.tokenScopesHintUser')
-                      : t('connect.tokenScopesHint')
-                  }
+                  hint={t('connect.tokenScopesHint')}
                 />
               </>
             )}
             {signs && <SigningFields value={signing} onChange={setSigning} />}
+
+            {/* Beside the contract above, not instead of it: this is the second identity the same
+                API may offer, and the reason it no longer has to be registered twice. */}
+            <div className="space-y-6 border-t border-line pt-6">
+              <CheckField
+                label={t('connect.connectionLabel')}
+                checked={connectable}
+                onChange={(e) => setConnectable(e.target.checked)}
+                hint={t('connect.connectionHint')}
+              />
+              {connectable && (
+                <>
+                  {/* Registering this with the provider is a step outside Janus, and the one nobody
+                      is told about until an authorisation is refused for an undeclared redirect. */}
+                  <CallbackToRegister />
+                  <Field
+                    label={t('connect.authorizationUrl')}
+                    type="url"
+                    required
+                    data
+                    autoComplete="off"
+                    placeholder="https://accounts.spotify.com/authorize"
+                    value={authorizationUrl}
+                    onChange={(e) => setAuthorizationUrl(e.target.value)}
+                    hint={t('connect.authorizationUrlHint')}
+                  />
+                  <Field
+                    label={t('connect.tokenUrl')}
+                    type="url"
+                    required
+                    data
+                    autoComplete="off"
+                    placeholder="https://accounts.spotify.com/api/token"
+                    value={connectionTokenUrl}
+                    onChange={(e) => setConnectionTokenUrl(e.target.value)}
+                    hint={t('connect.tokenUrlHint')}
+                  />
+                  <Field
+                    label={t('connect.tokenScopes')}
+                    data
+                    autoComplete="off"
+                    value={connectionScopes}
+                    onChange={(e) => setConnectionScopes(e.target.value)}
+                    hint={t('connect.tokenScopesHintUser')}
+                  />
+                  <p className="text-xs text-text-2">{t('connect.consentNote')}</p>
+                </>
+              )}
+            </div>
             <div>
               <p className="stamp mb-1.5 text-text-2">{t('connect.preview')}</p>
               <p className="data rounded-control border border-line bg-sunk px-3 py-2 text-xs leading-5">
@@ -427,9 +478,6 @@ export function ConnectFlow({
               </p>
               {authType === 'OAUTH2_CLIENT_CREDENTIALS' && (
                 <p className="mt-1.5 text-xs text-text-2">{t('connect.exchangeNote')}</p>
-              )}
-              {authType === 'OAUTH2_AUTHORIZATION_CODE' && (
-                <p className="mt-1.5 text-xs text-text-2">{t('connect.consentNote')}</p>
               )}
             </div>
 
@@ -454,13 +502,23 @@ export function ConnectFlow({
                     value={secret}
                     onChange={(e) => setSecret(e.target.value)}
                     hint={
-                      authType === 'OAUTH2_AUTHORIZATION_CODE'
-                        ? t('connect.secretConsentHint')
-                        : authType === 'OAUTH2_CLIENT_CREDENTIALS'
-                          ? t('connect.secretExchangeHint')
-                          : t('connect.secretHint')
+                      authType === 'OAUTH2_CLIENT_CREDENTIALS'
+                        ? t('connect.secretExchangeHint')
+                        : t('connect.secretHint')
                     }
                   />
+                  {connectionNeedsSecret && (
+                    <Field
+                      label={t('connect.connectionSecret')}
+                      type="password"
+                      required
+                      autoComplete="new-password"
+                      placeholder="client_id:client_secret"
+                      value={connectionSecret}
+                      onChange={(e) => setConnectionSecret(e.target.value)}
+                      hint={t('connect.connectionSecretHint')}
+                    />
+                  )}
                   <Field
                     label={t('expiry.field')}
                     type="date"

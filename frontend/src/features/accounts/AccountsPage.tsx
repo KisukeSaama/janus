@@ -20,13 +20,16 @@ import {
   FormLayout,
   Notice,
   PageHead,
+  Pager,
   RecordCell,
+  SearchField,
   SelectField,
   SidePanel,
   SkeletonRows,
   type Column,
 } from '../../components';
 import { useI18n, type MessageKey } from '../../i18n';
+import { useListView } from '../../hooks/useListView';
 import { useErrorMessage } from '../../lib/errors';
 
 /**
@@ -52,6 +55,13 @@ export function AccountsPage({ identity }: { identity: Identity }) {
   const rows = accounts.data ?? [];
   const editing = typeof panel === 'object' ? panel : null;
   const superAdmin = identity.role === 'SUPER_ADMIN';
+
+  /** Narrowed by the three ways a person is named here: displayed, signed in with, and written to. */
+  const view = useListView(rows, (account, needle) =>
+    [account.displayName, account.username, account.email].some((value) =>
+      value.toLowerCase().includes(needle),
+    ),
+  );
 
   /** Whether the signed-in person may act on this row at all — the rule AccountService enforces. */
   const manageable = (account: Account) =>
@@ -145,40 +155,61 @@ export function AccountsPage({ identity }: { identity: Identity }) {
       ) : rows.length === 0 ? (
         <Empty headline={t('accounts.emptyTitle')} hint={t('accounts.emptyHint')} action={newButton} />
       ) : (
-        <DataTable
-          columns={columns}
-          rows={rows}
-          rowKey={(r) => r.id}
-          actions={(r) =>
-            manageable(r) ? (
-              // Two entries do not earn a menu: an overflow control here would cost a click to reach
-              // what already fits, and neither verb is ambiguous about what it acts on.
-              <>
-                <button className="btn btn-sm btn-quiet" onClick={() => setPanel(r)}>
-                  {t('common.edit')}
-                  <span className="sr-only"> {r.displayName}</span>
-                </button>
-                {r.id !== identity.id && (
-                  <DeleteAction
-                    label={r.displayName}
-                    consequence={t('accounts.deleteConsequence')}
-                    onDelete={async () => {
-                      setError('');
-                      try {
-                        await remove.mutateAsync(r.id);
-                      } catch (x) {
-                        setError(describe(x));
-                      }
-                    }}
-                  />
-                )}
-              </>
-            ) : (
-              // Peers do not hold power over each other; saying so is better than a button that fails.
-              <span className="text-xs text-text-3">{t('accounts.notYours')}</span>
-            )
-          }
-        />
+        <>
+          <SearchField
+            value={view.query}
+            onChange={view.search}
+            label={t('accounts.searchLabel')}
+            placeholder={t('accounts.searchPlaceholder')}
+          />
+          {view.rows.length === 0 ? (
+            <Empty headline={t('accounts.noResults')} hint={t('accounts.noResultsHint')} />
+          ) : (
+            <>
+              <DataTable
+                columns={columns}
+                rows={view.rows}
+                rowKey={(r) => r.id}
+                actions={(r) =>
+                  manageable(r) ? (
+                    // Two entries do not earn a menu: an overflow control here would cost a click to reach
+                    // what already fits, and neither verb is ambiguous about what it acts on.
+                    <>
+                      <button className="btn btn-sm btn-quiet" onClick={() => setPanel(r)}>
+                        {t('common.edit')}
+                        <span className="sr-only"> {r.displayName}</span>
+                      </button>
+                      {r.id !== identity.id && (
+                        <DeleteAction
+                          label={r.displayName}
+                          consequence={t('accounts.deleteConsequence')}
+                          onDelete={async () => {
+                            setError('');
+                            try {
+                              await remove.mutateAsync(r.id);
+                            } catch (x) {
+                              setError(describe(x));
+                            }
+                          }}
+                        />
+                      )}
+                    </>
+                  ) : (
+                    // Peers do not hold power over each other; saying so is better than a button that fails.
+                    <span className="text-xs text-text-3">{t('accounts.notYours')}</span>
+                  )
+                }
+              />
+              <Pager
+                page={view.page}
+                totalPages={view.totalPages}
+                totalElements={view.totalElements}
+                unit={t('pager.accounts')}
+                onPage={view.setPage}
+              />
+            </>
+          )}
+        </>
       )}
 
       {panel !== 'closed' && (

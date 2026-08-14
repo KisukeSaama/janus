@@ -207,16 +207,11 @@ export function ServiceFlow({
                 <span key={n} className={`h-1 w-6 rounded-[1px] ${n <= step ? 'bg-accent' : 'bg-line'}`} />
               ))}
             </span>
-            <button
-              className="btn btn-sm btn-quiet"
-              aria-haspopup={started ? 'dialog' : undefined}
-              onClick={() => leave(onClose)}
-            >
-              {t('connect.abandon')}
-            </button>
           </div>
         )
       }
+      /* Leaving sits at the far end of the bar from the button that carries on. Once the records
+         exist there is nothing left to leave, so only the closing button remains. */
       footer={
         ready ? (
           <button className="btn btn-primary ml-auto min-w-[12rem]" onClick={onDone}>
@@ -224,29 +219,39 @@ export function ServiceFlow({
           </button>
         ) : (
           <>
-            {step > 1 && (
-              <button className="btn btn-secondary" type="button" onClick={() => setStep(1)}>
-                <ArrowLeft size={15} strokeWidth={2.25} />
-                {t('common.back')}
-              </button>
-            )}
             <button
-              type="submit"
-              form="service"
-              className="btn btn-primary ml-auto min-w-[12rem]"
-              disabled={!complete[step] || busy}
+              type="button"
+              className="btn btn-quiet"
+              aria-haspopup={started ? 'dialog' : undefined}
+              onClick={() => leave(onClose)}
             >
-              {step < 2 ? (
-                <>
-                  {t('common.next')}
-                  <ArrowRight size={15} strokeWidth={2.25} />
-                </>
-              ) : busy ? (
-                t('connect.creating')
-              ) : (
-                t('applications.submit')
-              )}
+              {t('connect.abandon')}
             </button>
+            <div className="ml-auto flex items-center gap-3">
+              {step > 1 && (
+                <button className="btn btn-secondary" type="button" onClick={() => setStep(1)}>
+                  <ArrowLeft size={15} strokeWidth={2.25} />
+                  {t('common.back')}
+                </button>
+              )}
+              <button
+                type="submit"
+                form="service"
+                className="btn btn-primary min-w-[12rem]"
+                disabled={!complete[step] || busy}
+              >
+                {step < 2 ? (
+                  <>
+                    {t('common.next')}
+                    <ArrowRight size={15} strokeWidth={2.25} />
+                  </>
+                ) : busy ? (
+                  t('connect.creating')
+                ) : (
+                  t('applications.submit')
+                )}
+              </button>
+            </div>
           </>
         )
       }

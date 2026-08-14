@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.UUID;
 
+import io.janus.credentials.Identity;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.http.*;
 
@@ -159,8 +161,8 @@ class CachePolicyTest {
 
     @Test
     void theCredentialIsPartOfTheAddress() {
-        String one = CachePolicy.key(PROVIDER, CREDENTIAL, "GET", route("/v1/orders"), new HttpHeaders());
-        String other = CachePolicy.key(PROVIDER, UUID.randomUUID(), "GET", route("/v1/orders"), new HttpHeaders());
+        String one = CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", route("/v1/orders"), new HttpHeaders());
+        String other = CachePolicy.key(PROVIDER, UUID.randomUUID(), Identity.APP, "GET", route("/v1/orders"), new HttpHeaders());
         assertNotEquals(one, other);
     }
 
@@ -171,26 +173,26 @@ class CachePolicyTest {
         var plain = GatewayPath.parse("/gateway/billing/v1/orders", "billing", null);
         var filtered = GatewayPath.parse("/gateway/billing/v1/orders", "billing", "status=open");
         assertNotEquals(
-                CachePolicy.key(PROVIDER, CREDENTIAL, "GET", plain, json),
-                CachePolicy.key(PROVIDER, CREDENTIAL, "GET", filtered, json));
+                CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", plain, json),
+                CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", filtered, json));
         assertNotEquals(
-                CachePolicy.key(PROVIDER, CREDENTIAL, "GET", plain, json),
-                CachePolicy.key(PROVIDER, CREDENTIAL, "GET", plain, xml));
+                CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", plain, json),
+                CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", plain, xml));
     }
 
     @Test
     void theMethodIsPartOfTheAddress() {
         assertNotEquals(
-                CachePolicy.key(PROVIDER, CREDENTIAL, "GET", route("/v1/orders"), new HttpHeaders()),
-                CachePolicy.key(PROVIDER, CREDENTIAL, "HEAD", route("/v1/orders"), new HttpHeaders()));
+                CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", route("/v1/orders"), new HttpHeaders()),
+                CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "HEAD", route("/v1/orders"), new HttpHeaders()));
     }
 
     @Test
     void aWriteCoversTheResourceAndItsMembersButNotItsNeighbours() {
-        String prefix = CachePolicy.resourcePrefix(PROVIDER, CREDENTIAL);
-        String collection = CachePolicy.key(PROVIDER, CREDENTIAL, "GET", route("/v1/orders"), new HttpHeaders());
-        String member = CachePolicy.key(PROVIDER, CREDENTIAL, "GET", route("/v1/orders/42"), new HttpHeaders());
-        String neighbour = CachePolicy.key(PROVIDER, CREDENTIAL, "GET", route("/v1/orders-archive"), new HttpHeaders());
+        String prefix = CachePolicy.resourcePrefix(PROVIDER, CREDENTIAL, Identity.APP);
+        String collection = CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", route("/v1/orders"), new HttpHeaders());
+        String member = CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", route("/v1/orders/42"), new HttpHeaders());
+        String neighbour = CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", route("/v1/orders-archive"), new HttpHeaders());
 
         assertTrue(CachePolicy.covers(collection, prefix, "/v1/orders"));
         assertTrue(CachePolicy.covers(member, prefix, "/v1/orders"));
@@ -200,8 +202,8 @@ class CachePolicyTest {
 
     @Test
     void anotherCredentialIsNeverCoveredByAWrite() {
-        String otherPrefix = CachePolicy.resourcePrefix(PROVIDER, UUID.randomUUID());
-        String mine = CachePolicy.key(PROVIDER, CREDENTIAL, "GET", route("/v1/orders"), new HttpHeaders());
+        String otherPrefix = CachePolicy.resourcePrefix(PROVIDER, UUID.randomUUID(), Identity.APP);
+        String mine = CachePolicy.key(PROVIDER, CREDENTIAL, Identity.APP, "GET", route("/v1/orders"), new HttpHeaders());
         assertFalse(CachePolicy.covers(mine, otherPrefix, "/v1/orders"));
     }
 

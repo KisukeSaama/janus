@@ -7,6 +7,8 @@ import java.util.function.Predicate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 
+import io.janus.credentials.Identity;
+
 /**
  * The stored responses, bounded by count and by bytes and evicted least-recently-used first.
  *
@@ -178,10 +180,20 @@ public class ResponseCache {
         }
     }
 
-    /** Drops what a write to {@code decodedPath} made questionable: that resource and its members. */
+    /**
+     * Drops what a write to {@code decodedPath} made questionable: that resource and its members.
+     *
+     * <p>Both identities, whichever one performed the write. A playlist somebody adds a track to as
+     * themselves is the same playlist the application read a moment ago, and an invalidation that
+     * covered only the identity that wrote would leave the other serving the version from before.
+     */
     public int invalidateResource(UUID providerId, UUID credentialId, String decodedPath) {
-        String prefix = CachePolicy.resourcePrefix(providerId, credentialId);
-        return removeIf(key -> CachePolicy.covers(key, prefix, decodedPath));
+        int dropped = 0;
+        for (Identity identity : Identity.values()) {
+            String prefix = CachePolicy.resourcePrefix(providerId, credentialId, identity);
+            dropped += removeIf(key -> CachePolicy.covers(key, prefix, decodedPath));
+        }
+        return dropped;
     }
 
     public int invalidateProvider(UUID providerId) {

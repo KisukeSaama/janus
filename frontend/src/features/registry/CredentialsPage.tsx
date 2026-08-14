@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { Plus } from 'lucide-react';
 
 import {
   useCreateCredential,
@@ -31,6 +31,7 @@ import {
   PingState,
   RecordCell,
   RowMenu,
+  SearchField,
   SelectField,
   SidePanel,
   SkeletonRows,
@@ -77,6 +78,8 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
   // The array declaration only means anything while normalisation is on, so it follows the switch
   // rather than sitting there inert — and a saved form would have cleared it anyway.
   const [normalizing, setNormalizing] = useState(false);
+  /** Whether this API also lets an account holder connect theirs, beside whatever it presents. */
+  const [connectable, setConnectable] = useState(false);
   const [formError, setFormError] = useState('');
   const [error, setError] = useState('');
 
@@ -118,6 +121,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
   function openApi(provider: Provider) {
     setStrategy(provider.authType);
     setNormalizing(provider.normalizeJson ?? false);
+    setConnectable(Boolean(provider.connectionAuthorizationUrl));
     setPanel({ kind: 'api', provider });
   }
 
@@ -204,6 +208,14 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
       tokenUrl: String(form.get('tokenUrl') ?? '') || null,
       tokenScopes: String(form.get('tokenScopes') ?? '') || null,
       tokenClientAuth: (String(form.get('tokenClientAuth') ?? '') || null) as TokenClientAuth | null,
+      // Cleared as a block when the box is unticked, so withdrawing a connection is one gesture
+      // rather than three emptied fields the backend would refuse as half a flow.
+      connectionAuthorizationUrl: connectable ? String(form.get('connectionAuthorizationUrl') ?? '') || null : null,
+      connectionTokenUrl: connectable ? String(form.get('connectionTokenUrl') ?? '') || null : null,
+      connectionScopes: connectable ? String(form.get('connectionScopes') ?? '') || null : null,
+      connectionClientAuth: connectable
+        ? ((String(form.get('connectionClientAuth') ?? '') || null) as TokenClientAuth | null)
+        : null,
     };
     setFormError('');
     try {
@@ -268,19 +280,12 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
       <PageHead section={t('nav.registry')} title={t('credentials.title')} intro={t('credentials.catalogIntro')} action={primary} />
       {error && <Notice>{error}</Notice>}
 
-      <div className="mb-4 flex max-w-xl items-center gap-2">
-        <div className="relative min-w-0 flex-1">
-          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-3" />
-          <input
-            className="field w-full pl-9"
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t('credentials.searchPlaceholder')}
-            aria-label={t('credentials.searchLabel')}
-          />
-        </div>
-      </div>
+      <SearchField
+        value={query}
+        onChange={setQuery}
+        label={t('credentials.searchLabel')}
+        placeholder={t('credentials.searchPlaceholder')}
+      />
 
       {probed && (
         <div className="panel mb-4 flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
@@ -382,6 +387,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
             page={catalog.data?.page ?? page}
             totalPages={catalog.data?.totalPages ?? 0}
             totalElements={catalog.data?.totalElements ?? 0}
+            unit={t('pager.apis')}
             busy={catalog.isFetching}
             onPage={setPage}
           />
@@ -467,6 +473,21 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
                 <Field label={t('credentials.fieldTokenUrl')} name="tokenUrl" required data defaultValue={panel.provider.tokenUrl} />
                 <Field label={t('credentials.fieldTokenScopes')} name="tokenScopes" data defaultValue={panel.provider.tokenScopes} />
                 <SelectField label={t('credentials.fieldTokenClientAuth')} name="tokenClientAuth" defaultValue={panel.provider.tokenClientAuth ?? 'BASIC'} options={[{ value: 'BASIC', label: t('credentials.tokenClientAuthBasic') }, { value: 'POST', label: t('credentials.tokenClientAuthPost') }]} />
+              </>
+            )}
+            <CheckField
+              label={t('providers.connectionLabel')}
+              name="connectable"
+              hint={t('providers.connectionHint')}
+              checked={connectable}
+              onChange={(event) => setConnectable(event.target.checked)}
+            />
+            {connectable && (
+              <>
+                <Field label={t('credentials.authorizationUrl')} name="connectionAuthorizationUrl" required data defaultValue={panel.provider.connectionAuthorizationUrl} hint={t('credentials.authorizationUrlHint')} />
+                <Field label={t('credentials.fieldTokenUrl')} name="connectionTokenUrl" required data defaultValue={panel.provider.connectionTokenUrl} />
+                <Field label={t('credentials.fieldTokenScopes')} name="connectionScopes" data defaultValue={panel.provider.connectionScopes} hint={t('credentials.tokenScopesHintUser')} />
+                <SelectField label={t('credentials.fieldTokenClientAuth')} name="connectionClientAuth" defaultValue={panel.provider.connectionClientAuth ?? 'BASIC'} options={[{ value: 'BASIC', label: t('credentials.tokenClientAuthBasic') }, { value: 'POST', label: t('credentials.tokenClientAuthPost') }]} />
               </>
             )}
             <CheckField label={t('providers.cacheLabel')} name="cacheEnabled" defaultChecked={panel.provider.cacheEnabled ?? true} />

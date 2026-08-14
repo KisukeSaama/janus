@@ -25,6 +25,12 @@ export type AgentApi = {
   slug: string;
   /** Whether this API's responses reach the caller as JSON whatever it answers in. */
   normalizeJson: boolean;
+  /** The path this service may call under, when its grant names one. */
+  pathPrefix?: string;
+  /** The methods it may use, when its grant names any. Empty is all of them. */
+  methods: string[];
+  /** Whether somebody has connected an account here, so calls must say whom they speak for. */
+  connected: boolean;
 };
 
 export type AgentTarget = {
@@ -78,6 +84,7 @@ Send the request you would have sent to the API, with its address replaced by
     rate limiting     per-caller quota, answered as 429 with \`Retry-After\`
     secret storage    the API's secret lives in the vault, never in this project
     OAuth2 tokens     client-credentials tokens are fetched, cached and renewed by Janus
+    two identities    an API's own token or a connected person's; say which with X-Janus-Identity
     audit trail       every call is recorded with its correlation id
 
 So: no cache layer, no retry or backoff wrapper, no circuit breaker, no token store, no entry in
@@ -87,8 +94,10 @@ So: no cache layer, no retry or backoff wrapper, no circuit breaker, no token st
 
 ${apiList(apis)}
 
-Any path and any method under a slug above is forwarded. What the API itself allows for the secret
-Janus presents is the only limit; an API at a slug not listed is not reachable at all.
+Unless a line above narrows it, any path and any method under a slug is forwarded, and what the API
+itself allows for the secret Janus presents is the only limit. A line that names a path or a set of
+methods is a ceiling this service was given: anything outside it is refused with 403 by Janus, before
+the API is called. An API at a slug not listed is not reachable at all.
 ${conversionNote(apis)}
 
 ## Errors
@@ -98,7 +107,7 @@ media type means the API itself answered.
 
     400  dot segment, // or encoded separator in the path
     401  headers missing, malformed, or wrong
-    403  this service is not connected to that API, or the connection is paused
+    403  not connected to that API, connection paused, or a path or method outside what it was given
     404  no API at that slug, or its record is disabled
     405  a method the gateway does not forward
     413  body over the limit
@@ -106,8 +115,25 @@ media type means the API itself answered.
     502  the API failed, or its address is no longer permitted
 
 Log \`X-Janus-Correlation-Id\`, present on every response, beside your own errors. Also returned:
-\`X-Janus-Cache\`, \`X-Janus-RateLimit-Limit/-Remaining/-Reset\`, \`X-Janus-Upstream-Attempts\`,
-and \`Retry-After\` on a 429.
+\`X-Janus-Cache\`, \`X-Janus-Identity\`, \`X-Janus-RateLimit-Limit/-Remaining/-Reset\`,
+\`X-Janus-Upstream-Attempts\`, and \`Retry-After\` on a 429.
+
+## Two identities, where an API has both
+
+An API marked **app and account** above answers both for this service and for the person who
+connected their account. Nothing in a URL says which an endpoint wants, so **state it**: send
+
+    X-Janus-Identity: app        # the API's own data: a catalogue, a search, a public resource
+    X-Janus-Identity: account    # data belonging to the person who connected: their library, their profile
+
+on every call to those APIs, decided from what the endpoint returns rather than guessed at call time.
+It never reaches the API, and \`X-Janus-Identity\` on the response repeats what was used.
+
+Leaving it off is not an error: Janus presents the application, and on a refusal tries the account and
+remembers the answer. But it costs an extra round trip against the API's quota, it makes the first
+call to a new endpoint behave differently from every call after it, and it does not happen at all
+where a second attempt could repeat a write: a \`POST\` refused with 403 is returned as it came.
+Send the header.
 
 ## If the API you need is not listed
 
@@ -130,12 +156,24 @@ Then add the new slug to this file.
 `;
 }
 
-/** One line per API: the name, the gateway path its routes hang off, and what it answers in. */
+/**
+ * One line per API: the name, the gateway path its routes hang off, what it answers in, and the two
+ * things a caller cannot infer. Those two are how much of it this service may reach, and whether it
+ * has to say whom a call speaks for.
+ */
 function apiList(apis: AgentApi[]): string {
   if (apis.length === 0) return 'None yet. Follow the next section before writing any call.';
 
   return apis
-    .map(({ name, slug, normalizeJson }) => `- ${name} — \`/gateway/${slug}/…\`${normalizeJson ? ' — **JSON**' : ''}`)
+    .map((api) => {
+      const notes = [
+        api.normalizeJson ? '**JSON**' : '',
+        api.pathPrefix ? `only \`${api.pathPrefix}\` and under` : '',
+        api.methods.length > 0 ? `only ${api.methods.join(', ')}` : '',
+        api.connected ? 'app **and** account' : '',
+      ].filter(Boolean);
+      return `- **${api.name}**: \`/gateway/${api.slug}/…\`${notes.length > 0 ? ` (${notes.join(', ')})` : ''}`;
+    })
     .join('\n');
 }
 

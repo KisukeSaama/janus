@@ -55,6 +55,7 @@ class GatewayTrafficServiceTest {
     // The real one. It does nothing at all unless a destination asks for it, so every test that is
     // not about conversion is unaffected by its presence.
     private final JsonNormalizer normalizer = new JsonNormalizer(new ObjectMapper(), properties);
+    private final IdentityMemory identities = new IdentityMemory();
 
     private final List<ClientRequest> sent = new ArrayList<>();
     private final Deque<Supplier<Mono<ClientResponse>>> answers = new ArrayDeque<>();
@@ -75,7 +76,8 @@ class GatewayTrafficServiceTest {
                 })
                 .build();
         service =
-                new GatewayTrafficService(web, web, bao, tokens, cache, limiter, cooldown, normalizer, properties, 30);
+                new GatewayTrafficService(
+                        web, web, bao, tokens, cache, limiter, cooldown, normalizer, identities, properties, 30);
         when(bao.read(any())).thenReturn(SECRET);
     }
 
@@ -182,7 +184,7 @@ class GatewayTrafficServiceTest {
     @Test
     void sendsTheObtainedTokenRatherThanTheStoredClientCredentials() {
         when(bao.read(any())).thenReturn("client-id:client-secret");
-        when(tokens.tokenFor(any(), eq("client-id:client-secret"))).thenReturn("short-lived-token");
+        when(tokens.tokenFor(any(), any(), eq("client-id:client-secret"))).thenReturn("short-lived-token");
         var credential = new Credential(
                 provider,
                 "key",
@@ -742,5 +744,248 @@ class GatewayTrafficServiceTest {
         assertThat(outcome.status().value()).isEqualTo(200);
         assertThat(body(outcome)).isEqualTo("<MediaContainer><Directory></MediaContainer>");
         assertThat(outcome.headers().getFirst(JsonNormalizer.TRANSFORM_HEADER)).startsWith("none (");
+    }
+
+    // --- speaking for the application, or for whoever connected their account ------------------
+
+    /**
+     * One API, two identities, and nothing in a URL that says which an endpoint wants. What is
+     * asserted here is the whole bargain: the application goes first because its answers are the ones
+     * that can be shared, a refusal is investigated rather than believed, and the lesson is only drawn
+     * when the other identity actually works.
+     */
+    @Nested
+    class Identities {
+
+        private Credential connected() {
+            var connection = new Provider.Connection(
+                    "https://accounts.example.com/authorize",
+                    "https://accounts.example.com/token",
+                    null,
+                    TokenClientAuth.BASIC);
+            provider.applyConnection(connection);
+            var credential = Fixtures.credential(provider, AuthType.OAUTH2_CLIENT_CREDENTIALS);
+            credential.applyConnection(connection);
+            credential.authorized("someone@example.com");
+            when(tokens.tokenFor(any(), eq(Identity.APP), any())).thenReturn("the-applications-token");
+            when(tokens.tokenFor(any(), eq(Identity.ACCOUNT), any())).thenReturn("somebodys-own-token");
+            return credential;
+        }
+
+        private String presented(int index) {
+            return sent.get(index).headers().getFirst(HttpHeaders.AUTHORIZATION);
+        }
+
+        @Test
+        void speaksForTheApplicationWhenNothingIsKnownAboutTheEndpoint() {
+            var outcome = service.forward(exchange(connected()));
+
+            assertThat(outcome.headers().getFirst(GatewayTrafficService.IDENTITY_HEADER))
+                    .isEqualTo("app");
+            assertThat(presented(0)).isEqualTo("Bearer the-applications-token");
+        }
+
+        /**
+         * The sequence that matters. A refusal is ambiguous, so the held token is dropped and the same
+         * identity asked again; only when that is refused too is the other one tried.
+         */
+        @Test
+        void triesTheConnectedAccountOnlyAfterRulingOutAnExpiredToken() {
+            var credential = connected();
+            willAnswer(status(HttpStatus.UNAUTHORIZED), status(HttpStatus.UNAUTHORIZED), cacheable("{\"mine\":1}"));
+
+            var outcome = service.forward(exchange(HttpMethod.GET, "/v1/me/playlists", credential, new HttpHeaders()));
+
+            assertThat(outcome.status().value()).isEqualTo(200);
+            assertThat(outcome.headers().getFirst(GatewayTrafficService.IDENTITY_HEADER))
+                    .isEqualTo("account");
+            verify(tokens).invalidate(credential.getId(), Identity.APP);
+            assertThat(sent).hasSize(3);
+            assertThat(presented(0)).isEqualTo("Bearer the-applications-token");
+            assertThat(presented(1)).isEqualTo("Bearer the-applications-token");
+            assertThat(presented(2)).isEqualTo("Bearer somebodys-own-token");
+        }
+
+        /**
+         * Without the second attempt above, a token that merely aged out would teach Janus that the
+         * endpoint belongs to somebody else — and it would go on sending every later call there.
+         */
+        @Test
+        void anExpiredTokenTeachesNothing() {
+            var credential = connected();
+            willAnswer(status(HttpStatus.UNAUTHORIZED), cacheable("{\"mine\":1}"));
+
+            var outcome = service.forward(exchange(HttpMethod.GET, "/v1/tracks", credential, new HttpHeaders()));
+
+            assertThat(outcome.headers().getFirst(GatewayTrafficService.IDENTITY_HEADER))
+                    .isEqualTo("app");
+            assertThat(identities.recall(credential.getId(), "GET", "/v1/tracks")).isEmpty();
+            assertThat(sent).hasSize(2);
+        }
+
+        @Test
+        void remembersTheEndpointSoTheNextCallGoesOutRightTheFirstTime() {
+            var credential = connected();
+            willAnswer(
+                    status(HttpStatus.UNAUTHORIZED),
+                    status(HttpStatus.UNAUTHORIZED),
+                    cacheable("{\"mine\":1}"),
+                    cacheable("{\"mine\":2}"));
+
+            service.forward(exchange(HttpMethod.GET, "/v1/me/playlists", credential, noStore()));
+            sent.clear();
+            var second =
+                    service.forward(exchange(HttpMethod.GET, "/v1/me/playlists", credential, noStore()));
+
+            assertThat(second.headers().getFirst(GatewayTrafficService.IDENTITY_HEADER))
+                    .isEqualTo("account");
+            assertThat(sent).hasSize(1);
+            assertThat(presented(0)).isEqualTo("Bearer somebodys-own-token");
+        }
+
+        /** Two refusals are a fact about the credential, not about which identity to present. */
+        @Test
+        void learnsNothingWhenNeitherIdentityIsAccepted() {
+            var credential = connected();
+            willAnswer(
+                    status(HttpStatus.UNAUTHORIZED), status(HttpStatus.UNAUTHORIZED), status(HttpStatus.UNAUTHORIZED));
+
+            var outcome = service.forward(exchange(HttpMethod.GET, "/v1/me/playlists", credential, new HttpHeaders()));
+
+            assertThat(outcome.status().value()).isEqualTo(401);
+            // The one that was meant, not the one that was tried last.
+            assertThat(outcome.headers().getFirst(GatewayTrafficService.IDENTITY_HEADER))
+                    .isEqualTo("app");
+            assertThat(identities.recall(credential.getId(), "GET", "/v1/me/playlists"))
+                    .isEmpty();
+        }
+
+        @Test
+        void aCallerThatNamesAnIdentityGetsItWithoutAnyReplay() {
+            var credential = connected();
+            willAnswer(status(HttpStatus.UNAUTHORIZED));
+            var grant = Fixtures.grant(application, provider, credential);
+            var route = GatewayPath.parse("/gateway/" + provider.getSlug() + "/v1/tracks", provider.getSlug(), null);
+            var pinned = new GatewayExchange(
+                    provider,
+                    grant,
+                    application.getId(),
+                    HttpMethod.GET,
+                    route,
+                    new HttpHeaders(),
+                    null,
+                    "correlation-1",
+                    Identity.ACCOUNT);
+
+            var outcome = service.forward(pinned);
+
+            assertThat(outcome.status().value()).isEqualTo(401);
+            assertThat(sent).hasSize(1);
+            assertThat(presented(0)).isEqualTo("Bearer somebodys-own-token");
+        }
+
+        /**
+         * The line between a convenience and a duplicated write. A 403 means understood and refused,
+         * which an API may perfectly well say after having acted on part of a write. So a POST that met
+         * one is handed back as it came, and the journal says why it was not repaired.
+         */
+        @Test
+        void doesNotReplayAWriteThatMayAlreadyHaveTakenEffect() {
+            var credential = connected();
+            willAnswer(status(HttpStatus.FORBIDDEN));
+
+            var outcome =
+                    service.forward(exchange(HttpMethod.POST, "/v1/me/playlists", credential, new HttpHeaders()));
+
+            assertThat(outcome.status().value()).isEqualTo(403);
+            assertThat(sent).hasSize(1);
+            assertThat(outcome.auditDetail()).contains("identity not replayed");
+            assertThat(identities.recall(credential.getId(), "POST", "/v1/me/playlists"))
+                    .isEmpty();
+        }
+
+        /** A 401 refuses the request before it is acted on, so the same write may be tried again. */
+        @Test
+        void replaysAWriteThatWasNeverAdmitted() {
+            var credential = connected();
+            willAnswer(status(HttpStatus.UNAUTHORIZED), status(HttpStatus.UNAUTHORIZED), cacheable("{\"id\":1}"));
+
+            var outcome =
+                    service.forward(exchange(HttpMethod.POST, "/v1/me/playlists", credential, new HttpHeaders()));
+
+            assertThat(outcome.status().value()).isEqualTo(200);
+            assertThat(outcome.headers().getFirst(GatewayTrafficService.IDENTITY_HEADER))
+                    .isEqualTo("account");
+            assertThat(sent).hasSize(3);
+        }
+
+        /** A second identical DELETE leaves the same state behind, so a 403 is worth investigating. */
+        @Test
+        void replaysAnIdempotentWriteWhateverTheRefusalWas() {
+            var credential = connected();
+            willAnswer(status(HttpStatus.FORBIDDEN), status(HttpStatus.FORBIDDEN), status(HttpStatus.NO_CONTENT));
+
+            var outcome = service.forward(
+                    exchange(HttpMethod.DELETE, "/v1/me/playlists/3cEYpjA9oz9GiPac4AsH4n", credential, new HttpHeaders()));
+
+            assertThat(outcome.status().value()).isEqualTo(204);
+            assertThat(sent).hasSize(3);
+        }
+
+        /** Nobody has agreed, so there is nothing to fall back to and nothing to investigate. */
+        @Test
+        void doesNotReachForAnAccountNobodyHasConnected() {
+            var credential = connected();
+            credential.forgetAuthorization();
+            willAnswer(status(HttpStatus.UNAUTHORIZED), status(HttpStatus.UNAUTHORIZED));
+
+            var outcome = service.forward(exchange(HttpMethod.GET, "/v1/me/playlists", credential, new HttpHeaders()));
+
+            assertThat(outcome.status().value()).isEqualTo(401);
+            assertThat(sent).hasSize(2);
+        }
+
+        /**
+         * The store is addressed by identity, and this is the line that keeps one person's data out of
+         * everybody else's answers: an entry fetched as the account must not answer a call made as the
+         * application.
+         */
+        @Test
+        void whatWasFetchedForOnePersonIsNotServedToTheApplication() {
+            var credential = connected();
+            willAnswer(
+                    status(HttpStatus.UNAUTHORIZED),
+                    status(HttpStatus.UNAUTHORIZED),
+                    cacheable("{\"private\":\"theirs\"}"),
+                    cacheable("{\"public\":\"everyones\"}"));
+
+            service.forward(exchange(HttpMethod.GET, "/v1/me/playlists", credential, new HttpHeaders()));
+            // Same path, asked for as the application. Were the store blind to identity, this would be
+            // answered from the entry above without a single byte leaving the process.
+            var grant = Fixtures.grant(application, provider, credential);
+            var route = GatewayPath.parse(
+                    "/gateway/" + provider.getSlug() + "/v1/me/playlists", provider.getSlug(), null);
+            var asApp = new GatewayExchange(
+                    provider,
+                    grant,
+                    application.getId(),
+                    HttpMethod.GET,
+                    route,
+                    new HttpHeaders(),
+                    null,
+                    "correlation-2",
+                    Identity.APP);
+
+            var outcome = service.forward(asApp);
+
+            assertThat(outcome.cacheStatus()).isNotEqualTo(CacheStatus.HIT);
+            assertThat(body(outcome)).isEqualTo("{\"public\":\"everyones\"}");
+        }
+
+        private static HttpHeaders noStore() {
+            var headers = new HttpHeaders();
+            headers.set(HttpHeaders.CACHE_CONTROL, "no-store");
+            return headers;
+        }
     }
 }

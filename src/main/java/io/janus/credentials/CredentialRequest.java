@@ -18,11 +18,13 @@ import jakarta.validation.constraints.*;
  *     never disagree about which day that was. Optional — a key with no known end is never announced.
  *     For an exchange, this is the end of the <em>client secret</em>, not of the tokens it produces:
  *     those last minutes, are never persisted, and are renewed by Janus without anyone being told.
- * @param tokenUrl where credentials are exchanged, for the two strategies that exchange anything
+ * @param tokenUrl where the application's credentials are exchanged, for the strategy that exchanges
+ *     them
  * @param tokenScopes space separated, as RFC 6749 says; blank means the client's default scopes
  * @param tokenClientAuth how Janus presents itself there; defaults to Basic, which the spec requires
  *     every server to accept
- * @param authorizationUrl where a person is sent to agree, for an authorisation-code connection
+ * @param connectionSecret the OAuth client an account connection exchanges with, when the API does
+ *     not already store one for the application itself
  */
 public record CredentialRequest(
         // A name is displayed, and it also travels in the subject line of the expiry mail. A control
@@ -40,7 +42,6 @@ public record CredentialRequest(
         @Size(max = 500) String tokenUrl,
         @Size(max = 500) String tokenScopes,
         TokenClientAuth tokenClientAuth,
-        @Size(max = 500) String authorizationUrl,
         SignatureAlgorithm signatureAlgorithm,
         @Size(max = SignatureTemplate.MAX_LENGTH) String signatureTemplate,
         SignatureEncoding signatureEncoding,
@@ -50,7 +51,12 @@ public record CredentialRequest(
         @Size(max = 100) String timestampParameter,
         @Size(min = 1, max = 8192) String secret,
         Instant expiresAt,
-        boolean enabled) {
+        boolean enabled,
+        // The OAuth client the account connection exchanges with, when it is not the one above. Left
+        // empty whenever the two are the same client — which is every API that issues one client id
+        // and mints both kinds of token from it. Last in the record, so callers written before an API
+        // could offer two identities still compile.
+        @Size(min = 1, max = 8192) String connectionSecret) {
 
     private static final Pattern HEADER_NAME = Pattern.compile("[A-Za-z0-9-]{1,100}");
     /** A query parameter travels in a URL, so anything needing encoding to survive is refused. */
@@ -89,26 +95,23 @@ public record CredentialRequest(
                 null,
                 null,
                 null,
-                null,
                 secret,
                 expiresAt,
-                enabled);
+                enabled,
+                null);
     }
 
     public boolean carriesSecret() {
         return secret != null && !secret.isBlank();
     }
 
+    public boolean carriesConnectionSecret() {
+        return connectionSecret != null && !connectionSecret.isBlank();
+    }
+
     public Credential.Strategy strategy() {
         return new Credential.Strategy(
-                authType,
-                headerName,
-                queryParameter,
-                tokenUrl,
-                tokenScopes,
-                tokenClientAuth,
-                authorizationUrl,
-                signature());
+                authType, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, signature());
     }
 
     /** The signing recipe, or null when this strategy does not sign. */
@@ -149,15 +152,6 @@ public record CredentialRequest(
                             "A token endpoint is required, such as https://accounts.spotify.com/api/token");
                 requirePair("Client credentials must be supplied as client_id:client_secret");
             }
-            case OAUTH2_AUTHORIZATION_CODE -> {
-                if (tokenUrl == null || tokenUrl.isBlank())
-                    throw new IllegalArgumentException(
-                            "A token endpoint is required, such as https://accounts.spotify.com/api/token");
-                if (authorizationUrl == null || authorizationUrl.isBlank())
-                    throw new IllegalArgumentException("An authorisation page is required, where the account holder "
-                            + "agrees — such as https://accounts.spotify.com/authorize");
-                requirePair("Client credentials must be supplied as client_id:client_secret");
-            }
             case HMAC_SIGNATURE -> {
                 requirePair("Signing credentials must be supplied as key:secret");
                 // The recipe is validated as a whole, since no part of it means anything alone.
@@ -180,6 +174,12 @@ public record CredentialRequest(
                     throw new IllegalArgumentException("An open API takes no secret; choose how the key is sent");
             }
         }
+        // Whatever the application presents, a connection exchanges as an OAuth client. Whether one
+        // belongs here at all depends on the API, which this record cannot see; CredentialService
+        // refuses a value for a destination that offers no connection.
+        if (carriesConnectionSecret() && connectionSecret.indexOf(':') < 0)
+            throw new IllegalArgumentException(
+                    "The account connection's credentials must be supplied as client_id:client_secret");
     }
 
     /** Two values in one stored string, checked only when a value was actually supplied. */

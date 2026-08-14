@@ -59,6 +59,11 @@ export function AgentsPage() {
           name: c.grant.providerName,
           slug: c.provider.slug,
           normalizeJson: c.provider.normalizeJson,
+          // The two things an agent cannot work out from the API's own documentation: how much of it
+          // this service was given, and that some of its endpoints answer for a person instead.
+          pathPrefix: c.grant.pathPrefix,
+          methods: c.grant.methods,
+          connected: Boolean(c.credential?.authorizedAt),
         });
       }
       byService.set(service.id, service);

@@ -11,6 +11,8 @@ import java.util.*;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 
+import io.janus.credentials.Identity;
+
 /**
  * The HTTP caching rules, kept apart from the store that applies them.
  *
@@ -36,19 +38,25 @@ final class CachePolicy {
     private CachePolicy() {}
 
     /**
-     * Addresses one stored response. The provider, credential, and decoded path stay readable so
-     * entries can be dropped by resource when one is written to; everything else that can
+     * Addresses one stored response. The provider, credential, identity, and decoded path stay
+     * readable so entries can be dropped by resource when one is written to; everything else that can
      * legitimately change a body — the original encoding, the query, the negotiated representation
      * — is folded into a digest.
      */
-    static String key(UUID providerId, UUID credentialId, String method, GatewayPath route, HttpHeaders request) {
+    static String key(
+            UUID providerId,
+            UUID credentialId,
+            Identity identity,
+            String method,
+            GatewayPath route,
+            HttpHeaders request) {
         String variant = String.join(
                 "|",
                 Objects.requireNonNullElse(route.rawPath(), ""),
                 Objects.requireNonNullElse(route.rawQuery(), ""),
                 Objects.requireNonNullElse(request.getFirst(HttpHeaders.ACCEPT), ""),
                 Objects.requireNonNullElse(request.getFirst(HttpHeaders.ACCEPT_LANGUAGE), ""));
-        return resourcePrefix(providerId, credentialId)
+        return resourcePrefix(providerId, credentialId, identity)
                 + route.decodedPath()
                 + SEPARATOR
                 + method
@@ -56,9 +64,17 @@ final class CachePolicy {
                 + digest(variant);
     }
 
-    /** Prefix shared by every entry a given credential holds at a given provider. */
-    static String resourcePrefix(UUID providerId, UUID credentialId) {
-        return providerId + String.valueOf(SEPARATOR) + credentialId + SEPARATOR;
+    /**
+     * Prefix shared by every entry a given credential holds at a given provider, as one identity.
+     *
+     * <p>The identity is part of the address, and this is the line that keeps one person's data out of
+     * everybody else's answers. One credential can now fetch the same URL twice — once as the
+     * application, once as whoever connected their account — and the two responses are not
+     * interchangeable. Without it, {@code /me/playlists} fetched for one person would be served to
+     * every application holding a grant on that credential.
+     */
+    static String resourcePrefix(UUID providerId, UUID credentialId, Identity identity) {
+        return providerId + String.valueOf(SEPARATOR) + credentialId + SEPARATOR + identity.name() + SEPARATOR;
     }
 
     static String providerPrefix(UUID providerId) {
