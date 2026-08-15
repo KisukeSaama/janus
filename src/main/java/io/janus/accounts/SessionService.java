@@ -40,6 +40,7 @@ public class SessionService {
     private final AccessScope scope;
     private final SecurityContextRepository contexts = new HttpSessionSecurityContextRepository();
     private final io.janus.security.AuthenticationThrottle throttle;
+    private final ConsoleSessionRegistry sessions;
     private final AuditService audit;
 
     public SessionService(
@@ -47,11 +48,13 @@ public class SessionService {
             AccountRepository accounts,
             AccessScope scope,
             io.janus.security.AuthenticationThrottle throttle,
+            ConsoleSessionRegistry sessions,
             AuditService audit) {
         this.authentication = authentication;
         this.accounts = accounts;
         this.scope = scope;
         this.throttle = throttle;
+        this.sessions = sessions;
         this.audit = audit;
     }
 
@@ -89,7 +92,7 @@ public class SessionService {
         throttle.recordSuccess(client);
         var existing = request.getSession(false);
         if (existing != null) existing.invalidate();
-        request.getSession(true);
+        var session = request.getSession(true);
 
         var context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(result);
@@ -97,6 +100,9 @@ public class SessionService {
         contexts.saveContext(context, request, response);
 
         var user = (ConsoleUser) result.getPrincipal();
+        // Written down here because this is the only place a console session is created, and the
+        // authentication filters that would otherwise record it are the ones this method replaces.
+        sessions.opened(user.id(), session);
         accounts.markSignedIn(user.id(), Instant.now());
         audit.recordAdmin(AuditAction.ACCOUNT_SIGNED_IN, null, user.getUsername());
         return Identity.of(user);

@@ -13,7 +13,8 @@ import io.janus.security.GatewayPrincipal;
 class AccessTokenStoreTest {
 
     private static AccessTokenStore store(int maxEntries) {
-        return new AccessTokenStore(new OAuthProperties(Duration.ofMinutes(15), Duration.ofDays(30), true, maxEntries));
+        return new AccessTokenStore(
+                new OAuthProperties(Duration.ofMinutes(15), Duration.ofDays(30), true, maxEntries, 0));
     }
 
     private static GatewayPrincipal caller() {
@@ -93,5 +94,53 @@ class AccessTokenStoreTest {
         store.issue(caller(), 600);
 
         assertThat(store.resolve(first)).isEmpty();
+    }
+
+    /**
+     * The bound one application reaches must be its own. A single least-recently-used ceiling over
+     * the whole deployment made a caller asking for tokens in a loop — well inside its rate limit —
+     * everybody else's problem: their tokens went, and each of them found itself unauthenticated for
+     * no reason it could see.
+     */
+    @Test
+    void oneApplicationInALoopEvictsItsOwnTokensAndNobodyElses() {
+        var store =
+                new AccessTokenStore(new OAuthProperties(Duration.ofMinutes(15), Duration.ofDays(30), true, 100, 2));
+        var quiet = caller();
+        String theirs = store.issue(quiet, 600);
+        var noisy = caller();
+
+        String kept = null;
+        for (int i = 0; i < 20; i++) kept = store.issue(noisy, 600);
+
+        assertThat(store.resolve(theirs))
+                .as("the quiet caller keeps what it was given")
+                .contains(quiet);
+        assertThat(store.resolve(kept))
+                .as("the noisy one keeps its most recent")
+                .contains(noisy);
+        assertThat(store.revokeApplication(noisy.applicationId()))
+                .as("and holds no more than its own ceiling")
+                .isEqualTo(2);
+    }
+
+    /**
+     * Expired entries are dead weight, so they are what a full store gives up first. Without that,
+     * the oldest live token goes while a token nobody can present any more keeps its place.
+     */
+    @Test
+    void whatHasExpiredIsGivenUpBeforeAnythingStillValid() throws Exception {
+        var store = store(3);
+        var oldest = caller();
+        String earliest = store.issue(oldest, 600);
+        store.issue(caller(), 600);
+        store.issue(caller(), 1);
+        Thread.sleep(1100);
+
+        // The store is at its bound and something has to go. Least recently used would take the one
+        // issued first; what actually goes is the one that has run out.
+        store.issue(caller(), 600);
+
+        assertThat(store.resolve(earliest)).contains(oldest);
     }
 }

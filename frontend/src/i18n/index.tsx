@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { en, type Dictionary } from './en';
+import { en, type Dictionary, type Messages } from './en';
 import { fr } from './fr';
 
 export const LOCALES = ['en', 'fr'] as const;
@@ -7,7 +7,10 @@ export type Locale = (typeof LOCALES)[number];
 
 export const LOCALE_NAMES: Record<Locale, string> = { en: 'English', fr: 'Français' };
 
-const DICTIONARIES: Record<Locale, Dictionary> = { en, fr: fr as Dictionary };
+// No assertion here, deliberately. `fr as Dictionary` claimed a translation was made of the very
+// string literals `en` is made of, which is untrue and is exactly the kind of statement that stops
+// the compiler from reporting the next thing that is. `Messages` is what both tables actually are.
+const DICTIONARIES: Record<Locale, Messages> = { en, fr };
 const STORAGE_KEY = 'janus.locale';
 
 type Paths<T> = {
@@ -17,7 +20,7 @@ type Paths<T> = {
 export type MessageKey = Paths<Dictionary>;
 type Params = Record<string, string | number>;
 
-function read(dictionary: Dictionary, key: string): string | undefined {
+function read(dictionary: Messages, key: string): string | undefined {
   const value = key.split('.').reduce<unknown>((node, part) => {
     if (node && typeof node === 'object' && part in node) return (node as Record<string, unknown>)[part];
     return undefined;

@@ -74,12 +74,9 @@ class GrantAdminControllerTest {
         when(providers.findById(theirs.getId())).thenReturn(Optional.of(theirs));
         when(credentials.findOwnedBy(theirCredential.getId(), owner.getId())).thenReturn(Optional.of(theirCredential));
 
-        mvc.perform(post("/api/admin/grants")
-                        .contentType("application/json")
-                        .content(
-                                """
-                                {"applicationId":"%s","providerId":"%s","credentialId":"%s","enabled":true}"""
-                                        .formatted(application.getId(), theirs.getId(), theirCredential.getId())))
+        mvc.perform(post("/api/admin/grants").contentType("application/json").content("""
+                                {"applicationId":"%s","providerId":"%s","credentialId":"%s","enabled":true}""".formatted(
+                                application.getId(), theirs.getId(), theirCredential.getId())))
                 .andExpect(status().isBadRequest());
     }
 
@@ -89,22 +86,17 @@ class GrantAdminControllerTest {
         var unknown = UUID.randomUUID();
         when(applications.findOwnedBy(unknown, owner.getId())).thenReturn(Optional.empty());
 
-        mvc.perform(post("/api/admin/grants")
-                        .contentType("application/json")
-                        .content(
-                                """
-                                {"applicationId":"%s","providerId":"%s","credentialId":"%s","enabled":true}"""
-                                        .formatted(unknown, provider.getId(), credential.getId())))
+        mvc.perform(post("/api/admin/grants").contentType("application/json").content("""
+                                {"applicationId":"%s","providerId":"%s","credentialId":"%s","enabled":true}""".formatted(
+                                unknown, provider.getId(), credential.getId())))
                 .andExpect(status().isNotFound());
     }
 
     private org.springframework.test.web.servlet.ResultActions postGrant() throws Exception {
-        return mvc.perform(post("/api/admin/grants")
-                .contentType("application/json")
-                .content(
-                        """
-                        {"applicationId":"%s","providerId":"%s","credentialId":"%s","enabled":true}"""
-                                .formatted(application.getId(), provider.getId(), credential.getId())));
+        return mvc.perform(
+                post("/api/admin/grants").contentType("application/json").content("""
+                        {"applicationId":"%s","providerId":"%s","credentialId":"%s","enabled":true}""".formatted(
+                                application.getId(), provider.getId(), credential.getId())));
     }
 
     /**
@@ -139,13 +131,10 @@ class GrantAdminControllerTest {
     /** A burst with nothing to burst against is a configuration mistake, not a permissive default. */
     @Test
     void refusesABurstWithoutAnAllowance() throws Exception {
-        mvc.perform(post("/api/admin/grants")
-                        .contentType("application/json")
-                        .content(
-                                """
+        mvc.perform(post("/api/admin/grants").contentType("application/json").content("""
                                 {"applicationId":"%s","providerId":"%s","credentialId":"%s","enabled":true,
-                                 "rateLimitPerMinute":0,"rateLimitBurst":10}"""
-                                        .formatted(application.getId(), provider.getId(), credential.getId())))
+                                 "rateLimitPerMinute":0,"rateLimitBurst":10}""".formatted(
+                                application.getId(), provider.getId(), credential.getId())))
                 .andExpect(status().isBadRequest());
     }
 }

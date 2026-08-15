@@ -435,7 +435,7 @@ class GatewayControllerTest {
 
         @Test
         void admitsWhatIsUnderThePrefix() throws Exception {
-            grant.applyScope(io.janus.grants.GrantScope.of("/v1/tracks", null));
+            grant.applyScope(io.janus.grants.GrantScope.of("/v1/tracks", null, true));
 
             mvc.perform(get("/gateway/spotify/v1/tracks/3cEYpjA9oz9GiPac4AsH4n"))
                     .andExpect(status().isOk());
@@ -443,7 +443,7 @@ class GatewayControllerTest {
 
         @Test
         void refusesAPathTheGrantDoesNotName() throws Exception {
-            grant.applyScope(io.janus.grants.GrantScope.of("/v1/tracks", null));
+            grant.applyScope(io.janus.grants.GrantScope.of("/v1/tracks", null, true));
 
             mvc.perform(get("/gateway/spotify/v1/me/playlists"))
                     .andExpect(status().isForbidden())
@@ -457,7 +457,7 @@ class GatewayControllerTest {
         /** Read-only access to an API whose own key has no such notion. */
         @Test
         void refusesAMethodTheGrantDoesNotName() throws Exception {
-            grant.applyScope(io.janus.grants.GrantScope.of(null, "GET,HEAD"));
+            grant.applyScope(io.janus.grants.GrantScope.of(null, "GET,HEAD", true));
 
             mvc.perform(delete("/gateway/spotify/v1/tracks/3cEYpjA9oz9GiPac4AsH4n"))
                     .andExpect(status().isForbidden())
@@ -469,12 +469,40 @@ class GatewayControllerTest {
         /** Two refusals a caller must act on differently never share one code. */
         @Test
         void tellsAPathItMayNotReachApartFromAMethodItMayNotUse() throws Exception {
-            grant.applyScope(io.janus.grants.GrantScope.of("/v1/tracks", "GET"));
+            grant.applyScope(io.janus.grants.GrantScope.of("/v1/tracks", "GET", true));
 
             mvc.perform(get("/gateway/spotify/v1/albums"))
                     .andExpect(jsonPath("$.code").value("path_not_granted"));
             mvc.perform(delete("/gateway/spotify/v1/tracks/1"))
                     .andExpect(jsonPath("$.code").value("method_not_granted"));
+        }
+
+        /**
+         * Whom a call may be made as, which the grant decides and a request header does not.
+         *
+         * <p>A destination somebody has connected their account to answers as two different callers,
+         * and until this existed any application holding a grant could ask for the personal one by
+         * writing a header. Reaching somebody's own data took no more authority than reaching the
+         * shared catalogue, which was a consequence of a grant naming a destination rather than a
+         * decision anybody had taken.
+         */
+        @Test
+        void refusesTheAccountIdentityWhenTheGrantDoesNotAdmitIt() throws Exception {
+            grant.applyScope(io.janus.grants.GrantScope.of(null, null, false));
+
+            mvc.perform(get("/gateway/spotify/v1/me").header(GatewayTrafficService.IDENTITY_HEADER, "account"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("identity_not_granted"));
+
+            verify(traffic, never()).forward(any());
+        }
+
+        /** Only the identity was refused: the same path, asked for as the service, still goes. */
+        @Test
+        void theSameCallMadeAsTheServiceItselfIsStillAdmitted() throws Exception {
+            grant.applyScope(io.janus.grants.GrantScope.of(null, null, false));
+
+            mvc.perform(get("/gateway/spotify/v1/me")).andExpect(status().isOk());
         }
 
         /** Every grant written before this existed, and every one that wants the whole API. */

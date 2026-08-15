@@ -61,6 +61,10 @@ public class Grant {
     @Column(name = "allowed_methods", length = 128)
     private String allowedMethods;
 
+    /** Whether it may speak for the connected account, or only as the application itself. */
+    @Column(name = "allow_account_identity", nullable = false)
+    private boolean allowAccountIdentity = true;
+
     /**
      * The two columns above, read once rather than on every proxied call. Held here because a grant
      * is what the gateway's authorisation cache keeps, so this is parsed once per cached grant rather
@@ -113,7 +117,7 @@ public class Grant {
      * even if a query somewhere were widened. The credential follows its provider, so checking those
      * two settles all three.
      */
-    public void bind(Application application, Provider provider, Credential credential) {
+    public final void bind(Application application, Provider provider, Credential credential) {
         if (!credential.getProvider().getId().equals(provider.getId()))
             throw new IllegalArgumentException("Credential belongs to a different provider");
         if (!application.getOwner().getId().equals(credential.getOwnerId()))
@@ -133,12 +137,13 @@ public class Grant {
         scope.validate();
         this.pathPrefix = scope.storedPrefix();
         this.allowedMethods = scope.storedMethods();
+        this.allowAccountIdentity = scope.admitsAccountIdentity();
         this.scope = scope;
     }
 
     public GrantScope getScope() {
         var held = scope;
-        if (held == null) this.scope = held = GrantScope.of(pathPrefix, allowedMethods);
+        if (held == null) this.scope = held = GrantScope.of(pathPrefix, allowedMethods, allowAccountIdentity);
         return held;
     }
 

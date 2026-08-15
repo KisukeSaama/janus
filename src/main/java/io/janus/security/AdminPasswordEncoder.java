@@ -20,9 +20,10 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  *
  * <p>Only successful comparisons are remembered, so guessing fills nothing. Entries are keyed on a
  * digest of the presented value together with the hash it was checked against, never on the value
- * itself, and a hash that changes invalidates its entries by not matching them. The administrator
- * password is read from the environment at startup, so changing it restarts the process and empties
- * this along with everything else; the time-to-live is a backstop, not the mechanism.
+ * itself, which is what makes a changed password invalidate its own entries: accounts live in the
+ * database and a password is replaced without restarting anything, so the new hash simply does not
+ * match a key built from the old one. The time-to-live bounds how long a hash that was deleted
+ * rather than replaced stays remembered.
  *
  * <p>Wired to the administrator realm alone, by {@code SecurityConfig}. The encoder that mints and
  * checks application keys stays the plain one: those have their own cache, invalidated on rotation.

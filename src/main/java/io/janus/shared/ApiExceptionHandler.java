@@ -45,7 +45,17 @@ public class ApiExceptionHandler {
         return problem(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND, "The requested resource does not exist");
     }
 
-    @ExceptionHandler({IllegalArgumentException.class, IllegalStateException.class})
+    /**
+     * A request the endpoint understood and cannot act on, answered with the reason.
+     *
+     * <p>{@link IllegalArgumentException} alone, and deliberately not {@link IllegalStateException}
+     * beside it. The message travels back verbatim, so what may be thrown here is what somebody
+     * wrote for a reader: an argument the caller can correct. A state that should not have occurred
+     * is a different statement about a different party, and its message is written by whoever threw
+     * it — including libraries this code never sees. Those fall through to the handler at the bottom,
+     * which logs them with their correlation identifier and answers without quoting them.
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
     ResponseEntity<ProblemDetail> badRequest(RuntimeException ex) {
         return problem(HttpStatus.BAD_REQUEST, ErrorCode.BAD_REQUEST, ex.getMessage());
     }
@@ -150,7 +160,7 @@ public class ApiExceptionHandler {
     @ExceptionHandler(PayloadTooLargeException.class)
     ResponseEntity<ProblemDetail> tooLarge(PayloadTooLargeException ex) {
         return problem(
-                HttpStatus.PAYLOAD_TOO_LARGE, ErrorCode.PAYLOAD_TOO_LARGE, "Request body exceeds the configured limit");
+                HttpStatus.CONTENT_TOO_LARGE, ErrorCode.PAYLOAD_TOO_LARGE, "Request body exceeds the configured limit");
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

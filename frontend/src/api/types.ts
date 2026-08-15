@@ -170,6 +170,8 @@ export type Grant = {
   pathPrefix?: string;
   /** The methods it admits. Empty is all of them. */
   methods: HttpMethod[];
+  /** Whether it may speak for the connected account, rather than only as the service itself. */
+  allowAccountIdentity: boolean;
   createdAt: string;
   updatedAt?: string;
 };
@@ -338,6 +340,8 @@ export type GrantInput = {
   /** Empty on both counts is the whole destination, which is what a grant has always meant. */
   pathPrefix?: string | null;
   methods?: HttpMethod[];
+  /** Absent is yes, which is what every grant written before the question existed already does. */
+  allowAccountIdentity?: boolean;
 };
 
 /* ── Who may sign in ────────────────────────────────────────────────────── */
@@ -373,4 +377,6 @@ export type AccountInput = {
   enabled: boolean;
   /** Blank on an update means "leave the current password alone". */
   password?: string | null;
+  /** Sent only when somebody changes their own password, which is the one case that has to prove it. */
+  currentPassword?: string | null;
 };

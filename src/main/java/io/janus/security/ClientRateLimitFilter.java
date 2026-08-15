@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.ObjectMapper;
 
+import io.janus.gateway.GatewayPath;
 import io.janus.gateway.RateLimiter;
 import io.janus.shared.ApiProblem;
 import io.janus.shared.ErrorCode;
@@ -84,9 +85,9 @@ public class ClientRateLimitFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        String uri = request.getRequestURI();
-        boolean gateway = uri.startsWith("/gateway/") || uri.matches("^/[^/]+/gateway/.*");
-        String surface = gateway ? "gateway" : request.getRequestURI().startsWith("/oauth/") ? "oauth" : "admin";
+        String uri = GatewayPath.applicationPath(request);
+        boolean gateway = uri.startsWith("/gateway/");
+        String surface = gateway ? "gateway" : uri.startsWith("/oauth/") ? "oauth" : "admin";
         int perMinute = gateway ? gatewayPerMinute : adminPerMinute;
         int burst = gateway ? gatewayBurst : adminBurst;
 
@@ -105,12 +106,11 @@ public class ClientRateLimitFilter extends OncePerRequestFilter {
     /** Static assets are served by nginx, never by the backend, so only its own surfaces are metered. */
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        String uri = request.getRequestURI();
+        String uri = GatewayPath.applicationPath(request);
         // Health is how an orchestrator decides whether to keep the container: refusing it under
         // load would restart the instance the flood is aimed at.
         if (uri.startsWith("/actuator/health")) return true;
         return !uri.startsWith("/gateway/")
-                && !uri.matches("^/[^/]+/gateway/.*")
                 && !uri.startsWith("/api/")
                 && !uri.startsWith("/oauth/")
                 && !uri.startsWith("/actuator/");

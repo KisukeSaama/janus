@@ -27,7 +27,8 @@ class AccountAdminControllerTest {
 
     @BeforeEach
     void setUp() {
-        var service = new AccountService(repository, new BCryptPasswordEncoder(4), scope, registry, audit);
+        var service = new AccountService(
+                repository, new BCryptPasswordEncoder(4), scope, registry, new ConsoleSessionRegistry(), audit);
         when(registry.holdings(any())).thenReturn(new RegistryTransfer.Holdings(0, 0));
         mvc = MockMvcBuilders.standaloneSetup(new AccountAdminController(service))
                 .setControllerAdvice(new ApiExceptionHandler())
@@ -50,8 +51,7 @@ class AccountAdminControllerTest {
 
     private static String body(String username, String role, String password, boolean enabled) {
         return """
-               {"username":"%s","displayName":"Someone","email":"%s@example.com","role":"%s","password":"%s","enabled":%s}"""
-                .formatted(username, username, role, password, enabled);
+               {"username":"%s","displayName":"Someone","email":"%s@example.com","role":"%s","password":"%s","enabled":%s}""".formatted(username, username, role, password, enabled);
     }
 
     private ResultActionsWrapper createAccount(String username, String role, String password) throws Exception {
@@ -251,6 +251,88 @@ class AccountAdminControllerTest {
                 .andExpect(status().isOk());
 
         org.assertj.core.api.Assertions.assertThat(account.getPasswordHash()).isEqualTo(before);
+    }
+
+    // --- changing your own password -----------------------------------------
+
+    /**
+     * A session left open on an unattended screen must not be enough to replace the password that
+     * opened it. Somebody changing their own proves they know it; an administrator resetting
+     * somebody else's cannot, and is not asked to.
+     */
+    @Test
+    void changingYourOwnPasswordRequiresTheCurrentOne() throws Exception {
+        var caller = mineToEdit();
+        String before = caller.getPasswordHash();
+
+        mvc.perform(put("/api/admin/accounts/" + caller.getId())
+                        .contentType("application/json")
+                        .content(body("caller", "SUPER_ADMIN", STRONG, true)))
+                .andExpect(status().isBadRequest());
+
+        org.assertj.core.api.Assertions.assertThat(caller.getPasswordHash()).isEqualTo(before);
+    }
+
+    @Test
+    void aWrongCurrentPasswordChangesNothing() throws Exception {
+        var caller = mineToEdit();
+        String before = caller.getPasswordHash();
+
+        mvc.perform(put("/api/admin/accounts/" + caller.getId())
+                        .contentType("application/json")
+                        .content(withCurrent(body("caller", "SUPER_ADMIN", STRONG, true), "not-the-one")))
+                .andExpect(status().isBadRequest());
+
+        org.assertj.core.api.Assertions.assertThat(caller.getPasswordHash()).isEqualTo(before);
+    }
+
+    @Test
+    void theRightCurrentPasswordChangesIt() throws Exception {
+        var caller = mineToEdit();
+        String before = caller.getPasswordHash();
+
+        mvc.perform(put("/api/admin/accounts/" + caller.getId())
+                        .contentType("application/json")
+                        .content(withCurrent(body("caller", "SUPER_ADMIN", STRONG, true), "known")))
+                .andExpect(status().isOk());
+
+        org.assertj.core.api.Assertions.assertThat(caller.getPasswordHash()).isNotEqualTo(before);
+    }
+
+    /** The reset case: nothing to prove, because the point of a reset is not knowing the old one. */
+    @Test
+    void anAdministratorResettingAnotherAccountNeedsNoCurrentPassword() throws Exception {
+        var other = account("bo", AccountRole.USER);
+        String before = other.getPasswordHash();
+        when(repository.findById(other.getId())).thenReturn(Optional.of(other));
+
+        mvc.perform(put("/api/admin/accounts/" + other.getId())
+                        .contentType("application/json")
+                        .content(body("bo", "USER", STRONG, true)))
+                .andExpect(status().isOk());
+
+        org.assertj.core.api.Assertions.assertThat(other.getPasswordHash()).isNotEqualTo(before);
+    }
+
+    /** The signed-in person, holding a password this test knows, and reachable by identifier. */
+    private Account mineToEdit() {
+        var mine = new Account(
+                "caller",
+                "Someone",
+                "caller@example.com",
+                new BCryptPasswordEncoder(4).encode("known"),
+                AccountRole.SUPER_ADMIN,
+                true);
+        var user = new ConsoleUser(mine);
+        when(scope.current()).thenReturn(user);
+        when(scope.accountId()).thenReturn(mine.getId());
+        when(repository.findById(mine.getId())).thenReturn(Optional.of(mine));
+        when(repository.countByRoleAndEnabledTrue(AccountRole.SUPER_ADMIN)).thenReturn(2L);
+        return mine;
+    }
+
+    private static String withCurrent(String json, String currentPassword) {
+        return json.substring(0, json.length() - 1) + ",\"currentPassword\":\"" + currentPassword + "\"}";
     }
 
     @Test

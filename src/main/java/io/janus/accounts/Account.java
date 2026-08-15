@@ -1,6 +1,7 @@
 package io.janus.accounts;
 
 import java.time.Instant;
+import java.util.Locale;
 import java.util.UUID;
 
 import jakarta.persistence.*;
@@ -11,6 +12,9 @@ import jakarta.persistence.*;
  * <p>The username is set once and never changes. It is what somebody types to sign in and what the
  * journal shows beside an action, so renaming it would rewrite the meaning of entries already
  * written. Everything else about a person is editable; who they are is not.
+ *
+ * <p>It is stored in one form only, the one {@link #normalise} produces, and every comparison is
+ * made on that form. Case is how a login is typed, not part of who it names.
  *
  * <p>Identity and timestamps are assigned in the constructor rather than by a callback, for the
  * reason given at length on {@code Application}: with an assigned identifier Hibernate defers the
@@ -89,7 +93,7 @@ public class Account {
     }
 
     /** Everything an administrator may change about a person, other than their role. */
-    public void describe(String displayName, String email, boolean enabled) {
+    public final void describe(String displayName, String email, boolean enabled) {
         this.displayName = displayName;
         this.email = email;
         this.enabled = enabled;
@@ -115,6 +119,20 @@ public class Account {
      */
     public boolean awaitingBootstrap() {
         return BOOTSTRAP_HASH.equals(passwordHash);
+    }
+
+    /**
+     * The single form a login is stored and compared in.
+     *
+     * <p>Everything that names an account goes through here: what an administrator submits, and what
+     * somebody types to sign in. Two callers agreeing on lower case by habit would be one edit away
+     * from an account nobody can sign in to, which is a failure that shows up as "wrong password".
+     *
+     * <p>{@link Locale#ROOT} rather than the default locale, so a deployment configured in Turkish
+     * does not fold {@code I} to a different letter than the one that created the row.
+     */
+    public static String normalise(String username) {
+        return username == null ? null : username.trim().toLowerCase(Locale.ROOT);
     }
 
     /** Matches the value inserted by {@code V7__accounts.sql}; not a BCrypt hash, so nothing matches it. */

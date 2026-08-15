@@ -36,6 +36,21 @@ class SecurityIT extends IntegrationTest {
                 .isOk();
     }
 
+    /**
+     * A login is stored lowercased and compared on that form, so the case somebody types is not a
+     * second password. The password beside it still is: only the login is folded.
+     */
+    @Test
+    void acceptsThatAccountWhateverCaseTheLoginIsTypedIn() {
+        http().get()
+                .uri("/api/admin/providers")
+                .headers(headers ->
+                        headers.setBasicAuth(ADMIN_USERNAME.toUpperCase(java.util.Locale.ROOT), ADMIN_PASSWORD))
+                .exchange()
+                .expectStatus()
+                .isOk();
+    }
+
     @Test
     void refusesAWrongPasswordTheSameWayItRefusesNoPassword() {
         http().get()
@@ -177,8 +192,7 @@ class SecurityIT extends IntegrationTest {
                 .uri("/api/admin/providers")
                 .headers(headers -> headers.setBasicAuth(ADMIN_USERNAME, ADMIN_PASSWORD))
                 .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .bodyValue(
-                        """
+                .bodyValue("""
                         {"name":"Spotify","slug":"csrf-probe","baseUrl":"https://api.spotify.com","enabled":true,"authType":"NONE"}""")
                 .exchange()
                 .expectStatus()
@@ -283,7 +297,6 @@ class SecurityIT extends IntegrationTest {
 
     private static String providerNamed(String slug) {
         return """
-               {"name":"Spotify","slug":"%s","baseUrl":"https://api.spotify.com","enabled":true,"authType":"NONE"}"""
-                .formatted(slug);
+               {"name":"Spotify","slug":"%s","baseUrl":"https://api.spotify.com","enabled":true,"authType":"NONE"}""".formatted(slug);
     }
 }

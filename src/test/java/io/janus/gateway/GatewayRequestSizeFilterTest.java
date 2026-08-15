@@ -61,8 +61,10 @@ class GatewayRequestSizeFilterTest {
     void refusesADeclaredLengthOverTheLimitWithoutReadingTheBody() throws Exception {
         var response = refuseOrPass(gatewayRequest(new byte[LIMIT + 1], true));
 
-        assertThat(response.getStatus()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE.value());
-        assertThat(response.getContentAsString()).contains("Payload Too Large");
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.CONTENT_TOO_LARGE.value());
+        // The title is the status' own reason phrase, which RFC 9110 renamed. What a caller matches on
+        // does not move with it: the status stays 413 and the error code below stays payload_too_large.
+        assertThat(response.getContentAsString()).contains("Content Too Large");
         assertThat(response.getContentType()).contains("application/problem+json");
         assertThat(response.getHeader(ApiProblem.HEADER)).isEqualTo("payload_too_large");
     }
@@ -95,7 +97,7 @@ class GatewayRequestSizeFilterTest {
 
         filter.doFilter(request, response, (req, res) -> req.getInputStream().readAllBytes());
 
-        assertThat(response.getStatus()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE.value());
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.CONTENT_TOO_LARGE.value());
     }
 
     @Test

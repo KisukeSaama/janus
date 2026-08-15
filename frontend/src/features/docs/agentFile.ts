@@ -135,6 +135,10 @@ call to a new endpoint behave differently from every call after it, and it does 
 where a second attempt could repeat a write: a \`POST\` refused with 403 is returned as it came.
 Send the header.
 
+A grant may refuse the account identity, in which case \`X-Janus-Identity: account\` is answered 403 with
+code \`identity_not_granted\` and every call goes as the service. That is an operator's decision, not a
+fault to work around: ask them, do not retry as \`app\` and call it equivalent.
+
 ## If the API you need is not listed
 
 Stop and ask the operator to register it. Do not call the API directly, and never ask anyone for its

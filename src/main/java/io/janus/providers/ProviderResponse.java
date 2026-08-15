@@ -5,20 +5,26 @@ import java.util.UUID;
 
 import io.janus.credentials.*;
 
-/** A destination as the console sees it. */
+/**
+ * A destination as the console sees it.
+ *
+ * @param allowPrivateDestination whether this destination is registered as living on the local
+ *     network
+ * @param normalizeJson whether callers receive JSON whatever this destination answers in
+ * @param jsonArrayPaths elements that must always be arrays once converted, comma-separated
+ * @param connectionAuthorizationUrl the account connection this API offers, null throughout when it
+ *     offers none
+ */
 public record ProviderResponse(
         UUID id,
         String name,
         String slug,
         String baseUrl,
         boolean enabled,
-        /** Whether this destination is registered as living on the local network. */
         boolean allowPrivateDestination,
         boolean cacheEnabled,
         int cacheTtlSeconds,
-        /** Whether callers receive JSON whatever this destination answers in. */
         boolean normalizeJson,
-        /** Elements that must always be arrays once converted, comma-separated. */
         String jsonArrayPaths,
         int rateLimitPerMinute,
         int rateLimitBurst,
@@ -28,7 +34,6 @@ public record ProviderResponse(
         String tokenUrl,
         String tokenScopes,
         TokenClientAuth tokenClientAuth,
-        /** The account connection this API offers, null throughout when it offers none. */
         String connectionAuthorizationUrl,
         String connectionTokenUrl,
         String connectionScopes,

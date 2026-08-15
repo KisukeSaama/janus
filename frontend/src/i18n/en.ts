@@ -340,6 +340,11 @@ export const en = {
     scopeMethodsLabel: 'Methods',
     scopeMethodsHint: 'Only these. Anything else is refused.',
     scopeAllMethods: 'Every method',
+    scopeIdentityLabel: 'Identity',
+    scopeIdentityBoth: 'Service and connected account',
+    scopeIdentityAppOnly: 'Service only',
+    scopeIdentityCheck: 'May send X-Janus-Identity: account',
+    scopeIdentityHint: 'Lets this service reach the connected person’s own data. Off, every call goes as the service.',
 
     openTitle: 'What Janus presents',
     openLead: 'Nothing: this API is open.',
@@ -808,6 +813,8 @@ export const en = {
     roleHintAdmin: 'Only a super administrator appoints another one.',
     fieldPassword: 'Password',
     replacementPassword: 'New password',
+    currentPassword: 'Current password',
+    currentPasswordHint: 'Required to change your own. Other sessions end when it changes.',
     replacementPlaceholder: 'Leave blank to keep the current one',
     passwordHint: 'At least 8 characters, with upper case, lower case and a digit. Stored as a one-way hash.',
     activeLabel: 'Active',
@@ -890,3 +897,10 @@ export const en = {
 } as const;
 
 export type Dictionary = typeof en;
+
+/**
+ * A locale's table: the shape above with its values widened to plain strings, which is what every
+ * translation of them is. Declared beside the source rather than in each locale, so the map of
+ * dictionaries can be typed without asserting that a translation is one of these literals.
+ */
+export type Messages<T = Dictionary> = { [K in keyof T]: T[K] extends string ? string : Messages<T[K]> };

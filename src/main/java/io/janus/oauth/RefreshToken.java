@@ -52,11 +52,14 @@ public class RefreshToken {
         this.expiresAt = expiresAt;
     }
 
-    /** Retires this token. A second call means the value was presented twice, which is the signal. */
-    public void use() {
-        this.usedAt = Instant.now();
-    }
-
+    /**
+     * Whether this token has been retired.
+     *
+     * <p>Read only. Retiring one is {@code RefreshTokenRepository.markUsed}, which does it
+     * conditionally so that two requests presenting the same value cannot both succeed; setting the
+     * field here would put that decision back in a place where the check and the write are two
+     * steps with a gap between them.
+     */
     public boolean spent() {
         return usedAt != null;
     }

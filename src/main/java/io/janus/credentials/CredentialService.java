@@ -151,9 +151,12 @@ public class CredentialService {
     }
 
     /**
-     * The strategy, with its token endpoint held to the same standard as any other address Janus will
-     * call: HTTPS, no credentials or query in the URL, and not resolving to a private address. It is
-     * a destination the gateway dials with a secret in hand, so it gets the destination rules.
+     * The shape of the value itself, against the strategy the destination was registered with.
+     *
+     * <p>Only the shape. The token endpoint is held to the same standard as any other address Janus
+     * dials — HTTPS, no credentials or query in the URL, not resolving to a private address — but
+     * that is settled where the address is written, by {@code ProviderService}, and a credential
+     * cannot state one of its own.
      */
     private void validateSecret(Provider provider, CredentialRequest request) {
         if (!request.carriesSecret()) return;

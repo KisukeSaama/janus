@@ -94,14 +94,12 @@ class SchemaIT extends IntegrationTest {
     /** A secret is addressed by its path, so two records may never claim the same one. */
     @Test
     void noTwoCredentialsCanClaimTheSameSecretPath() {
-        var unique = jdbc().queryForList(
-                        """
+        var unique = jdbc().queryForList("""
                 select i.indexrelid::regclass::text as name
                 from pg_index i
                 join pg_class c on c.oid = i.indrelid
                 where c.relname = 'credentials' and i.indisunique
-                """,
-                        String.class);
+                """, String.class);
 
         assertThat(unique).isNotEmpty();
     }
@@ -109,13 +107,11 @@ class SchemaIT extends IntegrationTest {
     /** Removing an API removes its database aggregate; OpenBao cleanup is queued separately. */
     @Test
     void credentialMetadataCascadesFromItsApi() {
-        var deleteAction = jdbc().queryForObject(
-                        """
+        var deleteAction = jdbc().queryForObject("""
                 select rc.delete_rule
                   from information_schema.referential_constraints rc
                  where rc.constraint_name = 'credentials_provider_id_fkey'
-                """,
-                        String.class);
+                """, String.class);
 
         assertThat(deleteAction).isEqualTo("CASCADE");
     }

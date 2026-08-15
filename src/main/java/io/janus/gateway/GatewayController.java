@@ -87,7 +87,7 @@ public class GatewayController {
             @RequestBody(required = false) byte[] body) {
         var call = new Call(request, principal);
         try {
-            var route = GatewayPath.parse(request.getRequestURI(), slug, request.getQueryString());
+            var route = GatewayPath.parse(GatewayPath.applicationPath(request), slug, request.getQueryString());
             call.routed(route.decodedPath());
 
             var method = HttpMethod.valueOf(request.getMethod());
@@ -151,6 +151,14 @@ public class GatewayController {
             } catch (IllegalArgumentException ex) {
                 throw new Denied(HttpStatus.BAD_REQUEST, ErrorCode.BAD_REQUEST, ex.getMessage());
             }
+            // Whom this application may speak as, which the grant decides and a header does not.
+            // Refused here, beside the path and the method, and for the same reason: this is the
+            // ceiling, and nothing behind it should have to check the ceiling again.
+            if (pinned == Identity.ACCOUNT && !scope.admitsAccountIdentity())
+                throw new Denied(
+                        HttpStatus.FORBIDDEN,
+                        ErrorCode.IDENTITY_NOT_GRANTED,
+                        "This grant does not admit speaking for the connected account");
 
             var exchange = new GatewayExchange(
                     provider,

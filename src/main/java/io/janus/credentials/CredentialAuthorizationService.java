@@ -53,6 +53,7 @@ public class CredentialAuthorizationService {
 
     private final CredentialRepository credentials;
     private final AuthorizationStateRepository states;
+    private final AuthorizationStateConsumer consumer;
     private final OpenBaoClient bao;
     private final UpstreamTokenCache tokens;
     private final WebClient web;
@@ -65,6 +66,7 @@ public class CredentialAuthorizationService {
     public CredentialAuthorizationService(
             CredentialRepository credentials,
             AuthorizationStateRepository states,
+            AuthorizationStateConsumer consumer,
             OpenBaoClient bao,
             UpstreamTokenCache tokens,
             WebClient gatewayWebClient,
@@ -75,6 +77,7 @@ public class CredentialAuthorizationService {
             @Value("${janus.public-url:http://localhost:8080}") String publicUrl) {
         this.credentials = credentials;
         this.states = states;
+        this.consumer = consumer;
         this.bao = bao;
         this.tokens = tokens;
         this.web = gatewayWebClient;
@@ -159,8 +162,12 @@ public class CredentialAuthorizationService {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "This authorisation is no longer valid. Start it again from the console."));
         // Single use, whatever happens next: a code that fails to exchange must not be retryable
-        // against the same state, and a state that succeeded must not be replayable at all.
-        states.delete(pending);
+        // against the same state, and a state that succeeded must not be replayable at all. In its
+        // own transaction, because every failure below is reported by throwing and a rollback here
+        // would hand the state back — see AuthorizationStateConsumer.
+        if (!consumer.consume(state))
+            throw new IllegalArgumentException(
+                    "This authorisation is no longer valid. Start it again from the console.");
         if (pending.expired())
             throw new IllegalArgumentException("This authorisation took too long. Start it again from the console.");
 
@@ -242,7 +249,7 @@ public class CredentialAuthorizationService {
         String stored = bao.read(credential.connectionSecretPath());
         int separator = stored.indexOf(':');
         if (separator < 0)
-            throw new IllegalStateException("The stored secret is not in the form client_id:client_secret");
+            throw new IllegalArgumentException("The stored secret is not in the form client_id:client_secret");
         String clientId = stored.substring(0, separator);
         String clientSecret = stored.substring(separator + 1);
 
@@ -264,8 +271,7 @@ public class CredentialAuthorizationService {
                     .headers(headers -> {
                         headers.setAccept(List.of(MediaType.APPLICATION_JSON));
                         if (credential.getConnectionClientAuth() != TokenClientAuth.POST)
-                            headers.setBasicAuth(Base64.getEncoder()
-                                    .encodeToString((clientId + ":" + clientSecret).getBytes(StandardCharsets.UTF_8)));
+                            headers.setBasicAuth(TokenClientAuth.basicCredentials(clientId, clientSecret));
                     })
                     .body(BodyInserters.fromFormData(form))
                     .retrieve()
@@ -315,7 +321,7 @@ public class CredentialAuthorizationService {
         }
         int separator = stored.indexOf(':');
         if (separator < 0)
-            throw new IllegalStateException("The stored secret is not in the form client_id:client_secret");
+            throw new IllegalArgumentException("The stored secret is not in the form client_id:client_secret");
         return stored.substring(0, separator);
     }
 

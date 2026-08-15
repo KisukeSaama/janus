@@ -129,6 +129,7 @@ export function ConnectionPage({
       burst: number;
       pathPrefix: string;
       methods: HttpMethod[];
+      allowAccountIdentity: boolean;
     }>,
   ) =>
     updateGrant.mutateAsync({
@@ -142,8 +143,12 @@ export function ConnectionPage({
         rateLimitBurst: changes.burst ?? grant.rateLimitBurst,
         pathPrefix: changes.pathPrefix ?? grant.pathPrefix ?? null,
         methods: changes.methods ?? grant.methods,
+        allowAccountIdentity: changes.allowAccountIdentity ?? grant.allowAccountIdentity,
       },
     });
+
+  /** Whether this API offers an account connection at all, and so whether identity is a question. */
+  const offersConnection = Boolean(credential?.connectionAuthorizationUrl);
 
   async function guard(run: () => Promise<unknown>) {
     setError('');
@@ -314,6 +319,18 @@ export function ConnectionPage({
                 {grant.methods.length > 0 ? grant.methods.join(', ') : t('detail.scopeAllMethods')}
               </dd>
             </div>
+            {/* Only where there are two identities to choose between. On an API nobody can connect
+                an account to, every call is the service's and the row would state a non-question. */}
+            {offersConnection && (
+              <div className="flex flex-wrap items-baseline justify-between gap-4 px-4 py-3">
+                <dt className="text-text-2">{t('detail.scopeIdentityLabel')}</dt>
+                <dd className={grant.allowAccountIdentity ? 'text-text-3' : 'data'}>
+                  {grant.allowAccountIdentity
+                    ? t('detail.scopeIdentityBoth')
+                    : t('detail.scopeIdentityAppOnly')}
+                </dd>
+              </div>
+            )}
           </dl>
         </Block>
 
@@ -426,9 +443,10 @@ export function ConnectionPage({
       {panel === 'scope' && (
         <ScopePanel
           grant={grant}
+          offersConnection={offersConnection}
           onClose={() => setPanel('closed')}
-          onSave={async (pathPrefix, methods) => {
-            await writeGrant({ pathPrefix, methods });
+          onSave={async (pathPrefix, methods, allowAccountIdentity) => {
+            await writeGrant({ pathPrefix, methods, allowAccountIdentity });
             setPanel('closed');
           }}
         />
@@ -732,23 +750,26 @@ function QuotaPanel({
  */
 function ScopePanel({
   grant,
+  offersConnection,
   onClose,
   onSave,
 }: {
   grant: Grant;
+  offersConnection: boolean;
   onClose: () => void;
-  onSave: (pathPrefix: string, methods: HttpMethod[]) => Promise<void>;
+  onSave: (pathPrefix: string, methods: HttpMethod[], allowAccountIdentity: boolean) => Promise<void>;
 }) {
   const { t } = useI18n();
   const describe = useErrorMessage();
   const [pathPrefix, setPathPrefix] = useState(grant.pathPrefix ?? '');
   const [methods, setMethods] = useState<HttpMethod[]>(grant.methods);
+  const [accountIdentity, setAccountIdentity] = useState(grant.allowAccountIdentity);
   const [error, setError] = useState('');
 
   async function submit(_e: FormEvent<HTMLFormElement>) {
     setError('');
     try {
-      await onSave(pathPrefix, methods);
+      await onSave(pathPrefix, methods, accountIdentity);
     } catch (x) {
       setError(describe(x));
     }
@@ -786,6 +807,14 @@ function ScopePanel({
             ))}
           </div>
         </fieldset>
+        {offersConnection && (
+          <CheckField
+            label={t('detail.scopeIdentityCheck')}
+            checked={accountIdentity}
+            onChange={() => setAccountIdentity((held) => !held)}
+            hint={t('detail.scopeIdentityHint')}
+          />
+        )}
       </FormLayout>
     </SidePanel>
   );

@@ -66,8 +66,7 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        String uri = request.getRequestURI();
-        return !uri.startsWith("/gateway/") && !uri.matches("^/[^/]+/gateway/.*");
+        return !io.janus.gateway.GatewayPath.applicationPath(request).startsWith("/gateway/");
     }
 
     @Override

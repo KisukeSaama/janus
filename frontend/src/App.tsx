@@ -18,11 +18,15 @@ import { isAuthError } from './lib/errors';
  * loader's job, which meant a background refetch could keep failing quietly against a session that
  * had stopped working.
  */
-function createClient(onAuthLost: () => void) {
+function createClient() {
+  // The handler reads the client declared below rather than a binding from the component, which is
+  // what the compiler rules object to. Reading it is safe wherever it is written: nothing calls this
+  // before a request has gone out through the client itself.
   const handle = (error: unknown) => {
-    if (isAuthError(error)) onAuthLost();
+    // The cookie is the server's to invalidate; all the console can do is stop believing in it.
+    if (isAuthError(error)) client.setQueryData(keys.session, null);
   };
-  return new QueryClient({
+  const client = new QueryClient({
     queryCache: new QueryCache({ onError: handle }),
     mutationCache: new MutationCache({ onError: handle }),
     defaultOptions: {
@@ -33,15 +37,11 @@ function createClient(onAuthLost: () => void) {
       mutations: { retry: false },
     },
   });
+  return client;
 }
 
 export default function App() {
-  const [client] = useState(() =>
-    createClient(() => {
-      // The cookie is the server's to invalidate; all the console can do is stop believing in it.
-      client.setQueryData(keys.session, null);
-    }),
-  );
+  const [client] = useState(createClient);
 
   return (
     <QueryClientProvider client={client}>

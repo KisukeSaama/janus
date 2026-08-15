@@ -40,8 +40,7 @@ public interface CredentialRepository extends JpaRepository<Credential, UUID> {
      * Secrets whose recorded deadline has arrived or is near enough to speak about. A disabled
      * secret is left out: it authorizes nothing, so its expiry is not work anyone has to do.
      */
-    @Query(
-            """
+    @Query("""
            select c from Credential c join fetch c.provider
            where c.enabled = true and c.expiresAt is not null and c.expiresAt <= :horizon
            order by c.expiresAt""")
@@ -61,8 +60,7 @@ public interface CredentialRepository extends JpaRepository<Credential, UUID> {
      * twice, without either of them holding a lock.
      */
     @Modifying
-    @Query(
-            """
+    @Query("""
            update Credential c set c.expiryStageNotified = :stage
            where c.id = :id and (c.expiryStageNotified is null or c.expiryStageNotified <> :stage)""")
     int claimExpiryStage(@Param("id") UUID id, @Param("stage") ExpiryStage stage);

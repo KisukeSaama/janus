@@ -85,7 +85,7 @@ public class Application {
     }
 
     /** Applies everything an administrator may change about an identity. */
-    public void describe(String name, String description, boolean enabled) {
+    public final void describe(String name, String description, boolean enabled) {
         this.name = name;
         this.description = description;
         this.enabled = enabled;

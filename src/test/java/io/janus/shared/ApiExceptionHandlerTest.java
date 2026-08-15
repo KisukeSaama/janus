@@ -171,7 +171,7 @@ class ApiExceptionHandlerTest {
 
     @Test
     void reportsAnOversizedBodyAsSuch() throws Exception {
-        mvc.perform(get("/things/too-large")).andExpect(status().isPayloadTooLarge());
+        mvc.perform(get("/things/too-large")).andExpect(status().isContentTooLarge());
     }
 
     /** The database's message names constraints and columns; the caller is told what it can act on. */

@@ -33,6 +33,22 @@ export default defineConfig(({ mode }) => {
         include: ['src/**/*.{ts,tsx}'],
         // Translation tables, type-only modules and the entry point assert nothing when covered.
         exclude: ['src/main.tsx', 'src/i18n/{en,fr}.ts', 'src/api/types.ts', 'src/test/**'],
+        // A floor, not a target. Set just under where the suite stands so that coverage can only
+        // be raised from here: what this catches is a screen added with no test at all, which is
+        // how the console arrived at having none for the two that display secrets. Raise each
+        // figure as the gap closes rather than leaving it to a convention nobody enforces.
+        //
+        // Recalibrated for Vitest 4, and the branch figure in particular is not a fall. The v8
+        // provider now maps its counts back through the AST rather than counting whatever the
+        // transformed output happened to look like: the same suite over the same code went from
+        // 719 branches to 1723, because the ones it used to miss are now counted and most of them
+        // are uncovered. What follows is where that measurement stands today.
+        thresholds: {
+          statements: 43,
+          lines: 43,
+          branches: 30,
+          functions: 35,
+        },
       },
     },
   };

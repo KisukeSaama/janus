@@ -40,6 +40,13 @@ class CredentialAuthorizationServiceTest {
     private final AuditService audit = mock(AuditService.class);
     private final UpstreamTokenCache tokens = new UpstreamTokenCache();
     private final AuthorizationStateRepository states = mock(AuthorizationStateRepository.class);
+
+    /**
+     * The real one, not a mock. It is three lines around a repository call, and what makes it worth
+     * having — its own transaction — is not decidable here at all: see {@code AuthorizationStateIT}.
+     */
+    private final AuthorizationStateConsumer consumer = new AuthorizationStateConsumer(states);
+
     private final TrafficPolicyRegistry traffic = mock(TrafficPolicyRegistry.class);
 
     /** What the repository would be holding. Asserted on directly, which a mock alone would not allow. */
@@ -85,10 +92,10 @@ class CredentialAuthorizationServiceTest {
             return state;
         });
         when(states.findById(anyString())).thenAnswer(call -> Optional.ofNullable(pending.get(call.getArgument(0))));
-        doAnswer(call -> pending.remove(
-                        call.getArgument(0, AuthorizationState.class).getState()))
-                .when(states)
-                .delete(any(AuthorizationState.class));
+        // Consumed by name and counted, the way the conditional delete answers: one for the caller
+        // that took it, zero for anybody arriving afterwards.
+        when(states.consume(anyString()))
+                .thenAnswer(call -> pending.remove(call.getArgument(0, String.class)) != null ? 1 : 0);
         when(states.deleteExpired(any())).thenAnswer(call -> {
             if (!allExpired) return 0;
             int swept = pending.size();
@@ -106,6 +113,7 @@ class CredentialAuthorizationServiceTest {
         authorizations = new CredentialAuthorizationService(
                 credentials,
                 states,
+                consumer,
                 bao,
                 tokens,
                 web,
@@ -227,10 +235,7 @@ class CredentialAuthorizationServiceTest {
             String state = startAndTakeState();
             // An id_token is the only place a provider commonly names the person. Its payload here is
             // {"email":"someone@example.com"}, unsigned, which is all this is ever read for.
-            answers.add(
-                    () -> Mono.just(
-                            json(
-                                    """
+            answers.add(() -> Mono.just(json("""
                     {"access_token":"at-1","refresh_token":"rt-1","expires_in":3600,
                      "id_token":"x.eyJlbWFpbCI6InNvbWVvbmVAZXhhbXBsZS5jb20ifQ.y"}""")));
 

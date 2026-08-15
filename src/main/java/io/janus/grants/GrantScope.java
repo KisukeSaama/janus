@@ -22,13 +22,22 @@ import java.util.*;
  * wildcards, no ordering, no precedence: a rule nobody has to work out the meaning of. A grant that
  * needs two unrelated prefixes is two grants, or none.
  *
- * @param pathPrefix the path under which this grant admits calls, or {@code null} for all of them
- * @param methods    the methods it admits, or empty for all of them
+ * <p>The third dimension is not about the surface but about whom a call may be made as. A
+ * destination somebody has connected their account to holds two identities, and any application
+ * with a grant could ask for the personal one by writing a header — reaching somebody's own data
+ * with no more authority than reaching the shared catalogue. That was a consequence of a grant
+ * naming a destination rather than a decision anybody took, and this is where it becomes one. It
+ * admits the account identity by default, because that is what every grant written before it did.
+ *
+ * @param pathPrefix           the path under which this grant admits calls, or {@code null} for all
+ * @param methods              the methods it admits, or empty for all of them
+ * @param admitsAccountIdentity whether this grant may speak for the connected account, rather than
+ *                             only as the application itself
  */
-public record GrantScope(String pathPrefix, Set<String> methods) {
+public record GrantScope(String pathPrefix, Set<String> methods, boolean admitsAccountIdentity) {
 
     /** The whole destination, which is what a grant with nothing stated has always meant. */
-    public static final GrantScope EVERYTHING = new GrantScope(null, Set.of());
+    public static final GrantScope EVERYTHING = new GrantScope(null, Set.of(), true);
 
     private static final int MAX_PREFIX = 512;
 
@@ -44,24 +53,28 @@ public record GrantScope(String pathPrefix, Set<String> methods) {
     }
 
     /**
-     * Reads back what was stored: a prefix, and methods as the comma-separated list a column holds.
+     * Reads a prefix and the comma-separated methods a column holds, and refuses a prefix that two
+     * layers could read differently rather than storing one that would never match anything.
      *
-     * <p>Whatever cannot be read is read as admitting everything. A grant is not the place to fail
-     * closed on a value nobody can correct from where the request is being refused, and there is no
-     * value this can be given that widens it past what the grant itself already admits.
+     * <p>The same method reads a stored row and a submitted form, so the refusal is what reports a
+     * mistyped prefix where it was typed. A stored row cannot reach it: {@code ck_grant_path_prefix}
+     * holds the column to the same rules, so the only way past the constraint is the way past this.
+     *
+     * <p>Nothing here is read as admitting more than was written. Both halves absent is the one
+     * default, and it is the whole destination, which is what a grant has always meant.
      */
-    public static GrantScope of(String pathPrefix, String methods) {
-        if (isBlank(pathPrefix) && isBlank(methods)) return EVERYTHING;
+    public static GrantScope of(String pathPrefix, String methods, boolean admitsAccountIdentity) {
+        if (isBlank(pathPrefix) && isBlank(methods) && admitsAccountIdentity) return EVERYTHING;
         var named = new LinkedHashSet<String>();
         if (!isBlank(methods))
             for (String method : methods.split(","))
                 if (!method.isBlank()) named.add(method.trim().toUpperCase(Locale.ROOT));
-        return new GrantScope(pathPrefix, named);
+        return new GrantScope(pathPrefix, named, admitsAccountIdentity);
     }
 
     /** Whether anything at all is narrowed, which is what the console shows and the journal records. */
     public boolean narrows() {
-        return pathPrefix != null || !methods.isEmpty();
+        return pathPrefix != null || !methods.isEmpty() || !admitsAccountIdentity;
     }
 
     /**

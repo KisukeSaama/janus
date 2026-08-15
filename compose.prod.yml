@@ -12,8 +12,11 @@ services:
     build:
       context: .
       dockerfile: deploy/nginx/Dockerfile
-    ports: ["80:80", "443:443"]
+    ports: ["80:8080", "443:8443"]
     volumes: ["./deploy/certs:/etc/nginx/certs:ro"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
     networks: [public, private]
     depends_on:
       backend: {condition: service_healthy}

@@ -119,8 +119,9 @@ class ExpiryMailerTest {
     void aRefusedMessageDoesNotStopTheRest() {
         doThrow(new MailSendException("refused")).doNothing().when(sender).send(any(SimpleMailMessage.class));
 
-        assertThatNoException().isThrownBy(() -> mailer().send(
-                        List.of(announcement(ada, "ada-key", 5), announcement(bo, "bo-key", 3))));
+        assertThatNoException()
+                .isThrownBy(
+                        () -> mailer().send(List.of(announcement(ada, "ada-key", 5), announcement(bo, "bo-key", 3))));
         verify(sender, times(2)).send(any(SimpleMailMessage.class));
     }
 

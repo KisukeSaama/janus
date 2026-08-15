@@ -142,8 +142,10 @@ public class AuthorizationCache {
 
     private static <T> Map<String, Entry<T>> bounded(int maxEntries) {
         return Collections.synchronizedMap(new LinkedHashMap<>(64, 0.75f, true) {
+            // Qualified deliberately. Inside a LinkedHashMap subclass the simple name Entry resolves to
+            // the inherited Map.Entry rather than to the record above, and the override stops overriding.
             @Override
-            protected boolean removeEldestEntry(Map.Entry<String, Entry<T>> eldest) {
+            protected boolean removeEldestEntry(Map.Entry<String, AuthorizationCache.Entry<T>> eldest) {
                 return size() > maxEntries;
             }
         });

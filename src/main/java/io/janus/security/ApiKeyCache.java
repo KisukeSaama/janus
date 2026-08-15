@@ -25,8 +25,10 @@ public class ApiKeyCache {
     private record Entry(String storedHash, GatewayPrincipal principal, long expiresAtNanos) {}
 
     private final Map<String, Entry> entries = Collections.synchronizedMap(new LinkedHashMap<>(64, 0.75f, true) {
+        // Qualified deliberately. Inside a LinkedHashMap subclass the simple name Entry resolves to the
+        // inherited Map.Entry rather than to the record above, and the override stops overriding.
         @Override
-        protected boolean removeEldestEntry(Map.Entry<String, Entry> eldest) {
+        protected boolean removeEldestEntry(Map.Entry<String, ApiKeyCache.Entry> eldest) {
             return size() > MAX_ENTRIES;
         }
     });

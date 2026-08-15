@@ -40,7 +40,7 @@ class ApiKeyAuthenticationFilterTest {
     void setUp() {
         throttle = new AuthenticationThrottle(3, 300, 900);
         accessTokens = new AccessTokenStore(
-                new OAuthProperties(java.time.Duration.ofMinutes(15), java.time.Duration.ofDays(30), true, 100));
+                new OAuthProperties(java.time.Duration.ofMinutes(15), java.time.Duration.ofDays(30), true, 100, 0));
         filter = new ApiKeyAuthenticationFilter(
                 new ApplicationAuthenticator(applications, encoder, cache),
                 accessTokens,
@@ -290,7 +290,7 @@ class ApiKeyAuthenticationFilterTest {
         return new ObjectMapper()
                 .readTree(response.getContentAsString())
                 .get("detail")
-                .asText();
+                .stringValue();
     }
 
     @Test

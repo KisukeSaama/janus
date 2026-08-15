@@ -27,6 +27,12 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    # Same treatment as the backend, and easier to justify here: this container serves files it was
+    # built with and writes nothing. The unprivileged nginx keeps its pid and every temporary path
+    # under /tmp, which is what makes a read-only root filesystem possible at all.
+    read_only: true
+    tmpfs:
+      - /tmp
     security_opt:
       - no-new-privileges:true
     labels:

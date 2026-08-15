@@ -1,4 +1,4 @@
-image: docker:27
+image: docker:29
 
 # Janus CI/CD follows the server's DraftGG golden path:
 # - verify and build automatically on `develop` and on tags `v*`;
@@ -11,7 +11,7 @@ image: docker:27
 #   JANUS_OPENBAO_TOKEN
 # Optional variables:
 #   JANUS_ADMIN_EMAIL (defaults to admin@localhost)
-#   JANUS_PRIVATE_DESTINATIONS_ENABLED (defaults to false) — lets an API be registered as living on
+#   JANUS_PRIVATE_DESTINATIONS_ENABLED (defaults to false) â€” lets an API be registered as living on
 #     the deployment's own local network. Not a secret, so leave it unmasked; scope it to the one
 #     environment that needs it rather than setting it for the project.
 
@@ -27,7 +27,7 @@ variables:
   DOCKER_TLS_CERTDIR: ""
 
 .docker_defaults: &docker_defaults
-  image: docker:27
+  image: docker:29
   tags:
     - devops
   before_script:
@@ -43,7 +43,7 @@ variables:
     - echo "${CI_REGISTRY_PASSWORD:-${CI_JOB_TOKEN}}" | docker login --username "${CI_REGISTRY_USER:-gitlab-ci-token}" --password-stdin "${CI_REGISTRY}"
 
 .deploy_defaults: &deploy_defaults
-  image: docker:27
+  image: docker:29
   tags:
     - devops
   before_script:
@@ -142,7 +142,7 @@ variables:
           -e DATA_REL="${data_rel}" \
           -e DEPLOY_ENV="${DEPLOY_ENV}" \
           -v /home/kisuke:/host-home \
-          alpine:3.21 sh -euc '
+          alpine:3.24 sh -euc '
             case "$TARGET_REL" in ""|/*|*..*) exit 1 ;; esac
             case "$DATA_REL" in ""|/*|*..*) exit 1 ;; esac
             host_target="/host-home/$TARGET_REL"
@@ -156,10 +156,20 @@ variables:
             chmod 700 "$host_target/.secrets"
             chmod 640 "$host_target/compose.yml" "$host_target/paths.env" "$host_target/app.env"
             chmod 644 "$host_target/openbao/"*
-            # Compose file-backed secrets are bind mounts, so the non-root
-            # application user must be able to read the host files. The 700
-            # parent directory still prevents other host users from reaching them.
-            chmod 644 "$host_target/.secrets/"*
+            # Compose file-backed secrets are bind mounts, and the daemon resolves the
+            # host path as root: the 700 directory above bounds other host users, not
+            # containers. What decides whether a container can read one is the file's
+            # own mode, which is why these are handed to the application's uid rather
+            # than left readable by everybody. Postgres and the vault bootstrap read
+            # theirs as root, before dropping privileges, so 600 covers them too.
+            for secret in postgres_password openbao_token admin_password; do
+              chown 10001 "$host_target/.secrets/$secret"
+              chmod 600 "$host_target/.secrets/$secret"
+            done
+            # The one exception. The vault entrypoint starts as root and drops to its
+            # own user before the server reads the seal stanza, so this file is read
+            # by a uid the image chooses. Readable, and nothing else in .secrets is.
+            chmod 644 "$host_target/.secrets/openbao_seal_key"
           '
       }
 
@@ -198,7 +208,7 @@ variables:
 test_backend:
   stage: test
   tags: [devops]
-  image: maven:3.9.9-eclipse-temurin-21
+  image: maven:3.9.16-eclipse-temurin-25
   variables:
     MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
   cache:
@@ -210,6 +220,13 @@ test_backend:
     - >-
       awk -F, 'NR>1 {m+=$4; c+=$5} END {printf "Coverage: %.1f%%\n", 100*c/(m+c)}'
       target/site/jacoco/jacoco.csv
+    # The resolved dependency tree, written here because this is the one job whose local
+    # repository is already warm. scan_dependencies reads it instead of pom.xml: reading a pom
+    # means resolving the Spring parent and its BOM imports over the network, and Maven Central
+    # answers a shared CI address with 429 and a half-hour block on the whole runner.
+    - >-
+      mvn -B -ntp org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom
+      -DoutputFormat=json -DoutputName=sbom -DincludeTestScope=false
   coverage: '/Coverage: (\d+\.\d+)%/'
   artifacts:
     when: always
@@ -219,6 +236,7 @@ test_backend:
         - target/failsafe-reports/TEST-*.xml
     paths:
       - target/site/jacoco
+      - target/sbom.json
     expire_in: 1 week
   rules:
     - if: '$CI_COMMIT_BRANCH == "develop"'
@@ -228,7 +246,7 @@ test_backend:
 test_frontend:
   stage: test
   tags: [devops]
-  image: node:22-alpine
+  image: node:24-alpine
   cache:
     key: janus-npm
     paths:
@@ -239,8 +257,66 @@ test_frontend:
     - cd frontend
     - npm ci --no-audit --no-fund
     - npm run lint
-    - npm test
+    # With coverage, so the floor in vite.config.ts is actually enforced somewhere. `npm test`
+    # stays the fast one for whoever is running it in a loop while writing a component.
+    - npm run test:coverage
     - npm run build
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# Advisories against what the two dependency sets pin, before anything is built. Neither pass
+# reaches the network for anything but the vulnerability database, so this answers in a minute
+# and needs no NVD key.
+#
+# The backend side reads the SBOM test_backend wrote, not pom.xml. Trivy can only read a pom by
+# resolving the Spring parent and its BOM imports from Maven Central, which rate limits shared CI
+# addresses: one 429 blocks every request from the runner for the next half hour. The SBOM already
+# names every resolved coordinate, so there is nothing left to look up. npm lockfiles are
+# self-contained and stay a plain filesystem scan.
+#
+# Two passes on purpose. The first reports everything at HIGH and above and never fails: a
+# pipeline that goes red on somebody else's disclosure, on a morning nobody changed anything,
+# stops being read. The second fails, and only on CRITICAL, the level that is worth stopping a
+# release for. Raise it once the backlog at HIGH is empty rather than the other way round.
+scan_dependencies:
+  stage: test
+  tags: [devops]
+  image:
+    name: aquasec/trivy:0.74.0
+    entrypoint: [""]
+  needs:
+    - job: test_backend
+      artifacts: true
+  variables:
+    TRIVY_CACHE_DIR: .trivycache
+    TRIVY_NO_PROGRESS: "true"
+    # Belt and braces against the 429 above: no scanner here has a reason to call a package
+    # registry, so a pass that suddenly wants to is a bug, not a slow job.
+    TRIVY_OFFLINE_SCAN: "true"
+  cache:
+    key: janus-trivy
+    paths:
+      - .trivycache
+  script:
+    # Created up front so a failure in the CRITICAL passes reports itself, instead of being
+    # buried under an artifact collector complaining it has no files to upload.
+    - touch critical-backend.txt critical-frontend.txt
+    - trivy sbom --scanners vuln --severity HIGH,CRITICAL --exit-code 0 target/sbom.json
+    - trivy fs --scanners vuln --severity HIGH,CRITICAL --exit-code 0 frontend/package-lock.json
+    - >-
+      trivy sbom --scanners vuln --severity CRITICAL --exit-code 1
+      --format table --output critical-backend.txt target/sbom.json
+    - >-
+      trivy fs --scanners vuln --severity CRITICAL --exit-code 1
+      --format table --output critical-frontend.txt frontend/package-lock.json
+  artifacts:
+    when: always
+    paths:
+      - critical-backend.txt
+      - critical-frontend.txt
+    expire_in: 1 week
   rules:
     - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
@@ -258,8 +334,33 @@ build:
   script:
     - docker build --pull -t "${CI_REGISTRY_IMAGE}/backend:${IMAGE_TAG}" -f Dockerfile .
     - docker build --pull -t "${CI_REGISTRY_IMAGE}/web:${IMAGE_TAG}" -f frontend/Dockerfile frontend
+    # Scanned before it is pushed, so a base image with a critical advisory never becomes a tag
+    # anybody can deploy. The bill of materials is written for both, which is what makes the next
+    # disclosure answerable without rebuilding anything: it says what was actually shipped.
+    - |
+      # Nothing is bind-mounted out of these: this job runs in a container of its own, and its
+      # working directory is not a path the daemon can resolve, so a --output written "to the
+      # project" would land in an empty directory on the host. The bill of materials comes back on
+      # stdout instead and is redirected here, where the artifact collector will find it.
+      trivy() {
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.74.0 "$@"
+      }
+
+      scan() {
+        trivy image --no-progress --scanners vuln --severity HIGH,CRITICAL --exit-code 0 "$1"
+        trivy image --quiet --no-progress --format cyclonedx "$1" > "sbom-$2.json"
+        trivy image --no-progress --scanners vuln --severity CRITICAL --exit-code 1 "$1"
+      }
+    - scan "${CI_REGISTRY_IMAGE}/backend:${IMAGE_TAG}" backend
+    - scan "${CI_REGISTRY_IMAGE}/web:${IMAGE_TAG}" web
     - docker push "${CI_REGISTRY_IMAGE}/backend:${IMAGE_TAG}"
     - docker push "${CI_REGISTRY_IMAGE}/web:${IMAGE_TAG}"
+  artifacts:
+    when: always
+    paths:
+      - sbom-backend.json
+      - sbom-web.json
+    expire_in: 1 month
   rules:
     - if: '$CI_COMMIT_BRANCH == "develop"'
     - if: '$CI_COMMIT_TAG =~ /^v.*/'

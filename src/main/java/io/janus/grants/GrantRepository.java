@@ -9,8 +9,7 @@ import org.springframework.data.repository.query.Param;
 
 public interface GrantRepository extends JpaRepository<Grant, UUID> {
     /** Fetches every association the gateway reads, so no lazy proxy is resolved outside the query. */
-    @Query(
-            """
+    @Query("""
            select g from Grant g
              join fetch g.credential
            where g.application.id=:appId and g.provider.id=:providerId and g.enabled=true
@@ -22,8 +21,7 @@ public interface GrantRepository extends JpaRepository<Grant, UUID> {
      * API", and both sides belong to the same person — {@code Grant.bind} refuses to tie together
      * two owners. Scoping through the application is therefore enough, and cannot drift.
      */
-    @Query(
-            """
+    @Query("""
            select g from Grant g
              join fetch g.application a
              join fetch g.provider
@@ -32,8 +30,7 @@ public interface GrantRepository extends JpaRepository<Grant, UUID> {
            """)
     List<Grant> findAllOwnedBy(@Param("owner") UUID owner);
 
-    @Query(
-            """
+    @Query("""
            select g from Grant g
              join fetch g.application a
              join fetch g.provider
