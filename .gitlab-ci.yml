@@ -220,6 +220,13 @@ test_backend:
     - >-
       awk -F, 'NR>1 {m+=$4; c+=$5} END {printf "Coverage: %.1f%%\n", 100*c/(m+c)}'
       target/site/jacoco/jacoco.csv
+    # The resolved dependency tree, written here because this is the one job whose local
+    # repository is already warm. scan_dependencies reads it instead of pom.xml: reading a pom
+    # means resolving the Spring parent and its BOM imports over the network, and Maven Central
+    # answers a shared CI address with 429 and a half-hour block on the whole runner.
+    - >-
+      mvn -B -ntp org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom
+      -DoutputFormat=json -DoutputName=sbom -DincludeTestScope=false
   coverage: '/Coverage: (\d+\.\d+)%/'
   artifacts:
     when: always
@@ -229,6 +236,7 @@ test_backend:
         - target/failsafe-reports/TEST-*.xml
     paths:
       - target/site/jacoco
+      - target/sbom.json
     expire_in: 1 week
   rules:
     - if: '$CI_COMMIT_BRANCH == "develop"'
@@ -258,12 +266,19 @@ test_frontend:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
-# Advisories against what the two lockfiles pin, before anything is built. Trivy reads pom.xml
-# and package-lock.json directly, so this answers in a minute and needs no NVD key.
+# Advisories against what the two dependency sets pin, before anything is built. Neither pass
+# reaches the network for anything but the vulnerability database, so this answers in a minute
+# and needs no NVD key.
+#
+# The backend side reads the SBOM test_backend wrote, not pom.xml. Trivy can only read a pom by
+# resolving the Spring parent and its BOM imports from Maven Central, which rate limits shared CI
+# addresses: one 429 blocks every request from the runner for the next half hour. The SBOM already
+# names every resolved coordinate, so there is nothing left to look up. npm lockfiles are
+# self-contained and stay a plain filesystem scan.
 #
 # Two passes on purpose. The first reports everything at HIGH and above and never fails: a
 # pipeline that goes red on somebody else's disclosure, on a morning nobody changed anything,
-# stops being read. The second fails, and only on CRITICAL â€” the level that is worth stopping a
+# stops being read. The second fails, and only on CRITICAL, the level that is worth stopping a
 # release for. Raise it once the backlog at HIGH is empty rather than the other way round.
 scan_dependencies:
   stage: test
@@ -271,20 +286,36 @@ scan_dependencies:
   image:
     name: aquasec/trivy:0.74.0
     entrypoint: [""]
+  needs:
+    - job: test_backend
+      artifacts: true
   variables:
     TRIVY_CACHE_DIR: .trivycache
     TRIVY_NO_PROGRESS: "true"
+    # Belt and braces against the 429 above: no scanner here has a reason to call a package
+    # registry, so a pass that suddenly wants to is a bug, not a slow job.
+    TRIVY_OFFLINE_SCAN: "true"
   cache:
     key: janus-trivy
     paths:
       - .trivycache
   script:
-    - trivy fs --scanners vuln --severity HIGH,CRITICAL --exit-code 0 .
-    - trivy fs --scanners vuln --severity CRITICAL --exit-code 1 --format table --output critical.txt .
+    # Created up front so a failure in the CRITICAL passes reports itself, instead of being
+    # buried under an artifact collector complaining it has no files to upload.
+    - touch critical-backend.txt critical-frontend.txt
+    - trivy sbom --scanners vuln --severity HIGH,CRITICAL --exit-code 0 target/sbom.json
+    - trivy fs --scanners vuln --severity HIGH,CRITICAL --exit-code 0 frontend/package-lock.json
+    - >-
+      trivy sbom --scanners vuln --severity CRITICAL --exit-code 1
+      --format table --output critical-backend.txt target/sbom.json
+    - >-
+      trivy fs --scanners vuln --severity CRITICAL --exit-code 1
+      --format table --output critical-frontend.txt frontend/package-lock.json
   artifacts:
     when: always
     paths:
-      - critical.txt
+      - critical-backend.txt
+      - critical-frontend.txt
     expire_in: 1 week
   rules:
     - if: '$CI_COMMIT_BRANCH == "develop"'
