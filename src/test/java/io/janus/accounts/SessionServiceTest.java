@@ -28,7 +28,7 @@ class SessionServiceTest {
     @BeforeEach
     void setUp() {
         throttle = new AuthenticationThrottle(3, 300, 900);
-        sessions = new SessionService(authentication, accounts, scope, throttle, audit);
+        sessions = new SessionService(authentication, accounts, scope, throttle, new ConsoleSessionRegistry(), audit);
         request = new MockHttpServletRequest("POST", "/api/admin/session");
         request.setRemoteAddr("203.0.113.10");
         response = new MockHttpServletResponse();

@@ -27,8 +27,7 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
      * substitutes the widest possible bounds when the reader asked for none — so the query has one
      * shape, and the index on the timestamp is used whether or not a range was named.
      */
-    String WINDOW =
-            """
+    String WINDOW = """
             select e from AuditEvent e
             where e.ownerId = :ownerId
               and e.occurredAt >= :from
@@ -71,30 +70,24 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
      */
     @Modifying
     @Transactional
-    @Query(
-            value =
-                    """
+    @Query(value = """
                     delete from audit_events
                     where id in (
                       select id from audit_events
                       where occurred_at < :before and action in (:actions)
-                      limit :batch)""",
-            nativeQuery = true)
+                      limit :batch)""", nativeQuery = true)
     int deleteBeforeMatching(
             @Param("before") Instant before, @Param("actions") Collection<String> actions, @Param("batch") int batch);
 
     /** The same pass over everything the actions do <em>not</em> name; see {@link #deleteBeforeMatching}. */
     @Modifying
     @Transactional
-    @Query(
-            value =
-                    """
+    @Query(value = """
                     delete from audit_events
                     where id in (
                       select id from audit_events
                       where occurred_at < :before and action not in (:actions)
-                      limit :batch)""",
-            nativeQuery = true)
+                      limit :batch)""", nativeQuery = true)
     int deleteBeforeExcept(
             @Param("before") Instant before, @Param("actions") Collection<String> actions, @Param("batch") int batch);
 }

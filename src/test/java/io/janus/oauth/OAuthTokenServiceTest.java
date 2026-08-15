@@ -23,7 +23,7 @@ class OAuthTokenServiceTest {
     private final RefreshTokenRepository refreshTokens = Mockito.mock(RefreshTokenRepository.class);
     private final AuditService audit = Mockito.mock(AuditService.class);
     private final OAuthProperties properties =
-            new OAuthProperties(Duration.ofMinutes(15), Duration.ofDays(30), true, 100);
+            new OAuthProperties(Duration.ofMinutes(15), Duration.ofDays(30), true, 100, 0);
     private final AccessTokenStore accessTokens = new AccessTokenStore(properties);
 
     private OAuthTokenService service;
@@ -44,6 +44,12 @@ class OAuthTokenServiceTest {
             return token;
         });
         when(applications.findByIdWithOwner(application.getId())).thenReturn(Optional.of(application));
+        // A rotation is decided by the row, not by the entity in memory, so the mock behaves the way
+        // the conditional update does: the first claim on a token succeeds and every later one finds
+        // nothing left to update.
+        var claimed = new HashSet<UUID>();
+        when(refreshTokens.markUsed(any(), any()))
+                .thenAnswer(invocation -> claimed.add(invocation.getArgument(0)) ? 1 : 0);
     }
 
     private TokenResponse signIn() {
@@ -116,6 +122,11 @@ class OAuthTokenServiceTest {
     /**
      * The property the whole rotation scheme exists for: a value that turns up twice is evidence it
      * leaked, and neither holder keeps the chain.
+     *
+     * <p>What this cannot show is that the revocation survives the refusal that reports it, because
+     * a mocked repository has no transaction to roll back. {@code RefreshRotationIT} is where that
+     * is decided, against a real database, and it is the reason {@code refresh} is declared
+     * {@code noRollbackFor}.
      */
     @Test
     void aRefreshTokenPresentedTwiceRevokesItsWholeFamily() {

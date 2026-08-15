@@ -75,6 +75,7 @@ export function AccountsPage({ identity }: { identity: Identity }) {
   async function submit(e: FormEvent<HTMLFormElement>) {
     const form = new FormData(e.currentTarget);
     const password = String(form.get('password') ?? '');
+    const currentPassword = String(form.get('currentPassword') ?? '');
     const input = {
       username: String(form.get('username') ?? ''),
       displayName: String(form.get('displayName') ?? ''),
@@ -82,6 +83,9 @@ export function AccountsPage({ identity }: { identity: Identity }) {
       role: String(form.get('role') ?? 'USER') as AccountRole,
       // Blank on an edit means "leave the current password alone"; it is never sent back to us.
       password: password === '' ? null : password,
+      // Asked for only when somebody changes their own, which is the one case where holding the
+      // session is not proof enough. An administrator resetting another account never sends it.
+      currentPassword: currentPassword === '' ? null : currentPassword,
       enabled: form.get('enabled') === 'on',
     };
     setFormError('');
@@ -262,6 +266,15 @@ export function AccountsPage({ identity }: { identity: Identity }) {
               options={roles.map((role) => ({ value: role, label: t(`roles.${role}` as MessageKey) }))}
               hint={superAdmin ? t('accounts.roleHint') : t('accounts.roleHintAdmin')}
             />
+            {editing?.id === identity.id && (
+              <Field
+                label={t('accounts.currentPassword')}
+                name="currentPassword"
+                type="password"
+                autoComplete="current-password"
+                hint={t('accounts.currentPasswordHint')}
+              />
+            )}
             <Field
               label={editing ? t('accounts.replacementPassword') : t('accounts.fieldPassword')}
               name="password"

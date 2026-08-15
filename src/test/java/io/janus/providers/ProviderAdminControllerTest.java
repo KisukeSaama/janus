@@ -68,8 +68,7 @@ class ProviderAdminControllerTest {
 
     private static String body(String name, String slug, String baseUrl) {
         return """
-               {"name":"%s","slug":"%s","baseUrl":"%s","enabled":true,"authType":"NONE"}"""
-                .formatted(name, slug, baseUrl);
+               {"name":"%s","slug":"%s","baseUrl":"%s","enabled":true,"authType":"NONE"}""".formatted(name, slug, baseUrl);
     }
 
     private Provider existing() {
@@ -338,11 +337,7 @@ class ProviderAdminControllerTest {
 
     @Test
     void aBurstWithoutAnAllowanceIsRefused() throws Exception {
-        mvc.perform(
-                        post("/api/admin/providers")
-                                .contentType("application/json")
-                                .content(
-                                        """
+        mvc.perform(post("/api/admin/providers").contentType("application/json").content("""
                                 {"name":"Spotify","slug":"spotify","baseUrl":"https://api.spotify.com","enabled":true,"authType":"NONE","rateLimitBurst":10}"""))
                 .andExpect(status().isBadRequest());
         verify(repository, never()).save(any());
@@ -358,11 +353,7 @@ class ProviderAdminControllerTest {
 
     @Test
     void aBurstWithinAnAllowanceIsAccepted() throws Exception {
-        mvc.perform(
-                        post("/api/admin/providers")
-                                .contentType("application/json")
-                                .content(
-                                        """
+        mvc.perform(post("/api/admin/providers").contentType("application/json").content("""
                                 {"name":"Spotify","slug":"spotify","baseUrl":"https://api.spotify.com","enabled":true,"authType":"NONE","rateLimitPerMinute":600,"rateLimitBurst":60}"""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.rateLimitBurst").value(60));

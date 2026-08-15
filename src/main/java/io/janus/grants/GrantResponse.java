@@ -18,6 +18,7 @@ public record GrantResponse(
         int rateLimitBurst,
         String pathPrefix,
         List<String> methods,
+        boolean allowAccountIdentity,
         Instant createdAt,
         Instant updatedAt) {
 
@@ -38,6 +39,7 @@ public record GrantResponse(
                 // A list rather than the stored string: the console offers one checkbox per method,
                 // and nothing outside this class should have to know how a column spells a set.
                 scope.orderedMethods(),
+                scope.admitsAccountIdentity(),
                 grant.getCreatedAt(),
                 grant.getUpdatedAt());
     }

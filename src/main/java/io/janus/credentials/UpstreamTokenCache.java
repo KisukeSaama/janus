@@ -48,8 +48,10 @@ public class UpstreamTokenCache {
     private record Key(UUID credentialId, Identity identity) {}
 
     private final Map<Key, Entry> entries = Collections.synchronizedMap(new LinkedHashMap<>(64, 0.75f, true) {
+        // Qualified deliberately. Inside a LinkedHashMap subclass the simple name Entry resolves to the
+        // inherited Map.Entry rather than to the record above, and the override stops overriding.
         @Override
-        protected boolean removeEldestEntry(Map.Entry<Key, Entry> eldest) {
+        protected boolean removeEldestEntry(Map.Entry<Key, UpstreamTokenCache.Entry> eldest) {
             return size() > MAX_ENTRIES;
         }
     });

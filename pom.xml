@@ -16,11 +16,11 @@
   <description>Secure secrets management and API proxy</description>
 
   <properties>
-    <java.version>21</java.version>
+    <java.version>25</java.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <spotless.version>2.44.5</spotless.version>
-    <palantir.version>2.50.0</palantir.version>
-    <jacoco.version>0.8.13</jacoco.version>
+    <spotless.version>3.9.0</spotless.version>
+    <palantir.version>2.97.0</palantir.version>
+    <jacoco.version>0.8.15</jacoco.version>
     <!--
       Holds JaCoCo's agent flags. Declared empty so surefire's argLine stays valid when the agent
       has not run (`mvn surefire:test` on its own), rather than failing on an unresolved property.
@@ -127,6 +127,28 @@
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+
+      <!--
+        Every warning javac has, on. What this is for is the removals: a JDK now deprecates an API
+        for removal several releases before it goes, and the only place that notice appears is here.
+        Not -Werror: a warning coming out of a dependency's generated code would then stop a build
+        that has nothing to fix.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <compilerArgs>
+            <!--
+              Two exclusions, neither of which hides anything actionable: `processing` reports on
+              annotation processors rather than on this code, and `serial` asks for a version field
+              on entities nothing ever serialises. Everything else is on, including `this-escape`
+              and `dangling-doc-comments`, both of which had real findings in this codebase.
+            -->
+            <arg>-Xlint:all,-processing,-serial</arg>
+          </compilerArgs>
+        </configuration>
       </plugin>
 
       <!-- Resolves dependency paths into properties so Mockito can be attached as a real agent below. -->

@@ -90,7 +90,7 @@ public record SignatureTemplate(String pattern) {
                 case QUERY_STRING -> query;
                 case "{body}" -> body;
                 case "{timestamp}", TIMESTAMP_MILLIS -> Long.toString(timestamp);
-                    // Unreachable: the constructor refused anything else before this could be reached.
+                // Unreachable: the constructor refused anything else before this could be reached.
                 default -> throw new IllegalStateException("Unknown placeholder " + placeholder);
             };
         }

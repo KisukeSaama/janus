@@ -17,13 +17,18 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param refreshTokenTtl how long a client may keep coming back without presenting its secret again
  * @param refreshEnabled whether the exchange hands out refresh tokens at all; a deployment where
  *     every caller is a server holding its own secret may prefer that it does not
+ * @param maxActiveTokens how many issued bearer tokens the process holds at once, across everybody
+ * @param maxActiveTokensPerApplication how many of those one application may hold; 0 derives a tenth
+ *     of the figure above. A ceiling of its own so that one caller asking for tokens in a loop is
+ *     bounded by its own share rather than by evicting everybody else's.
  */
 @ConfigurationProperties("janus.oauth")
 public record OAuthProperties(
         @DefaultValue("15m") Duration accessTokenTtl,
         @DefaultValue("30d") Duration refreshTokenTtl,
         @DefaultValue("true") boolean refreshEnabled,
-        @DefaultValue("10000") int maxActiveTokens) {
+        @DefaultValue("10000") int maxActiveTokens,
+        @DefaultValue("0") int maxActiveTokensPerApplication) {
 
     public OAuthProperties {
         if (accessTokenTtl.isNegative() || accessTokenTtl.isZero())
@@ -36,5 +41,20 @@ public record OAuthProperties(
             throw new IllegalArgumentException(
                     "janus.oauth.refresh-token-ttl must not be shorter than the access token it renews");
         if (maxActiveTokens < 1) throw new IllegalArgumentException("janus.oauth.max-active-tokens must be positive");
+        if (maxActiveTokensPerApplication < 0)
+            throw new IllegalArgumentException("janus.oauth.max-active-tokens-per-application must not be negative");
+    }
+
+    /**
+     * The per-application ceiling actually in force: a tenth of the store when nothing was stated.
+     *
+     * <p>With a floor, because one application legitimately holds several tokens at once — several
+     * instances of the same service, a client renewing before its old token expires — and a derived
+     * ceiling below that would evict a caller's own working tokens rather than protecting anybody
+     * from it. Where the floor exceeds the store, the store's own bound governs, which is the right
+     * answer for a deployment configured that small.
+     */
+    public int applicationTokenCeiling() {
+        return maxActiveTokensPerApplication > 0 ? maxActiveTokensPerApplication : Math.max(8, maxActiveTokens / 10);
     }
 }

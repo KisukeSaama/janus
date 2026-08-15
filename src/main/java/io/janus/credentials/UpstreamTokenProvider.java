@@ -1,6 +1,5 @@
 package io.janus.credentials;
 
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -163,8 +162,7 @@ public class UpstreamTokenProvider {
                     .headers(headers -> {
                         headers.setAccept(List.of(MediaType.APPLICATION_JSON));
                         if (clientAuth != TokenClientAuth.POST)
-                            headers.setBasicAuth(Base64.getEncoder()
-                                    .encodeToString((client[0] + ":" + client[1]).getBytes(StandardCharsets.UTF_8)));
+                            headers.setBasicAuth(TokenClientAuth.basicCredentials(client[0], client[1]));
                     })
                     .body(BodyInserters.fromFormData(form))
                     .exchangeToMono(result -> result.toEntity(byte[].class))

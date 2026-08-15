@@ -82,8 +82,21 @@ public class OAuthTokenService {
      *
      * <p>Everything the token stood for is checked again rather than trusted: the application may
      * have been disabled or deleted, and its key may have been rotated, since the token was issued.
+     *
+     * <p>{@code noRollbackFor}, because three of the refusals below revoke something first and the
+     * refusal is how the revocation is announced. Without it Spring undoes the revocation on the way
+     * out: reuse detection would refuse the caller, write a journal entry saying the family was
+     * dropped, and drop nothing — which is worse than not detecting the reuse at all, since the one
+     * record anybody would look at afterwards is then wrong.
+     *
+     * <p>Deliberately this rather than a bean of its own in {@code REQUIRES_NEW}, which is how
+     * {@code AuditEventWriter} solves the same problem and is the obvious answer here. A suspended
+     * transaction keeps its locks: the request that loses a rotation race has to wait for the winner
+     * before it can drop the family, and if it waits from a <em>second</em> transaction it is waiting
+     * on rows its own first transaction is holding, so neither ever finishes. Nothing in this method
+     * writes anything a refusal should discard, so committing on the way out costs nothing else.
      */
-    @Transactional
+    @Transactional(noRollbackFor = OAuthException.class)
     public TokenResponse refresh(String presented) {
         if (presented == null || presented.isBlank())
             throw OAuthException.invalidRequest("A refresh_token is required for this grant type");
@@ -92,19 +105,8 @@ public class OAuthTokenService {
                 .findByTokenHash(AccessTokenStore.digest(presented))
                 .orElseThrow(() -> OAuthException.invalidGrant("The refresh token is not valid"));
 
-        if (stored.spent()) {
-            // Presented twice. Whichever of the two holders is the thief, neither keeps the chain.
-            refreshTokens.deleteByFamilyId(stored.getFamilyId());
-            accessTokens.revokeApplication(stored.getApplicationId());
-            audit.recordAuthenticationDenied(
-                    AuditActor.APPLICATION,
-                    AuditAction.OAUTH_TOKEN_REPLAYED,
-                    "POST",
-                    "/oauth/token",
-                    400,
-                    "A refresh token was presented twice; its family was revoked");
-            throw OAuthException.invalidGrant("The refresh token has already been used");
-        }
+        // Presented twice. Whichever of the two holders is the thief, neither keeps the chain.
+        if (stored.spent()) throw replayed(stored);
         if (stored.expired(Instant.now())) {
             refreshTokens.delete(stored);
             throw OAuthException.invalidGrant("The refresh token has expired");
@@ -114,11 +116,20 @@ public class OAuthTokenService {
                 .findByIdWithOwner(stored.getApplicationId())
                 .filter(io.janus.applications.Application::isEnabled)
                 .orElseThrow(() -> {
-                    refreshTokens.deleteByFamilyId(stored.getFamilyId());
+                    revokeFamily(stored);
                     return OAuthException.invalidGrant("The service this token was issued to is no longer available");
                 });
 
-        stored.use();
+        // Claimed, not marked: the update touches the row only while its used_at is still null, so
+        // two requests carrying the same value cannot both pass the check above and both leave with
+        // a successor. The one that updates nothing lost the race, and a value used twice is a
+        // replay whichever of the two reached the database first.
+        //
+        // Last, after everything that can still refuse. A claim taken and then rolled back would
+        // hold a lock on the row for as long as the refusal takes, and the revocations above would
+        // be waiting on a lock held by the very transaction they were called from.
+        if (refreshTokens.markUsed(stored.getId(), Instant.now()) == 0) throw replayed(stored);
+
         var principal = new GatewayPrincipal(
                 application.getId(),
                 application.getName(),
@@ -126,6 +137,30 @@ public class OAuthTokenService {
                 application.getOwner().getUsername(),
                 application.getAllowedOrigins());
         return grant(principal, stored.getFamilyId());
+    }
+
+    /** A whole chain, and the bearer tokens issued along it. What a replayed value costs its family. */
+    private void revokeFamily(RefreshToken stored) {
+        refreshTokens.deleteByFamilyId(stored.getFamilyId());
+        accessTokens.revokeApplication(stored.getApplicationId());
+    }
+
+    /**
+     * A value presented twice: the chain goes, and the caller is refused.
+     *
+     * <p>Returned rather than thrown, so the call sites read as the refusals they are. What keeps
+     * the revocation above is {@code noRollbackFor} on the method that calls this.
+     */
+    private OAuthException replayed(RefreshToken stored) {
+        revokeFamily(stored);
+        audit.recordAuthenticationDenied(
+                AuditActor.APPLICATION,
+                AuditAction.OAUTH_TOKEN_REPLAYED,
+                "POST",
+                "/oauth/token",
+                400,
+                "A refresh token was presented twice; its family was revoked");
+        return OAuthException.invalidGrant("The refresh token has already been used");
     }
 
     /** Drops a token, whichever of the two kinds it is. Answers 200 either way, as RFC 7009 requires. */

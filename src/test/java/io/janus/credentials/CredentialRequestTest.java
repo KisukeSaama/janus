@@ -35,8 +35,9 @@ class CredentialRequestTest {
         assertThatThrownBy(() -> request(AuthType.API_KEY_HEADER, "not a header", null, null, "abc")
                         .validate())
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatNoException().isThrownBy(() -> request(AuthType.API_KEY_HEADER, "X-Api-Key", null, null, "abc")
-                .validate());
+        assertThatNoException()
+                .isThrownBy(() -> request(AuthType.API_KEY_HEADER, "X-Api-Key", null, null, "abc")
+                        .validate());
     }
 
     /** The name goes into a URL, so anything that would need encoding to survive is refused. */
@@ -48,8 +49,9 @@ class CredentialRequestTest {
         assertThatThrownBy(() -> request(AuthType.API_KEY_QUERY, null, "api key", null, "abc")
                         .validate())
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatNoException().isThrownBy(() -> request(AuthType.API_KEY_QUERY, null, "api_key", null, "abc")
-                .validate());
+        assertThatNoException()
+                .isThrownBy(() -> request(AuthType.API_KEY_QUERY, null, "api_key", null, "abc")
+                        .validate());
     }
 
     @Test
@@ -72,13 +74,14 @@ class CredentialRequestTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("client_id:client_secret");
 
-        assertThatNoException().isThrownBy(() -> request(
-                        AuthType.OAUTH2_CLIENT_CREDENTIALS,
-                        null,
-                        null,
-                        "https://accounts.spotify.com/api/token",
-                        "abc123:s3cret")
-                .validate());
+        assertThatNoException()
+                .isThrownBy(() -> request(
+                                AuthType.OAUTH2_CLIENT_CREDENTIALS,
+                                null,
+                                null,
+                                "https://accounts.spotify.com/api/token",
+                                "abc123:s3cret")
+                        .validate());
     }
 
     /**
@@ -97,9 +100,14 @@ class CredentialRequestTest {
     /** An update that omits the secret keeps what OpenBao holds, so its shape cannot be checked. */
     @Test
     void anUpdateWithoutASecretDoesNotCheckTheSecretsShape() {
-        assertThatNoException().isThrownBy(() -> request(
-                        AuthType.OAUTH2_CLIENT_CREDENTIALS, null, null, "https://accounts.spotify.com/api/token", null)
-                .validate());
+        assertThatNoException()
+                .isThrownBy(() -> request(
+                                AuthType.OAUTH2_CLIENT_CREDENTIALS,
+                                null,
+                                null,
+                                "https://accounts.spotify.com/api/token",
+                                null)
+                        .validate());
     }
 
     /**

@@ -25,7 +25,9 @@ public record NotificationProperties(
      * @param noticeDays  first, quiet announcement this many days before the date
      * @param warningDays second, insistent one this many days before it
      */
-    public record Expiry(@DefaultValue("30") int noticeDays, @DefaultValue("7") int warningDays) {
+    public record Expiry(
+            @DefaultValue("30") int noticeDays,
+            @DefaultValue("7") int warningDays) {
         public Expiry {
             if (noticeDays < 0 || warningDays < 0)
                 throw new IllegalArgumentException("janus.notifications.expiry thresholds cannot be negative");

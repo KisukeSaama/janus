@@ -466,8 +466,13 @@ function Probe({ slug, applicationId, apiKey }: { slug: string; applicationId: s
   const [result, setResult] = useState<ProbeResult | null>(null);
 
   // Trying one API says nothing about the next, and a verdict left over from the previous choice
-  // would be read as being about this one.
-  useEffect(() => setResult(null), [slug]);
+  // would be read as being about this one. Adjusted during the render that brings the new slug in,
+  // rather than in an effect afterwards: an effect would paint the previous verdict once first.
+  const [probed, setProbed] = useState(slug);
+  if (probed !== slug) {
+    setProbed(slug);
+    setResult(null);
+  }
 
   async function send(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();

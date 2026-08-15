@@ -63,11 +63,9 @@ class ApplicationAdminControllerTest {
 
     @Test
     void issuesAOneTimeKeyAndNeverReturnsItsHash() throws Exception {
-        mvc.perform(
-                        post("/api/admin/applications")
-                                .contentType("application/json")
-                                .content(
-                                        """
+        mvc.perform(post("/api/admin/applications")
+                        .contentType("application/json")
+                        .content("""
                                  {"name":"orders","description":"Orders service","enabled":true}"""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.apiKey").value(org.hamcrest.Matchers.startsWith("jns_")))

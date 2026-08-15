@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useEffectEvent, type RefObject } from 'react';
 
 /**
  * Closes a panel anchored to the control that opened it.
@@ -8,8 +8,9 @@ import { useEffect, useRef, type RefObject } from 'react';
  * their own copy of this, which is how one of them came to listen for `mousedown` and the row menus
  * for `pointerdown`: on a phone the first fires an event later than the tap that caused it.
  *
- * The callback is held in a ref, because every caller passes an inline closure and rebinding two
- * document listeners on every render is not what an open menu should cost.
+ * The callback is an Effect Event, because every caller passes an inline closure and rebinding two
+ * document listeners on every render is not what an open menu should cost. It reads the closure the
+ * last render passed, without being a dependency of the effect that installs the listeners.
  */
 export function useDismiss(
   open: boolean,
@@ -17,8 +18,7 @@ export function useDismiss(
   trigger: RefObject<HTMLElement | null>,
   onClose: () => void,
 ) {
-  const close = useRef(onClose);
-  close.current = onClose;
+  const close = useEffectEvent(onClose);
 
   useEffect(() => {
     if (!open) return;
@@ -28,11 +28,11 @@ export function useDismiss(
       // The trigger is exempt in its own right, not only by being inside the panel: a portalled
       // panel is not a descendant of the control that opened it, and closing on the press that the
       // trigger is about to read as a toggle would shut the menu and open it again.
-      if (!region.current?.contains(target) && !trigger.current?.contains(target)) close.current();
+      if (!region.current?.contains(target) && !trigger.current?.contains(target)) close();
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      close.current();
+      close();
       trigger.current?.focus();
     };
 

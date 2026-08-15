@@ -86,8 +86,9 @@ class UpstreamCooldownTest {
 
         cooldown.clearProvider(provider);
 
-        assertThat(cooldown.active()).singleElement().satisfies(pause -> assertThat(pause.providerId())
-                .isEqualTo(other));
+        assertThat(cooldown.active())
+                .singleElement()
+                .satisfies(pause -> assertThat(pause.providerId()).isEqualTo(other));
     }
 
     @Test

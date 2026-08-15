@@ -32,6 +32,7 @@ public class AccountService {
     private final PasswordEncoder encoder;
     private final AccessScope scope;
     private final RegistryTransfer registry;
+    private final ConsoleSessionRegistry sessions;
     private final AuditService audit;
 
     public AccountService(
@@ -39,11 +40,13 @@ public class AccountService {
             PasswordEncoder encoder,
             AccessScope scope,
             RegistryTransfer registry,
+            ConsoleSessionRegistry sessions,
             AuditService audit) {
         this.repository = repository;
         this.encoder = encoder;
         this.scope = scope;
         this.registry = registry;
+        this.sessions = sessions;
         this.audit = audit;
     }
 
@@ -101,8 +104,26 @@ public class AccountService {
         account.describe(request.displayName(), request.email(), request.enabled());
         account.assignRole(request.role());
         if (request.password() != null && !request.password().isBlank()) {
+            // Changing your own means proving you know the current one. A session left open on an
+            // unattended screen is otherwise enough to replace the password that opened it, and the
+            // person it belongs to would have no way of finding out. An administrator resetting
+            // somebody else's cannot supply it and is not asked to: that is what a reset is, and
+            // guardManagement above is what decides who may perform one.
+            if (account.getId().equals(scope.accountId())
+                    && (request.currentPassword() == null
+                            || !encoder.matches(request.currentPassword(), account.getPasswordHash())))
+                throw new IllegalArgumentException("The current password is required to change it");
+
             PasswordPolicy.check(account.getUsername(), request.password());
             account.changePassword(encoder.encode(request.password()));
+            // Every other session opened with the old password ends with it. Somebody changing a
+            // password because they think it was learned is asking for exactly this, and would
+            // reasonably assume it had happened; whoever learned it may already be signed in.
+            //
+            // Outside the transaction's guarantees on purpose. If the update below were to fail,
+            // sessions would have been ended that did not need to be, which costs a sign-in — the
+            // other order costs the thing this exists to prevent.
+            sessions.endOthers(account.getId());
             audit.recordAdmin(AuditAction.ACCOUNT_PASSWORD_CHANGED, null, account.getUsername());
         }
         audit.recordAdmin(AuditAction.ACCOUNT_UPDATED, null, account.getUsername());

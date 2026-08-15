@@ -292,11 +292,12 @@ public class Provider {
         updatedAt = Instant.now();
     }
 
-    public void describe(String name, String slug, String baseUrl, boolean enabled) {
+    public final void describe(String name, String slug, String baseUrl, boolean enabled) {
         describe(name, slug, baseUrl, enabled, false);
     }
 
-    public void describe(String name, String slug, String baseUrl, boolean enabled, boolean allowPrivateDestination) {
+    public final void describe(
+            String name, String slug, String baseUrl, boolean enabled, boolean allowPrivateDestination) {
         this.name = name;
         this.slug = slug;
         this.baseUrl = baseUrl;
@@ -310,7 +311,7 @@ public class Provider {
         this.jsonArrayPaths = normalization.enabled() ? blankToNull(normalization.arrayPaths()) : null;
     }
 
-    public void applyTrafficPolicy(TrafficPolicy traffic) {
+    public final void applyTrafficPolicy(TrafficPolicy traffic) {
         this.cacheEnabled = traffic.cacheEnabled();
         this.cacheTtlSeconds = traffic.ttlSeconds();
         this.rateLimitPerMinute = traffic.ratePerMinute();
@@ -321,7 +322,7 @@ public class Provider {
      * Applies the contract, clearing every setting that belongs to another strategy. Stated once here
      * and again in the database's constraints, so a row written by anything else means what it says.
      */
-    public void applyAuth(Auth auth) {
+    public final void applyAuth(Auth auth) {
         var type = auth.type();
         this.authType = type;
         this.headerName = type == AuthType.API_KEY_HEADER || type == AuthType.HMAC_SIGNATURE ? auth.headerName() : null;
@@ -335,7 +336,7 @@ public class Provider {
     }
 
     /** Applied on its own, because a connection is independent of whatever the application presents. */
-    public void applyConnection(Connection connection) {
+    public final void applyConnection(Connection connection) {
         boolean offered = connection != null && connection.offered();
         this.connectionAuthorizationUrl = offered ? connection.authorizationUrl() : null;
         this.connectionTokenUrl = offered ? connection.tokenUrl() : null;
@@ -359,10 +360,6 @@ public class Provider {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
-    /**
-     * Hands the destination to somebody else. The slug moves with it, so the caller must invalidate
-     * what was addressed by it — {@code TrafficPolicyRegistry.forgetProvider} — as for any edit.
-     */
     /** @deprecated APIs are global; only kept for old fixtures. */
     @Deprecated
     public Account getOwner() {

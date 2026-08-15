@@ -14,6 +14,8 @@ import java.util.UUID;
  *     thing the console acts on: it turns a row into a button.
  * @param authorizedSubject whom the provider says the stored consent belongs to. Displayed so an
  *     operator can tell whose account a connection speaks for, and never sent anywhere.
+ * @param connectionAwaitingSecret whether the connection still needs an OAuth client of its own
+ *     before anyone can be asked
  */
 public record CredentialResponse(
         UUID id,
@@ -30,7 +32,6 @@ public record CredentialResponse(
         String connectionTokenUrl,
         String connectionScopes,
         TokenClientAuth connectionClientAuth,
-        /** Whether the connection still needs an OAuth client of its own before anyone can be asked. */
         boolean connectionAwaitingSecret,
         SignatureAlgorithm signatureAlgorithm,
         String signatureTemplate,

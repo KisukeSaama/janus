@@ -37,6 +37,25 @@ public record GatewayPath(String rawPath, String decodedPath, String rawQuery) {
         return parseWithPrefix(requestUri, "/gateway/" + slug, queryString);
     }
 
+    /**
+     * The part of a request's path that this application answers on, with the container's context
+     * path removed.
+     *
+     * <p>Everything else in the chain already works in these terms — a security matcher and a
+     * {@code @RequestMapping} both see the context path stripped — while a servlet filter reading
+     * {@code getRequestURI()} does not. The filters used to allow for the difference by also matching
+     * an optional leading segment, which was both too wide and not enough: it admitted
+     * {@code /anything/gateway/...} as gateway traffic, and a deployment actually given a context
+     * path would have been metered here and then refused by {@link #parse}, which insists the URI
+     * begins with the prefix it is given. Asking the container how long its own prefix is answers
+     * exactly, and answers the same thing the rest of the chain is working from.
+     */
+    public static String applicationPath(jakarta.servlet.http.HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        String context = request.getContextPath();
+        return context.isEmpty() || !uri.startsWith(context) ? uri : uri.substring(context.length());
+    }
+
     private static GatewayPath parseWithPrefix(String requestUri, String prefix, String queryString) {
         if (!requestUri.startsWith(prefix))
             throw new GatewayController.Denied(HttpStatus.BAD_REQUEST, ErrorCode.PATH_INVALID, "Unsafe gateway path");

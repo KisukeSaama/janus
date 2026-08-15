@@ -14,11 +14,12 @@ import jakarta.validation.constraints.Size;
  */
 public record ApplicationRequest(
         @NotBlank
-                @Size(max = 120)
-                @jakarta.validation.constraints.Pattern(
-                        regexp = "[^\\p{Cntrl}]*",
-                        message = "must not contain control characters")
-                String name,
+        @Size(max = 120)
+        @jakarta.validation.constraints.Pattern(
+                regexp = "[^\\p{Cntrl}]*",
+                message = "must not contain control characters")
+        String name,
+
         @Size(max = 500) String description,
         boolean enabled,
         @Size(max = 10) List<@Size(max = 255) String> allowedOrigins) {

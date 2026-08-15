@@ -25,7 +25,8 @@ public class SessionController {
         this.sessions = sessions;
     }
 
-    public record Credentials(@NotBlank String username, @NotBlank String password) {}
+    public record Credentials(
+            @NotBlank String username, @NotBlank String password) {}
 
     @GetMapping
     public SessionService.Identity current() {

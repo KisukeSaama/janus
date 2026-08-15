@@ -134,8 +134,7 @@ public class ExpiryMailer {
 
     private String body(List<Notification> raised, Instant now) {
         var date = DateTimeFormatter.ISO_LOCAL_DATE.withZone(zone());
-        var text = new StringBuilder(
-                """
+        var text = new StringBuilder("""
                 Janus holds these secrets on your services' behalf, and the dates recorded for them \
                 have come due. Rotate the key upstream, then store the new value and its new date \
                 in Janus.

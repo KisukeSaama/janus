@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode, type RefObject } from 'react';
+import { useEffect, useEffectEvent, useId, useRef, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, Check, Copy, X } from 'lucide-react';
 
@@ -191,19 +191,20 @@ export function ConfirmDialog({
   const descriptionId = useId();
   useFocusTrap(dialogRef);
 
-  // Held in refs: the surface is mounted once and torn down once, and nothing about a keystroke or
-  // a request in flight should be able to re-run either.
-  const dismiss = useRef(onCancel);
-  dismiss.current = onCancel;
-  const locked = useRef(busy);
-  locked.current = busy;
-  const returnTo = useRef(returnFocus);
-  returnTo.current = returnFocus;
+  // Effect Events: the surface is mounted once and torn down once, and nothing about a keystroke or
+  // a request in flight should be able to re-run either. Both read the props of the last render
+  // without appearing in the dependencies below.
+  const escape = useEffectEvent(() => {
+    if (!busy) onCancel();
+  });
+  const restoreFocus = useEffectEvent((opener: HTMLElement | null) => {
+    (returnFocus?.() ?? opener)?.focus?.();
+  });
 
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !locked.current) dismiss.current();
+      if (e.key === 'Escape') escape();
     };
     document.addEventListener('keydown', onKey);
     // Restored rather than cleared: this dialog can be raised from inside a sheet that is holding
@@ -213,7 +214,7 @@ export function ConfirmDialog({
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = scroll;
-      (returnTo.current?.() ?? opener)?.focus?.();
+      restoreFocus(opener);
     };
   }, []);
 

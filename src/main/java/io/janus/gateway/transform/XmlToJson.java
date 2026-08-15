@@ -149,8 +149,8 @@ final class XmlToJson implements BodyTransformer {
                             element(reader, childPath, arrays, depth + 1, nodes),
                             arrays.forcesArray(childPath));
                 }
-                case XMLStreamConstants.CHARACTERS, XMLStreamConstants.CDATA, XMLStreamConstants.SPACE -> text.append(
-                        reader.getText());
+                case XMLStreamConstants.CHARACTERS, XMLStreamConstants.CDATA, XMLStreamConstants.SPACE ->
+                    text.append(reader.getText());
                 case XMLStreamConstants.END_ELEMENT -> {
                     return finish(content, text);
                 }

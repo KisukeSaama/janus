@@ -157,6 +157,9 @@ public class Credential {
     }
 
     /** Compatibility constructor for older fixtures. */
+    // Reaches the deprecated owner deliberately: this constructor exists for the same fixtures that
+    // accessor was kept for, and goes when they do.
+    @SuppressWarnings("deprecation")
     public Credential(Provider provider, String name, Strategy strategy, Instant expiresAt, boolean enabled) {
         this(provider.getOwner().getId(), provider, name, strategy, expiresAt, enabled);
     }
@@ -248,7 +251,7 @@ public class Credential {
      * <p>A deadline is one of those settings. Nothing is stored for an anonymous destination, so
      * nothing about it can stop working on a date, and the register must not announce that it will.
      */
-    public void describe(String name, Strategy strategy, Instant expiresAt, boolean enabled) {
+    public final void describe(String name, Strategy strategy, Instant expiresAt, boolean enabled) {
         var type = strategy.authType();
         this.name = name;
         this.authType = type;
@@ -352,7 +355,7 @@ public class Credential {
                 connectionAuthorizationUrl, connectionTokenUrl, connectionScopes, connectionClientAuth);
     }
 
-    public boolean offersConnection() {
+    public final boolean offersConnection() {
         return connectionAuthorizationUrl != null && connectionTokenUrl != null;
     }
 

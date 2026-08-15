@@ -30,11 +30,12 @@ public record CredentialRequest(
         // A name is displayed, and it also travels in the subject line of the expiry mail. A control
         // character in it is either a mistake or a header injection; neither has a use here.
         @NotBlank
-                @Size(max = 120)
-                @jakarta.validation.constraints.Pattern(
-                        regexp = "[^\\p{Cntrl}]*",
-                        message = "must not contain control characters")
-                String name,
+        @Size(max = 120)
+        @jakarta.validation.constraints.Pattern(
+                regexp = "[^\\p{Cntrl}]*",
+                message = "must not contain control characters")
+        String name,
+
         @NotNull UUID providerId,
         @NotNull AuthType authType,
         @Size(max = 100) String headerName,
@@ -49,14 +50,28 @@ public record CredentialRequest(
         @Size(max = 100) String signatureParameter,
         @Size(max = 100) String timestampHeader,
         @Size(max = 100) String timestampParameter,
-        @Size(min = 1, max = 8192) String secret,
+        // Refused where it is typed rather than where it is used. A stored secret travels in an
+        // outgoing header for most strategies, and a control character in one is either a mistake or
+        // a header injection. Netty refuses the value on the way out either way, so without this the
+        // failure surfaces on the first proxied call, on a screen that cannot say which field caused
+        // it — the same reasoning as `name` above, one layer later.
+        @Size(min = 1, max = 8192)
+        @jakarta.validation.constraints.Pattern(
+                regexp = "[^\\p{Cntrl}]*",
+                message = "must not contain control characters")
+        String secret,
+
         Instant expiresAt,
         boolean enabled,
         // The OAuth client the account connection exchanges with, when it is not the one above. Left
         // empty whenever the two are the same client — which is every API that issues one client id
         // and mints both kinds of token from it. Last in the record, so callers written before an API
         // could offer two identities still compile.
-        @Size(min = 1, max = 8192) String connectionSecret) {
+        @Size(min = 1, max = 8192)
+        @jakarta.validation.constraints.Pattern(
+                regexp = "[^\\p{Cntrl}]*",
+                message = "must not contain control characters")
+        String connectionSecret) {
 
     private static final Pattern HEADER_NAME = Pattern.compile("[A-Za-z0-9-]{1,100}");
     /** A query parameter travels in a URL, so anything needing encoding to survive is refused. */
@@ -166,9 +181,9 @@ public record CredentialRequest(
             case BEARER -> {
                 /* the stored value travels as it is */
             }
-                // Refused rather than ignored: a value accepted here would be written to OpenBao and
-                // never sent anywhere, which is the one outcome an operator would not expect from
-                // having typed it.
+            // Refused rather than ignored: a value accepted here would be written to OpenBao and
+            // never sent anywhere, which is the one outcome an operator would not expect from
+            // having typed it.
             case NONE -> {
                 if (carriesSecret())
                     throw new IllegalArgumentException("An open API takes no secret; choose how the key is sent");

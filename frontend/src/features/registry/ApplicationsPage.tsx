@@ -212,6 +212,7 @@ export function ApplicationsPage() {
               // narrowed grant re-enabled from here would silently widen back to everything.
               pathPrefix: existing?.pathPrefix ?? null,
               methods: existing?.methods ?? [],
+              allowAccountIdentity: existing?.allowAccountIdentity ?? true,
             };
             if (!existing) return createGrant.mutateAsync(grantInput);
             if (existing.credentialId !== credential!.id || !existing.enabled) {

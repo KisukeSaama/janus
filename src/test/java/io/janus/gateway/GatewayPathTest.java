@@ -10,6 +10,29 @@ class GatewayPathTest {
         return GatewayPath.parse(uri, "example", null);
     }
 
+    /**
+     * A servlet filter reads the URI with the container's prefix on it; everything else in the chain
+     * sees it removed. Asking the container how long its own prefix is is what keeps the two
+     * agreeing, and is what a pattern matching an optional leading segment never did.
+     */
+    @Test
+    void theApplicationPathIsWhatIsLeftAfterTheContextPath() {
+        var deployed = new org.springframework.mock.web.MockHttpServletRequest("GET", "/janus/gateway/example/v1");
+        deployed.setContextPath("/janus");
+        assertThat(GatewayPath.applicationPath(deployed)).isEqualTo("/gateway/example/v1");
+
+        var atTheRoot = new org.springframework.mock.web.MockHttpServletRequest("GET", "/gateway/example/v1");
+        assertThat(GatewayPath.applicationPath(atTheRoot)).isEqualTo("/gateway/example/v1");
+    }
+
+    /** A path that is not under the prefix the container reports is left exactly as it arrived. */
+    @Test
+    void aPathOutsideTheContextPathIsNotTrimmed() {
+        var odd = new org.springframework.mock.web.MockHttpServletRequest("GET", "/elsewhere/gateway/example");
+        odd.setContextPath("/janus");
+        assertThat(GatewayPath.applicationPath(odd)).isEqualTo("/elsewhere/gateway/example");
+    }
+
     @Test
     void extractsThePathThatFollowsTheProviderSlug() {
         var path = parse("/gateway/example/v1/customers/42");

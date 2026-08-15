@@ -16,6 +16,8 @@ import reactor.netty.http.client.HttpClient;
  */
 @Component
 public class OpenBaoClient {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(OpenBaoClient.class);
+
     private static final Pattern SAFE_PATH = Pattern.compile("[a-zA-Z0-9/_-]+");
     private static final int MAX_RESPONSE_BYTES = 256 * 1024;
 
@@ -26,6 +28,7 @@ public class OpenBaoClient {
         this.properties = properties;
         if (properties.address() == null || properties.address().isBlank())
             throw new IllegalStateException("janus.openbao.address must be configured");
+        warnIfInClear(properties.address());
         HttpClient httpClient = HttpClient.create()
                 .followRedirect(false)
                 .responseTimeout(Duration.ofSeconds(10))
@@ -37,6 +40,28 @@ public class OpenBaoClient {
                 .defaultHeader("X-Vault-Token", Objects.requireNonNullElse(properties.token(), ""))
                 .defaultHeader("X-Vault-Request", "true")
                 .build();
+    }
+
+    /**
+     * Said once, at startup, when the vault is reached over plain HTTP across a network.
+     *
+     * <p>The token that unlocks every secret this deployment holds, and each secret read back with
+     * it, travel over this address. On one host, with both containers on a network marked
+     * {@code internal}, that is bounded by the host. The moment the two are on different machines it
+     * is bounded by nothing, and there is no symptom: the deployment goes on working exactly as
+     * before. So it is stated here rather than discovered later.
+     *
+     * <p>Loopback is exempt. There is no wire, and a developer running both locally does not need a
+     * certificate to be told about.
+     */
+    private static void warnIfInClear(String address) {
+        if (!address.regionMatches(true, 0, "http://", 0, 7)) return;
+        String host = address.substring(7).split("[:/]", 2)[0];
+        if (host.equals("localhost") || host.equals("127.0.0.1") || host.equals("[::1]")) return;
+        log.warn(
+                "janus.openbao.address is {}, so the vault token and every secret read travel in clear. "
+                        + "Terminate TLS at OpenBao before it stops sharing a host with this process",
+                address);
     }
 
     public void write(String path, String value) {

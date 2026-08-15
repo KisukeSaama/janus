@@ -69,6 +69,12 @@ public enum ErrorCode {
      * console, and a caller that reads codes can say so instead of reporting a failure.
      */
     CONNECTION_NOT_AUTHORISED,
+    /**
+     * The call asked to speak for the connected account and the grant does not admit that identity.
+     * Told apart from the code above because the repair is the opposite: an account is connected,
+     * and what has to change is what this application is allowed to do with it.
+     */
+    IDENTITY_NOT_GRANTED,
 
     // Allowances.
     /** The per-address ceiling on calls to Janus itself. */

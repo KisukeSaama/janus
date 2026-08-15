@@ -1,6 +1,4 @@
-import type { Dictionary } from './en';
-
-type Translated<T> = { [K in keyof T]: T[K] extends string ? string : Translated<T[K]> };
+import type { Messages } from './en';
 
 /**
  * Le français dit la même chose que l’anglais, pas la même phrase. Le vocabulaire est celui de
@@ -8,7 +6,7 @@ type Translated<T> = { [K in keyof T]: T[K] extends string ? string : Translated
  *
  * Tout reste court : un libellé fait quelques mots, une aide tient sur une ligne.
  */
-export const fr: Translated<Dictionary> = {
+export const fr: Messages = {
   common: {
     refresh: 'Actualiser',
     signOut: 'Déconnexion',
@@ -342,6 +340,11 @@ export const fr: Translated<Dictionary> = {
     scopeMethodsLabel: 'Méthodes',
     scopeMethodsHint: 'Celles-ci seulement. Le reste est refusé.',
     scopeAllMethods: 'Toutes les méthodes',
+    scopeIdentityLabel: 'Identité',
+    scopeIdentityBoth: 'Service et compte connecté',
+    scopeIdentityAppOnly: 'Service seul',
+    scopeIdentityCheck: 'Peut envoyer X-Janus-Identity: account',
+    scopeIdentityHint: 'Laisse ce service atteindre les données de la personne connectée. Décoché, tout part au nom du service.',
 
     openTitle: 'Ce que Janus présente',
     openLead: 'Rien : cette API est ouverte.',
@@ -811,6 +814,8 @@ export const fr: Translated<Dictionary> = {
     roleHintAdmin: 'Seul un super administrateur en nomme un autre.',
     fieldPassword: 'Mot de passe',
     replacementPassword: 'Nouveau mot de passe',
+    currentPassword: 'Mot de passe actuel',
+    currentPasswordHint: 'Exigé pour changer le vôtre. Les autres sessions prennent fin.',
     replacementPlaceholder: 'Vide pour conserver l\u2019actuel',
     passwordHint: 'Au moins 8 caract\u00e8res, avec majuscule, minuscule et chiffre. Conserv\u00e9 sous forme d\u2019empreinte.',
     activeLabel: 'Actif',

@@ -19,12 +19,12 @@ public record ProviderRequest(
         // Displayed, and carried into the body of the expiry mail. A control character in a name is
         // either a mistake or a header injection; neither has a use here.
         @NotBlank @Size(max = 120) @Pattern(regexp = "[^\\p{Cntrl}]*", message = "must not contain control characters")
-                String name,
+        String name,
+
         @NotBlank
-                @Pattern(
-                        regexp = "[a-z0-9][a-z0-9-]{1,78}[a-z0-9]",
-                        message = "must be lowercase letters, digits, and hyphens")
-                String slug,
+        @Pattern(regexp = "[a-z0-9][a-z0-9-]{1,78}[a-z0-9]", message = "must be lowercase letters, digits, and hyphens")
+        String slug,
+
         @NotBlank @Size(max = 500) String baseUrl,
         boolean enabled,
         Boolean cacheEnabled,
@@ -56,10 +56,10 @@ public record ProviderRequest(
         // length: this is copied into no query and no address, but a field that accepts anything is
         // a field somebody eventually stores a document in.
         @Size(max = 1000)
-                @Pattern(
-                        regexp = "[\\p{L}\\p{N}_.:, -]*",
-                        message = "must be element names or dotted paths, separated by commas")
-                String jsonArrayPaths,
+        @Pattern(
+                regexp = "[\\p{L}\\p{N}_.:, -]*",
+                message = "must be element names or dotted paths, separated by commas")
+        String jsonArrayPaths,
         // The account connection, set beside whatever the application itself presents. Last in the
         // record for the same reason as the fields above: a caller written before an API could offer
         // two identities states nothing here, and an unstated answer is "it offers one".

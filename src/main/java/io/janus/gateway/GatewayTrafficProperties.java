@@ -57,13 +57,17 @@ public record GatewayTrafficProperties(
      * @param enabled  master switch; when false no destination normalises, whatever its row says
      * @param maxBytes largest body a conversion is attempted on
      */
-    public record Transform(@DefaultValue("true") boolean enabled, @DefaultValue("2097152") int maxBytes) {}
+    public record Transform(
+            @DefaultValue("true") boolean enabled,
+            @DefaultValue("2097152") int maxBytes) {}
 
     /**
      * @param maxWaitMillis      how long a request may wait for a provider allowance before being refused
      * @param maxCooldownSeconds ceiling on a cooldown taken from an upstream {@code Retry-After}
      */
-    public record Throttle(@DefaultValue("2000") long maxWaitMillis, @DefaultValue("300") long maxCooldownSeconds) {}
+    public record Throttle(
+            @DefaultValue("2000") long maxWaitMillis,
+            @DefaultValue("300") long maxCooldownSeconds) {}
 
     /**
      * @param maxAttempts           retries after the first attempt, for idempotent methods only

@@ -88,6 +88,58 @@ class OpenBaoClientTest {
         assertThat(received).isEmpty();
     }
 
+    /**
+     * The vault token and every secret read with it travel over this address. Reached in clear
+     * across a network, that is bounded by the host the two containers share and by nothing else the
+     * moment they stop sharing one — with no symptom at all, since the deployment goes on working
+     * exactly as it would have with TLS. So it is said once, at startup.
+     */
+    @Test
+    void saysSoWhenTheStoreIsReachedInClearAcrossANetwork() {
+        var recorded = recording();
+
+        new OpenBaoClient(new OpenBaoProperties("http://openbao:8200", "root-token", "secret"));
+
+        assertThat(warnings(recorded)).singleElement().asString().contains("travel in clear", "http://openbao:8200");
+    }
+
+    /** No wire, nothing to say: a developer running both locally needs no certificate to be told about. */
+    @Test
+    void saysNothingForLoopbackOrForTls() {
+        var recorded = recording();
+
+        client();
+        new OpenBaoClient(new OpenBaoProperties("http://localhost:8200", "root-token", "secret"));
+        new OpenBaoClient(new OpenBaoProperties("https://vault.example.test", "root-token", "secret"));
+
+        assertThat(warnings(recorded)).isEmpty();
+    }
+
+    /** Collects what this class logs, for the two tests above. Detached when the test ends. */
+    private ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> recording() {
+        var appender = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
+        appender.start();
+        attached = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(OpenBaoClient.class);
+        attached.addAppender(appender);
+        return appender;
+    }
+
+    private ch.qos.logback.classic.Logger attached;
+
+    @AfterEach
+    void detachRecording() {
+        if (attached != null) attached.detachAndStopAllAppenders();
+        attached = null;
+    }
+
+    private static List<String> warnings(
+            ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> recorded) {
+        return recorded.list.stream()
+                .filter(event -> event.getLevel() == ch.qos.logback.classic.Level.WARN)
+                .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                .toList();
+    }
+
     // --- reading ------------------------------------------------------------
 
     @Test

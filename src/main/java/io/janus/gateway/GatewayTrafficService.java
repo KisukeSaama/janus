@@ -75,7 +75,17 @@ public class GatewayTrafficService {
     private final long responseTimeoutMillis;
 
     /** Identical in-flight reads, so a cold entry under load costs one upstream call, not hundreds. */
-    private final ConcurrentMap<String, CompletableFuture<Delivery>> inFlight = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Leader> inFlight = new ConcurrentHashMap<>();
+
+    /**
+     * A call somebody else is already making, and the request it was made for.
+     *
+     * <p>The headers are kept because {@code Vary} is not knowable until the answer arrives. The key
+     * covers {@code Accept} and {@code Accept-Language}, which is what these requests are told apart
+     * by beforehand; whether the upstream considers anything else part of this representation's
+     * identity is something only its response says, and by then the followers are already waiting.
+     */
+    private record Leader(CompletableFuture<Delivery> result, HttpHeaders request) {}
 
     public GatewayTrafficService(
             WebClient gatewayWebClient,
@@ -227,21 +237,27 @@ public class GatewayTrafficService {
         while (true) {
             var leader = inFlight.get(key);
             if (leader == null) {
-                var mine = new CompletableFuture<Delivery>();
+                var mine = new Leader(new CompletableFuture<>(), exchange.headers());
                 if (inFlight.putIfAbsent(key, mine) != null) continue;
                 try {
                     var delivery = call(exchange, identity, key, stored);
-                    mine.complete(delivery);
+                    mine.result().complete(delivery);
                     return delivery;
                 } catch (RuntimeException ex) {
-                    mine.completeExceptionally(ex);
+                    mine.result().completeExceptionally(ex);
                     throw ex;
                 } finally {
                     inFlight.remove(key, mine);
                 }
             }
             try {
-                var delivery = leader.get(responseTimeoutMillis, TimeUnit.MILLISECONDS);
+                var delivery = leader.result().get(responseTimeoutMillis, TimeUnit.MILLISECONDS);
+                // What came back may name headers this follower does not agree with the leader on.
+                // The stored-response path checks that before serving one; this path had no way to,
+                // because Vary only becomes known once the answer exists. Checked here instead, and
+                // a follower that would be handed the wrong representation makes its own call.
+                if (!sameRepresentation(delivery, leader.request(), exchange.headers()))
+                    return call(exchange, identity, key, stored);
                 cache.record(CacheStatus.COALESCED);
                 return delivery.as(CacheStatus.COALESCED);
             } catch (TimeoutException ex) {
@@ -256,6 +272,21 @@ public class GatewayTrafficService {
                 throw new IllegalStateException("Interrupted while waiting for an identical request", ex);
             }
         }
+    }
+
+    /**
+     * Whether the answer the leader was given is an answer to this request too.
+     *
+     * <p>{@code Vary: *} is never shared: the upstream is saying the representation depends on
+     * something it will not name, so nothing can be concluded about a second request.
+     */
+    private static boolean sameRepresentation(Delivery delivery, HttpHeaders leader, HttpHeaders follower) {
+        for (String name : CachePolicy.varyNames(delivery.headers())) {
+            if (name.equals("*")) return false;
+            if (!Objects.equals(ResponseCache.varyValue(leader, name), ResponseCache.varyValue(follower, name)))
+                return false;
+        }
+        return true;
     }
 
     /**
@@ -289,7 +320,7 @@ public class GatewayTrafficService {
         }
 
         var other = identity == Identity.APP ? Identity.ACCOUNT : Identity.APP;
-        if (!available(credential, other)) return delivery;
+        if (!available(exchange, other)) return delivery;
         // Said in the journal rather than passed over quietly: this is the one refusal Janus could
         // have repaired and deliberately did not, and the caller's fix, pinning X-Janus-Identity, is
         // not one it can arrive at from the upstream's own 403.
@@ -716,23 +747,23 @@ public class GatewayTrafficService {
      */
     private void injectCredential(HttpHeaders headers, AuthType type, Credential credential, String secret) {
         switch (type) {
-                // An obtained token is a bearer token; what differs is only where it came from — a
-                // client secret of the application's, or a person's consent.
+            // An obtained token is a bearer token; what differs is only where it came from — a
+            // client secret of the application's, or a person's consent.
             case BEARER, OAUTH2_CLIENT_CREDENTIALS -> headers.setBearerAuth(secret);
             case API_KEY_HEADER -> headers.set(credential.getHeaderName(), secret);
-                // The secret half signed the request and does not travel. The key half identifies who
-                // signed it, which is what lets the upstream pick the secret to verify against.
+            // The secret half signed the request and does not travel. The key half identifies who
+            // signed it, which is what lets the upstream pick the secret to verify against.
             case HMAC_SIGNATURE -> {
                 int separator = secret.indexOf(':');
                 if (credential.getHeaderName() != null && separator >= 0)
                     headers.set(credential.getHeaderName(), secret.substring(0, separator));
             }
-                // Already in the address; see withQueryParameter.
+            // Already in the address; see withQueryParameter.
             case API_KEY_QUERY -> {}
-                // The stored value is "username:password"; HttpHeaders#setBasicAuth(String) expects it pre-encoded.
-            case BASIC -> headers.setBasicAuth(
-                    Base64.getEncoder().encodeToString(secret.getBytes(StandardCharsets.UTF_8)));
-                // Nothing to present. The request travels with the caller's forwarded headers alone.
+            // The stored value is "username:password"; HttpHeaders#setBasicAuth(String) expects it pre-encoded.
+            case BASIC ->
+                headers.setBasicAuth(Base64.getEncoder().encodeToString(secret.getBytes(StandardCharsets.UTF_8)));
+            // Nothing to present. The request travels with the caller's forwarded headers alone.
             case NONE -> {}
         }
     }
@@ -761,16 +792,22 @@ public class GatewayTrafficService {
                         "This call asked to speak for the connected account, and no account is connected");
             return exchange.pinned();
         }
-        if (!credential.connected()) return Identity.APP;
+        // A grant that does not admit the account identity is never answered with it, whatever was
+        // learned about the endpoint. What the memory holds is which identity an endpoint answers
+        // to, which is a fact about the destination; whether this application may present it is a
+        // decision about the application, and the decision outranks the fact.
+        if (!available(exchange, Identity.ACCOUNT)) return Identity.APP;
         var learned = identities.recall(
                 credential.getId(), exchange.method().name(), exchange.route().decodedPath());
         if (learned.isPresent()) return learned.get();
         return credential.getAuthType().anonymous() ? Identity.ACCOUNT : Identity.APP;
     }
 
-    /** Whether this credential can present that identity at all right now. */
-    private static boolean available(Credential credential, Identity identity) {
-        return identity == Identity.ACCOUNT ? credential.connected() : true;
+    /** Whether this call can present that identity at all: the credential holds it, the grant admits it. */
+    private static boolean available(GatewayExchange exchange, Identity identity) {
+        if (identity != Identity.ACCOUNT) return true;
+        return exchange.grant().getCredential().connected()
+                && exchange.grant().getScope().admitsAccountIdentity();
     }
 
     /** Whether presenting that identity means holding a token that can quietly age out. */

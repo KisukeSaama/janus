@@ -41,8 +41,7 @@ public class GatewayRequestSizeFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        String uri = request.getRequestURI();
-        return !uri.startsWith("/gateway/") && !uri.matches("^/[^/]+/gateway/.*");
+        return !GatewayPath.applicationPath(request).startsWith("/gateway/");
     }
 
     @Override
@@ -72,7 +71,7 @@ public class GatewayRequestSizeFilter extends OncePerRequestFilter {
         ApiProblem.write(
                 response,
                 mapper,
-                HttpStatus.PAYLOAD_TOO_LARGE,
+                HttpStatus.CONTENT_TOO_LARGE,
                 ErrorCode.PAYLOAD_TOO_LARGE,
                 "Request body exceeds the configured limit");
     }

@@ -31,20 +31,17 @@ public class AccessTokenStore {
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final int maxEntries;
+    private final int maxPerApplication;
 
     /** What was granted, and until when. Nanos, so a clock adjustment cannot extend a token. */
     private record Grant(GatewayPrincipal principal, long expiresAtNanos) {}
 
-    private final Map<String, Grant> issued;
+    /** Access order, so the iteration below runs from least recently used towards most. */
+    private final Map<String, Grant> issued = Collections.synchronizedMap(new LinkedHashMap<>(256, 0.75f, true));
 
     public AccessTokenStore(OAuthProperties properties) {
         this.maxEntries = properties.maxActiveTokens();
-        this.issued = Collections.synchronizedMap(new LinkedHashMap<>(256, 0.75f, true) {
-            @Override
-            protected boolean removeEldestEntry(Map.Entry<String, Grant> eldest) {
-                return size() > maxEntries;
-            }
-        });
+        this.maxPerApplication = properties.applicationTokenCeiling();
     }
 
     /** Mints a token for this caller and answers the value, which is the only time it exists. */
@@ -52,8 +49,55 @@ public class AccessTokenStore {
         byte[] material = new byte[ENTROPY_BYTES];
         RANDOM.nextBytes(material);
         String token = PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(material);
-        issued.put(digest(token), new Grant(principal, System.nanoTime() + ttlSeconds * 1_000_000_000L));
+        synchronized (issued) {
+            issued.put(digest(token), new Grant(principal, System.nanoTime() + ttlSeconds * 1_000_000_000L));
+            enforceBounds(principal.applicationId());
+        }
         return token;
+    }
+
+    /**
+     * Keeps the store inside its bounds, and takes what it has to take from whoever filled it.
+     *
+     * <p>A single least-recently-used ceiling over the whole deployment made one application's
+     * traffic everybody else's problem: an application holding valid credentials and asking for
+     * tokens in a loop — well inside its own rate limit — evicts every other application's tokens in
+     * minutes, and each of those callers finds itself unauthenticated for no reason it can see.
+     *
+     * <p>So three steps, in order of what they cost. Anything expired goes first and costs nobody
+     * anything. Then the caller's own ceiling, which is the step that makes a loop bounded by the
+     * loop rather than by the store. Only what is left over is taken from the whole, and by then a
+     * deployment reaching that point has more live callers than it was configured for, which is a
+     * figure to raise rather than a caller to blame.
+     *
+     * <p>One pass for the sweep and the count together: the store is walked on every exchange, and a
+     * token lasts minutes, so this is once per caller per quarter of an hour rather than per request.
+     */
+    private void enforceBounds(UUID applicationId) {
+        long now = System.nanoTime();
+        int held = 0;
+        var entries = issued.values().iterator();
+        while (entries.hasNext()) {
+            var grant = entries.next();
+            if (now - grant.expiresAtNanos() >= 0) entries.remove();
+            else if (grant.principal().applicationId().equals(applicationId)) held++;
+        }
+        dropOldest(
+                held - maxPerApplication,
+                grant -> grant.principal().applicationId().equals(applicationId));
+        dropOldest(issued.size() - maxEntries, grant -> true);
+    }
+
+    /** Drops the {@code excess} least recently used entries among those the predicate admits. */
+    private void dropOldest(int excess, java.util.function.Predicate<Grant> among) {
+        if (excess <= 0) return;
+        var entries = issued.values().iterator();
+        while (excess > 0 && entries.hasNext()) {
+            if (among.test(entries.next())) {
+                entries.remove();
+                excess--;
+            }
+        }
     }
 
     /** The caller behind a bearer token, or nothing if it is unknown, expired, or revoked. */
