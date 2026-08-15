@@ -11,7 +11,7 @@ image: docker:29
 #   JANUS_OPENBAO_TOKEN
 # Optional variables:
 #   JANUS_ADMIN_EMAIL (defaults to admin@localhost)
-#   JANUS_PRIVATE_DESTINATIONS_ENABLED (defaults to false) â€” lets an API be registered as living on
+#   JANUS_PRIVATE_DESTINATIONS_ENABLED (defaults to false) lets an API be registered as living on
 #     the deployment's own local network. Not a secret, so leave it unmasked; scope it to the one
 #     environment that needs it rather than setting it for the project.
 
@@ -158,10 +158,15 @@ variables:
             chmod 644 "$host_target/openbao/"*
             # Compose file-backed secrets are bind mounts, and the daemon resolves the
             # host path as root: the 700 directory above bounds other host users, not
-            # containers. What decides whether a container can read one is the file's
-            # own mode, which is why these are handed to the application's uid rather
-            # than left readable by everybody. Postgres and the vault bootstrap read
-            # theirs as root, before dropping privileges, so 600 covers them too.
+            # containers. What decides whether a container can read one is the mode on
+            # the file itself, which is why these are handed to the uid the application
+            # runs as rather than left readable by everybody. Postgres and the vault
+            # bootstrap read theirs as root, before dropping privileges, so 600 covers
+            # them too.
+            #
+            # Nothing below this line may contain an apostrophe: it all sits inside the
+            # single-quoted script above, where one would end the quote and hand the
+            # rest of this job to the outer shell.
             for secret in postgres_password openbao_token admin_password; do
               chown 10001 "$host_target/.secrets/$secret"
               chmod 600 "$host_target/.secrets/$secret"
