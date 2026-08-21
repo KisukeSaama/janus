@@ -203,6 +203,49 @@ class GatewayTrafficServiceTest {
         assertThat(sent.getFirst().headers().toString()).doesNotContain("client-secret");
     }
 
+    /**
+     * The public half of the OAuth client, on the header the destination named. Twitch refuses a
+     * Helix call without it whatever token it carries, and a caller that had to supply it would be
+     * holding a piece of the credential contract this gateway exists to keep.
+     */
+    @Test
+    void sendsTheClientIdOnTheHeaderTheDestinationNamed() {
+        when(bao.read(any())).thenReturn("client-id:client-secret");
+        when(tokens.tokenFor(any(), any(), eq("client-id:client-secret"))).thenReturn("short-lived-token");
+        var credential = new Credential(
+                provider,
+                "key",
+                new Credential.Strategy(
+                        AuthType.OAUTH2_CLIENT_CREDENTIALS,
+                        null,
+                        null,
+                        "https://auth.example.com/token",
+                        null,
+                        TokenClientAuth.BASIC,
+                        null,
+                        "Client-Id"),
+                null,
+                true);
+
+        service.forward(exchange(credential));
+
+        assertThat(header(sent.getFirst(), "Client-Id")).isEqualTo("client-id");
+        assertThat(header(sent.getFirst(), HttpHeaders.AUTHORIZATION)).isEqualTo("Bearer short-lived-token");
+        assertThat(sent.getFirst().headers().toString()).doesNotContain("client-secret");
+    }
+
+    /** No header named, nothing added: the strategy alone does not put the client on the request. */
+    @Test
+    void sendsNoClientIdWhereTheDestinationNamedNoHeaderForIt() {
+        when(bao.read(any())).thenReturn("client-id:client-secret");
+        when(tokens.tokenFor(any(), any(), eq("client-id:client-secret"))).thenReturn("short-lived-token");
+        var credential = Fixtures.credential(provider, AuthType.OAUTH2_CLIENT_CREDENTIALS);
+
+        service.forward(exchange(credential));
+
+        assertThat(sent.getFirst().headers().toString()).doesNotContain("client-id");
+    }
+
     // --- reuse ---------------------------------------------------------------
 
     /**

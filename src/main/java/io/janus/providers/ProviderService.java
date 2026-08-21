@@ -227,13 +227,19 @@ public class ProviderService {
             case OAUTH2_CLIENT_CREDENTIALS -> {
                 if (auth.tokenUrl() == null || auth.tokenUrl().isBlank())
                     throw new IllegalArgumentException("A token endpoint is required");
+                // Checked like any other header name, because that is what it becomes: a field
+                // written onto every outbound request, where a stray character is header injection.
+                if (hasText(auth.clientIdHeader()) && !auth.clientIdHeader().matches("[A-Za-z0-9-]{1,100}"))
+                    throw new IllegalArgumentException("A valid header name is required for the client id");
                 auth = new Provider.Auth(
                         auth.type(),
                         null,
                         null,
                         destinations.validate(auth.tokenUrl()).toString(),
                         auth.tokenScopes(),
-                        auth.tokenClientAuth());
+                        auth.tokenClientAuth(),
+                        null,
+                        auth.clientIdHeader());
             }
             case HMAC_SIGNATURE -> {
                 if (auth.headerName() != null && !auth.headerName().matches("[A-Za-z0-9-]{1,100}"))

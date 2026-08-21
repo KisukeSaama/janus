@@ -66,7 +66,10 @@ public record ProviderRequest(
         @Size(max = 500) String connectionAuthorizationUrl,
         @Size(max = 500) String connectionTokenUrl,
         @Size(max = 500) String connectionScopes,
-        TokenClientAuth connectionClientAuth) {
+        TokenClientAuth connectionClientAuth,
+        // The header an exchange puts its client id on, for the APIs that want it beside the token
+        // rather than only inside it. Last in the record, so callers written before it still compile.
+        @Size(max = 100) String clientIdHeader) {
 
     public ProviderRequest {
         name = name == null ? null : name.trim();
@@ -118,6 +121,7 @@ public record ProviderRequest(
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 
@@ -162,7 +166,14 @@ public record ProviderRequest(
 
     public Provider.Auth auth() {
         return new Provider.Auth(
-                authType, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, signature());
+                authType,
+                headerName,
+                queryParameter,
+                tokenUrl,
+                tokenScopes,
+                tokenClientAuth,
+                signature(),
+                clientIdHeader);
     }
 
     /** What the API offers an account holder, or a connection offering nothing when it offers none. */

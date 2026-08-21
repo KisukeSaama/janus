@@ -30,6 +30,10 @@ services:
       JANUS_DATABASE_USERNAME: janus
       OPENBAO_ADDR: http://openbao:8200
       JANUS_CORS_ORIGINS: https://${JANUS_PUBLIC_HOST:?Set JANUS_PUBLIC_HOST}
+      # What the OAuth callback address is built from, and what every provider is asked to
+      # register. It must be the public host: nginx routes /oauth/ to the backend.
+      JANUS_PUBLIC_URL: https://${JANUS_PUBLIC_HOST}
+      JANUS_CONSOLE_URL: https://${JANUS_PUBLIC_HOST}
       JANUS_ADMIN_EMAIL: ${JANUS_ADMIN_EMAIL:-admin@localhost}
       JANUS_PRIVATE_DESTINATIONS_ENABLED: ${JANUS_PRIVATE_DESTINATIONS_ENABLED:-false}
     secrets: [postgres_password, openbao_token, admin_password]

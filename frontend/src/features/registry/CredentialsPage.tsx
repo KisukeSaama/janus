@@ -135,6 +135,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
       tokenUrl: provider.tokenUrl ?? null,
       tokenScopes: provider.tokenScopes ?? null,
       tokenClientAuth: provider.tokenClientAuth ?? null,
+      clientIdHeader: provider.clientIdHeader ?? null,
     };
   }
 
@@ -208,6 +209,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
       tokenUrl: String(form.get('tokenUrl') ?? '') || null,
       tokenScopes: String(form.get('tokenScopes') ?? '') || null,
       tokenClientAuth: (String(form.get('tokenClientAuth') ?? '') || null) as TokenClientAuth | null,
+      clientIdHeader: String(form.get('clientIdHeader') ?? '') || null,
       // Cleared as a block when the box is unticked, so withdrawing a connection is one gesture
       // rather than three emptied fields the backend would refuse as half a flow.
       connectionAuthorizationUrl: connectable ? String(form.get('connectionAuthorizationUrl') ?? '') || null : null,
@@ -473,6 +475,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
                 <Field label={t('credentials.fieldTokenUrl')} name="tokenUrl" required data defaultValue={panel.provider.tokenUrl} />
                 <Field label={t('credentials.fieldTokenScopes')} name="tokenScopes" data defaultValue={panel.provider.tokenScopes} />
                 <SelectField label={t('credentials.fieldTokenClientAuth')} name="tokenClientAuth" defaultValue={panel.provider.tokenClientAuth ?? 'BASIC'} options={[{ value: 'BASIC', label: t('credentials.tokenClientAuthBasic') }, { value: 'POST', label: t('credentials.tokenClientAuthPost') }]} />
+                <Field label={t('credentials.fieldClientIdHeader')} name="clientIdHeader" data autoComplete="off" placeholder="Client-Id" defaultValue={panel.provider.clientIdHeader} hint={t('credentials.clientIdHeaderHint')} />
               </>
             )}
             <CheckField

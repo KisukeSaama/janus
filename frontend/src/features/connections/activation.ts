@@ -56,6 +56,7 @@ export function useApiActivation() {
         tokenUrl: provider.tokenUrl ?? null,
         tokenScopes: provider.tokenScopes ?? null,
         tokenClientAuth: provider.tokenClientAuth ?? null,
+        clientIdHeader: provider.clientIdHeader ?? null,
         signatureAlgorithm: provider.signatureAlgorithm ?? null,
         signatureTemplate: provider.signatureTemplate ?? null,
         signatureEncoding: provider.signatureEncoding ?? null,

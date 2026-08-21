@@ -57,6 +57,10 @@ public class Credential {
     @Column(name = "token_client_auth", length = 16)
     private TokenClientAuth tokenClientAuth;
 
+    /** The header this API wants the client id on; a copy of the provider's, like everything here. */
+    @Column(name = "client_id_header", length = 100)
+    private String clientIdHeader;
+
     /**
      * The account connection's contract, copied from the provider like the strategy above it, so an
      * outbound request is built without reading two rows. Null throughout when the API offers none.
@@ -172,7 +176,8 @@ public class Credential {
                 provider.getTokenUrl(),
                 provider.getTokenScopes(),
                 provider.getTokenClientAuth(),
-                provider.signatureSettings());
+                provider.signatureSettings(),
+                provider.getClientIdHeader());
     }
 
     /** Keeps personal credential metadata aligned with the administrator-owned API contract. */
@@ -217,7 +222,8 @@ public class Credential {
             String tokenUrl,
             String tokenScopes,
             TokenClientAuth tokenClientAuth,
-            SignatureSettings signature) {
+            SignatureSettings signature,
+            String clientIdHeader) {
 
         /** For the strategies that were the whole vocabulary before signing was added. */
         public Strategy(
@@ -228,6 +234,18 @@ public class Credential {
                 String tokenScopes,
                 TokenClientAuth tokenClientAuth) {
             this(authType, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, null);
+        }
+
+        /** For callers written before an exchange could also name a header for its client id. */
+        public Strategy(
+                AuthType authType,
+                String headerName,
+                String queryParameter,
+                String tokenUrl,
+                String tokenScopes,
+                TokenClientAuth tokenClientAuth,
+                SignatureSettings signature) {
+            this(authType, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, signature, null);
         }
 
         /** For the types that need nothing beyond the stored value. */
@@ -262,6 +280,7 @@ public class Credential {
         this.tokenScopes = type.exchanged() ? blankToNull(strategy.tokenScopes()) : null;
         this.tokenClientAuth =
                 type.exchanged() ? Objects.requireNonNullElse(strategy.tokenClientAuth(), TokenClientAuth.BASIC) : null;
+        this.clientIdHeader = type.exchanged() ? blankToNull(strategy.clientIdHeader()) : null;
         applySignature(type, strategy.signature());
 
         this.enabled = enabled;
@@ -343,6 +362,10 @@ public class Credential {
 
     public String getTokenScopes() {
         return tokenScopes;
+    }
+
+    public String getClientIdHeader() {
+        return clientIdHeader;
     }
 
     public TokenClientAuth getTokenClientAuth() {

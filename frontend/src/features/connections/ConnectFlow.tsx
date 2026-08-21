@@ -12,6 +12,7 @@ import {
   type Credential,
   type Provider,
   type SignatureEncoding,
+  type TokenClientAuth,
 } from '../../api';
 import { CheckField, ChoiceField, ConfirmDialog, CopyField, Field, Sheet } from '../../components';
 import { useI18n } from '../../i18n';
@@ -88,6 +89,13 @@ export function ConnectFlow({
   const [queryParameter, setQueryParameter] = useState('api_key');
   const [tokenUrl, setTokenUrl] = useState('');
   const [tokenScopes, setTokenScopes] = useState('');
+  // Where the client credentials go at that endpoint. Basic is what the spec requires of every
+  // server, so it is the default; the ones that read only the form body are common enough that
+  // finding out from a refused exchange, and coming back here to change it, is a step too many.
+  const [tokenClientAuth, setTokenClientAuth] = useState<TokenClientAuth>('BASIC');
+  // The header the API wants the client id on, beside the token obtained with it. Empty for most of
+  // them; Twitch refuses every call without it.
+  const [clientIdHeader, setClientIdHeader] = useState('');
   // The account connection, set beside whatever the application itself presents rather than instead
   // of it. One API is one entry here, however many identities it happens to offer.
   const [connectable, setConnectable] = useState(false);
@@ -143,6 +151,8 @@ export function ConnectFlow({
       queryParameter: authType === 'API_KEY_QUERY' ? queryParameter.trim() : null,
       tokenUrl: exchanges ? tokenUrl.trim() : null,
       tokenScopes: exchanges ? tokenScopes.trim() || null : null,
+      tokenClientAuth: exchanges ? tokenClientAuth : null,
+      clientIdHeader: exchanges ? clientIdHeader.trim() || null : null,
       signatureAlgorithm: signs ? 'HMAC_SHA256' : null,
       signatureTemplate: signs ? signing.template.trim() : null,
       signatureEncoding: signs ? signing.encoding : null,
@@ -413,6 +423,33 @@ export function ConnectFlow({
                   value={tokenScopes}
                   onChange={(e) => setTokenScopes(e.target.value)}
                   hint={t('connect.tokenScopesHint')}
+                />
+                <Field
+                  label={t('connect.clientIdHeader')}
+                  data
+                  autoComplete="off"
+                  placeholder="Client-Id"
+                  value={clientIdHeader}
+                  onChange={(e) => setClientIdHeader(e.target.value)}
+                  hint={t('connect.clientIdHeaderHint')}
+                />
+                <ChoiceField
+                  label={t('connect.clientAuth')}
+                  name="tokenClientAuth"
+                  value={tokenClientAuth}
+                  onChange={(value) => setTokenClientAuth(value as TokenClientAuth)}
+                  options={[
+                    {
+                      value: 'BASIC',
+                      label: t('connect.clientAuthBasic'),
+                      hint: t('connect.clientAuthBasicHint'),
+                    },
+                    {
+                      value: 'POST',
+                      label: t('connect.clientAuthPost'),
+                      hint: t('connect.clientAuthPostHint'),
+                    },
+                  ]}
                 />
               </>
             )}

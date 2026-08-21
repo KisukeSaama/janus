@@ -55,6 +55,11 @@ services:
       JANUS_ADMIN_EMAIL: ${JANUS_ADMIN_EMAIL:-admin@localhost}
       JANUS_PRIVATE_DESTINATIONS_ENABLED: ${JANUS_PRIVATE_DESTINATIONS_ENABLED:-false}
       JANUS_CORS_ORIGINS: https://${APP_HOST}
+      # The OAuth callback address is built from this, and it is registered with every
+      # provider, so it has to be the host a browser reaches rather than the port the
+      # process binds to. nginx sends /oauth/ to the backend, so the same host serves both.
+      JANUS_PUBLIC_URL: https://${APP_HOST}
+      JANUS_CONSOLE_URL: https://${APP_HOST}
     secrets:
       - postgres_password
       - openbao_token
