@@ -71,7 +71,10 @@ public record CredentialRequest(
         @jakarta.validation.constraints.Pattern(
                 regexp = "[^\\p{Cntrl}]*",
                 message = "must not contain control characters")
-        String connectionSecret) {
+        String connectionSecret,
+        // The header an exchange puts its client id on, copied from the API. Last in the record, so
+        // callers written before it still compile.
+        @Size(max = 100) String clientIdHeader) {
 
     private static final Pattern HEADER_NAME = Pattern.compile("[A-Za-z0-9-]{1,100}");
     /** A query parameter travels in a URL, so anything needing encoding to survive is refused. */
@@ -113,6 +116,7 @@ public record CredentialRequest(
                 secret,
                 expiresAt,
                 enabled,
+                null,
                 null);
     }
 
@@ -126,7 +130,14 @@ public record CredentialRequest(
 
     public Credential.Strategy strategy() {
         return new Credential.Strategy(
-                authType, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, signature());
+                authType,
+                headerName,
+                queryParameter,
+                tokenUrl,
+                tokenScopes,
+                tokenClientAuth,
+                signature(),
+                clientIdHeader);
     }
 
     /** The signing recipe, or null when this strategy does not sign. */
@@ -166,6 +177,12 @@ public record CredentialRequest(
                     throw new IllegalArgumentException(
                             "A token endpoint is required, such as https://accounts.spotify.com/api/token");
                 requirePair("Client credentials must be supplied as client_id:client_secret");
+                // It is written onto every outbound request, so it is checked like any other header
+                // name rather than trusted because the console filled it in.
+                if (clientIdHeader != null
+                        && !clientIdHeader.isBlank()
+                        && !HEADER_NAME.matcher(clientIdHeader).matches())
+                    throw new IllegalArgumentException("A valid header name is required for the client id");
             }
             case HMAC_SIGNATURE -> {
                 requirePair("Signing credentials must be supplied as key:secret");

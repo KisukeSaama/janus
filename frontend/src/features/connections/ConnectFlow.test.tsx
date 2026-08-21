@@ -125,6 +125,24 @@ describe('ConnectFlow', () => {
     expect(JSON.parse(writes()[1][1].body)).toMatchObject({ providerId: 'p1', secret: 'sk-live-1' });
   });
 
+  it('records where an exchange puts its client credentials', async () => {
+    renderFlow();
+    const user = await describeApi();
+
+    await user.click(screen.getByRole('radio', { name: /client id and secret|client id et client secret/i }));
+    await user.type(screen.getByLabelText(/token endpoint|point de d.livrance/i), 'https://id.twitch.tv/oauth2/token');
+    // Basic is the default, and the endpoints that read only the form body are why this is asked
+    // here rather than found out from a refused exchange.
+    await user.click(screen.getByRole('radio', { name: /in the form body|dans le corps du formulaire/i }));
+    await user.click(screen.getByRole('button', { name: /register the API|enregistrer l.API/i }));
+
+    await waitFor(() => expect(paths()).toEqual(['/api/admin/providers']));
+    expect(JSON.parse(writes()[0][1].body)).toMatchObject({
+      authType: 'OAUTH2_CLIENT_CREDENTIALS',
+      tokenClientAuth: 'POST',
+    });
+  });
+
   it('unwinds the catalogue entry when the credential is refused', async () => {
     refuse('/credentials');
     renderFlow();

@@ -389,6 +389,12 @@ public class GatewayTrafficService {
         // Fails closed: a failed exchange throws rather than sending the request without credentials,
         // which is the one outcome that would look to the upstream like an anonymous call.
         String presented = exchanges(credential, identity) ? tokens.tokenFor(credential, identity, secret) : secret;
+        // Beside the token, for the APIs that ask for the client itself as well. Not secret material:
+        // it is the public half of the OAuth client, which is why it may travel in a header the
+        // caller can see. Reading it here rather than in the caller is the whole point — a service
+        // that had to send it would hold a piece of the credential contract, and an operator
+        // rotating the client would have to chase every service that hard-coded it.
+        String clientId = credential.getClientIdHeader() == null ? null : leftOfColon(secret);
         boolean revalidating = stored != null && stored.revalidatable();
 
         int attempts = 0;
@@ -398,7 +404,7 @@ public class GatewayTrafficService {
         while (true) {
             attempts++;
             try {
-                upstream = send(exchange, credential, identity, presented, revalidating ? stored : null);
+                upstream = send(exchange, credential, identity, presented, clientId, revalidating ? stored : null);
                 transportFailure = null;
             } catch (GatewayHttpClientConfig.BlockedDestinationException ex) {
                 throw ex;
@@ -465,6 +471,7 @@ public class GatewayTrafficService {
             Credential credential,
             Identity identity,
             String secret,
+            String clientId,
             ResponseCache.Entry validator) {
         // Speaking for a person means presenting a bearer token, whatever the application itself
         // presents. A destination whose key travels in the query string does not put somebody's
@@ -484,6 +491,10 @@ public class GatewayTrafficService {
         var spec = client(exchange).method(exchange.method()).uri(target).headers(headers -> {
             headers.addAll(exchange.headers());
             injectCredential(headers, type, credential, secret);
+            // Named by the destination, not by the caller, and set after the forwarded headers so a
+            // caller cannot state a client id of its own. Applies to both identities: an API that
+            // wants the client on an application call wants it on a person's call too.
+            if (clientId != null) headers.set(credential.getClientIdHeader(), clientId);
             if (signed != null) signed.headers().forEach(headers::set);
             headers.set(CorrelationIdFilter.REQUEST_HEADER, exchange.correlationId());
             if (validator != null) {
@@ -766,6 +777,13 @@ public class GatewayTrafficService {
             // Nothing to present. The request travels with the caller's forwarded headers alone.
             case NONE -> {}
         }
+    }
+
+    /** The client id half of a stored {@code client_id:client_secret}, or null when there is not one. */
+    private static String leftOfColon(String storedSecret) {
+        if (storedSecret == null) return null;
+        int separator = storedSecret.indexOf(':');
+        return separator <= 0 ? null : storedSecret.substring(0, separator);
     }
 
     /**

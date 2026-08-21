@@ -576,6 +576,7 @@ function DestinationPanel({
         tokenUrl: provider.tokenUrl,
         tokenScopes: provider.tokenScopes,
         tokenClientAuth: provider.tokenClientAuth,
+        clientIdHeader: provider.clientIdHeader,
       });
     } catch (x) {
       setError(describe(x));

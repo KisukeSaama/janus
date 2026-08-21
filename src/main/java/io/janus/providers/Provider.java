@@ -101,6 +101,17 @@ public class Provider {
     private TokenClientAuth tokenClientAuth;
 
     /**
+     * The header this API wants the client id on, beside the token obtained with it. Null for the
+     * great majority, which read the client from the token alone; Twitch is the one every deployment
+     * meets, and it refuses a Helix call without {@code Client-Id} whatever the token says.
+     *
+     * <p>Only the name is here. The value is the left half of the stored secret, read from OpenBao at
+     * call time like everything else.
+     */
+    @Column(name = "client_id_header", length = 100)
+    private String clientIdHeader;
+
+    /**
      * Where a person is sent to agree, when this destination lets an account holder connect theirs.
      * Null means it does not, and the three columns below are null with it.
      */
@@ -243,7 +254,8 @@ public class Provider {
             String tokenUrl,
             String tokenScopes,
             TokenClientAuth tokenClientAuth,
-            SignatureSettings signature) {
+            SignatureSettings signature,
+            String clientIdHeader) {
 
         /** For the strategies that were the whole vocabulary before signing was added. */
         public Auth(
@@ -254,6 +266,18 @@ public class Provider {
                 String tokenScopes,
                 TokenClientAuth tokenClientAuth) {
             this(type, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, null);
+        }
+
+        /** For callers written before an exchange could also name a header for its client id. */
+        public Auth(
+                AuthType type,
+                String headerName,
+                String queryParameter,
+                String tokenUrl,
+                String tokenScopes,
+                TokenClientAuth tokenClientAuth,
+                SignatureSettings signature) {
+            this(type, headerName, queryParameter, tokenUrl, tokenScopes, tokenClientAuth, signature, null);
         }
 
         public static Auth none() {
@@ -332,6 +356,7 @@ public class Provider {
         this.tokenClientAuth = type.exchanged()
                 ? java.util.Objects.requireNonNullElse(auth.tokenClientAuth(), TokenClientAuth.BASIC)
                 : null;
+        this.clientIdHeader = type.exchanged() ? blankToNull(auth.clientIdHeader()) : null;
         applySignature(type, auth.signature());
     }
 
@@ -436,6 +461,10 @@ public class Provider {
 
     public TokenClientAuth getTokenClientAuth() {
         return tokenClientAuth;
+    }
+
+    public String getClientIdHeader() {
+        return clientIdHeader;
     }
 
     /** The account connection this destination offers, or {@link Connection#none()} when it offers none. */

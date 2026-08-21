@@ -89,6 +89,8 @@ export type Provider = {
   tokenUrl?: string;
   tokenScopes?: string;
   tokenClientAuth?: TokenClientAuth;
+  /** The header this API wants the client id on, beside the token obtained with it. */
+  clientIdHeader?: string;
   /** Whether the signed-in account has provisioned its personal credential for this API. */
   activated: boolean;
   createdAt: string;
@@ -134,6 +136,7 @@ export type Credential = {
   tokenUrl?: string;
   tokenScopes?: string;
   tokenClientAuth?: TokenClientAuth;
+  clientIdHeader?: string;
   /** Whether the connection still needs an OAuth client of its own before anyone can be asked. */
   connectionAwaitingSecret?: boolean;
   /** Where the value lives, never the value. Absent for NONE, which stores none. */
@@ -295,6 +298,7 @@ export type ProviderInput = {
   tokenUrl?: string | null;
   tokenScopes?: string | null;
   tokenClientAuth?: TokenClientAuth | null;
+  clientIdHeader?: string | null;
   /** The account connection, or null throughout when the API offers none. */
   connectionAuthorizationUrl?: string | null;
   connectionTokenUrl?: string | null;
@@ -311,6 +315,7 @@ export type CredentialInput = {
   tokenUrl?: string | null;
   tokenScopes?: string | null;
   tokenClientAuth?: TokenClientAuth | null;
+  clientIdHeader?: string | null;
   /**
    * The OAuth client the account connection exchanges with, when the API does not already store one
    * for the application itself. Left out whenever the two are the same client.
