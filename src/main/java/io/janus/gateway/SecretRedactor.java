@@ -57,6 +57,15 @@ final class SecretRedactor {
         return scrubbed;
     }
 
+    /**
+     * The substitution over text known to be text: a line of a streamed response, or a WebSocket text
+     * frame. Neither carries a Content-Type of its own to consult, and both are text by construction.
+     */
+    static String scrubText(String text, String... secrets) {
+        if (text == null || secrets == null) return text;
+        return replaceAll(text, secrets);
+    }
+
     private static String replaceAll(String text, String... secrets) {
         String scrubbed = text;
         for (String secret : secrets) {

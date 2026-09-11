@@ -21,6 +21,7 @@
     <spotless.version>3.9.0</spotless.version>
     <palantir.version>2.97.0</palantir.version>
     <jacoco.version>0.8.15</jacoco.version>
+    <graphql-java.version>26.1</graphql-java.version>
     <!--
       Holds JaCoCo's agent flags. Declared empty so surefire's argLine stays valid when the agent
       has not run (`mvn surefire:test` on its own), rather than failing on an unresolved property.
@@ -65,6 +66,26 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <!--
+      The gateway relays subscriptions over WebSocket as well as over HTTP. The server half is the
+      servlet container's own; the upstream half is Reactor Netty's client, the same one every
+      proxied call already uses, so the connection-time address check applies to a socket too.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-websocket</artifactId>
+    </dependency>
+    <!--
+      The parser only. Janus never executes a GraphQL document: it reads one to decide what kind of
+      operation it is, which root fields it touches and how deep it goes, and a hand-written reader
+      would get fragments, comments and multi-operation documents subtly wrong in exactly the places
+      a caller trying to slip a mutation past a read-only grant would aim for.
+    -->
+    <dependency>
+      <groupId>com.graphql-java</groupId>
+      <artifactId>graphql-java</artifactId>
+      <version>${graphql-java.version}</version>
     </dependency>
     <!--
       Boot 4 moved auto-configuration out of one jar and into per-technology modules. flyway-core on

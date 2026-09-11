@@ -19,9 +19,11 @@ import {
   useOAuthCallback,
   useUpdateGrant,
   useUpdateProvider,
+  GRAPHQL_OPERATIONS,
   HTTP_METHODS,
   type Credential,
   type Grant,
+  type GraphQlOperation,
   type HttpMethod,
   type Identity,
   type Provider,
@@ -130,6 +132,8 @@ export function ConnectionPage({
       pathPrefix: string;
       methods: HttpMethod[];
       allowAccountIdentity: boolean;
+      graphqlOperations: GraphQlOperation[];
+      graphqlRootFields: string[];
     }>,
   ) =>
     updateGrant.mutateAsync({
@@ -144,11 +148,23 @@ export function ConnectionPage({
         pathPrefix: changes.pathPrefix ?? grant.pathPrefix ?? null,
         methods: changes.methods ?? grant.methods,
         allowAccountIdentity: changes.allowAccountIdentity ?? grant.allowAccountIdentity,
+        // Carried on every write, or pausing a connection would quietly lift its GraphQL ceiling.
+        graphqlOperations: changes.graphqlOperations ?? grant.graphqlOperations ?? [],
+        graphqlRootFields: changes.graphqlRootFields ?? grant.graphqlRootFields ?? [],
       },
     });
 
   /** Whether this API offers an account connection at all, and so whether identity is a question. */
   const offersConnection = Boolean(credential?.connectionAuthorizationUrl);
+
+  const graphqlOperations = grant.graphqlOperations ?? [];
+  const graphqlRootFields = grant.graphqlRootFields ?? [];
+  /**
+   * Shown on a GraphQL API, and also wherever a ceiling is already stated: an API that stopped being
+   * one must not hide a rule the next save would silently drop.
+   */
+  const showsGraphql =
+    Boolean(provider?.graphqlPath) || graphqlOperations.length > 0 || graphqlRootFields.length > 0;
 
   async function guard(run: () => Promise<unknown>) {
     setError('');
@@ -264,6 +280,12 @@ export function ConnectionPage({
                   </dd>
                 </div>
               )}
+              {provider.graphqlPath && (
+                <div className="flex flex-wrap items-baseline justify-between gap-4 px-4 py-3">
+                  <dt className="text-text-2">{t('providers.graphqlPathLabel')}</dt>
+                  <dd className="data break-all text-right">{provider.graphqlPath}</dd>
+                </div>
+              )}
               <div className="flex flex-wrap items-baseline justify-between gap-4 px-4 py-3">
                 <dt className="text-text-2">{t('providers.rateLimitLabel')}</dt>
                 <dd className={provider.rateLimitPerMinute > 0 ? 'data' : 'text-text-3'}>
@@ -319,6 +341,26 @@ export function ConnectionPage({
                 {grant.methods.length > 0 ? grant.methods.join(', ') : t('detail.scopeAllMethods')}
               </dd>
             </div>
+            {/* Only on a GraphQL API, where every operation is the same POST and these rows are
+                what tell reading from writing. */}
+            {showsGraphql && (
+              <>
+                <div className="flex flex-wrap items-baseline justify-between gap-4 px-4 py-3">
+                  <dt className="text-text-2">{t('detail.scopeGraphqlOpsLabel')}</dt>
+                  <dd className={graphqlOperations.length > 0 ? 'data' : 'text-text-3'}>
+                    {graphqlOperations.length > 0
+                      ? graphqlOperations.map((operation) => operation.toLowerCase()).join(', ')
+                      : t('detail.scopeGraphqlAllOps')}
+                  </dd>
+                </div>
+                <div className="flex flex-wrap items-baseline justify-between gap-4 px-4 py-3">
+                  <dt className="text-text-2">{t('detail.scopeGraphqlFieldsLabel')}</dt>
+                  <dd className={graphqlRootFields.length > 0 ? 'data break-all text-right' : 'text-text-3'}>
+                    {graphqlRootFields.length > 0 ? graphqlRootFields.join(', ') : t('detail.scopeGraphqlAllFields')}
+                  </dd>
+                </div>
+              </>
+            )}
             {/* Only where there are two identities to choose between. On an API nobody can connect
                 an account to, every call is the service's and the row would state a non-question. */}
             {offersConnection && (
@@ -444,9 +486,10 @@ export function ConnectionPage({
         <ScopePanel
           grant={grant}
           offersConnection={offersConnection}
+          graphql={showsGraphql}
           onClose={() => setPanel('closed')}
-          onSave={async (pathPrefix, methods, allowAccountIdentity) => {
-            await writeGrant({ pathPrefix, methods, allowAccountIdentity });
+          onSave={async (scope) => {
+            await writeGrant(scope);
             setPanel('closed');
           }}
         />
@@ -553,6 +596,8 @@ function DestinationPanel({
   // The array declaration only means anything while normalisation is on, so it follows the switch
   // rather than sitting there inert.
   const [normalizing, setNormalizing] = useState(provider.normalizeJson);
+  // The same for the GraphQL endpoint and its limits: there is nothing to limit without one.
+  const [graphql, setGraphql] = useState(Boolean(provider.graphqlPath));
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     const form = new FormData(e.currentTarget);
@@ -568,6 +613,9 @@ function DestinationPanel({
         cacheTtlSeconds: Number(form.get('cacheTtlSeconds') || 0),
         normalizeJson: form.get('normalizeJson') === 'on',
         jsonArrayPaths: String(form.get('jsonArrayPaths') ?? '') || null,
+        graphqlPath: graphql ? String(form.get('graphqlPath') ?? '') || null : null,
+        graphqlMaxDepth: graphql ? Number(form.get('graphqlMaxDepth') || 0) : 0,
+        graphqlMaxAliases: graphql ? Number(form.get('graphqlMaxAliases') || 0) : 0,
         rateLimitPerMinute: Number(form.get('rateLimitPerMinute') || 0),
         rateLimitBurst: Number(form.get('rateLimitBurst') || 0),
         authType: provider.authType,
@@ -664,6 +712,48 @@ function DestinationPanel({
               hint={t('providers.arrayPathsHint')}
             />
           )}
+          <CheckField
+            label={t('providers.graphqlLabel')}
+            name="graphql"
+            defaultChecked={Boolean(provider.graphqlPath)}
+            onChange={(e) => setGraphql(e.currentTarget.checked)}
+            hint={t('providers.graphqlHint')}
+          />
+          {graphql && (
+            <>
+              <Field
+                label={t('providers.graphqlPathLabel')}
+                name="graphqlPath"
+                required
+                data
+                autoComplete="off"
+                maxLength={200}
+                placeholder="/graphql"
+                defaultValue={provider.graphqlPath ?? '/graphql'}
+                hint={t('providers.graphqlPathHint')}
+              />
+              <Field
+                label={t('providers.graphqlDepthLabel')}
+                name="graphqlMaxDepth"
+                type="number"
+                min={0}
+                max={100}
+                data
+                defaultValue={provider.graphqlMaxDepth ?? 0}
+                hint={t('providers.graphqlDepthHint')}
+              />
+              <Field
+                label={t('providers.graphqlAliasesLabel')}
+                name="graphqlMaxAliases"
+                type="number"
+                min={0}
+                max={10000}
+                data
+                defaultValue={provider.graphqlMaxAliases ?? 0}
+                hint={t('providers.graphqlAliasesHint')}
+              />
+            </>
+          )}
           <Field
             label={t('providers.rateLimitLabel')}
             name="rateLimitPerMinute"
@@ -752,25 +842,45 @@ function QuotaPanel({
 function ScopePanel({
   grant,
   offersConnection,
+  graphql,
   onClose,
   onSave,
 }: {
   grant: Grant;
   offersConnection: boolean;
+  /** Whether the GraphQL ceiling is offered: a GraphQL API, or one already carrying such a ceiling. */
+  graphql: boolean;
   onClose: () => void;
-  onSave: (pathPrefix: string, methods: HttpMethod[], allowAccountIdentity: boolean) => Promise<void>;
+  onSave: (scope: {
+    pathPrefix: string;
+    methods: HttpMethod[];
+    allowAccountIdentity: boolean;
+    graphqlOperations: GraphQlOperation[];
+    graphqlRootFields: string[];
+  }) => Promise<void>;
 }) {
   const { t } = useI18n();
   const describe = useErrorMessage();
   const [pathPrefix, setPathPrefix] = useState(grant.pathPrefix ?? '');
   const [methods, setMethods] = useState<HttpMethod[]>(grant.methods);
   const [accountIdentity, setAccountIdentity] = useState(grant.allowAccountIdentity);
+  const [operations, setOperations] = useState<GraphQlOperation[]>(grant.graphqlOperations ?? []);
+  const [rootFields, setRootFields] = useState((grant.graphqlRootFields ?? []).join(', '));
   const [error, setError] = useState('');
 
   async function submit(_e: FormEvent<HTMLFormElement>) {
     setError('');
     try {
-      await onSave(pathPrefix, methods, accountIdentity);
+      await onSave({
+        pathPrefix,
+        methods,
+        allowAccountIdentity: accountIdentity,
+        graphqlOperations: operations,
+        graphqlRootFields: rootFields
+          .split(',')
+          .map((field) => field.trim())
+          .filter(Boolean),
+      });
     } catch (x) {
       setError(describe(x));
     }
@@ -778,6 +888,10 @@ function ScopePanel({
 
   const toggle = (method: HttpMethod) =>
     setMethods((held) => (held.includes(method) ? held.filter((m) => m !== method) : [...held, method]));
+  const toggleOperation = (operation: GraphQlOperation) =>
+    setOperations((held) =>
+      held.includes(operation) ? held.filter((o) => o !== operation) : [...held, operation],
+    );
 
   return (
     <SidePanel title={t('detail.scopeEdit')} intro={t('detail.scopeLead')} onClose={onClose}>
@@ -808,6 +922,34 @@ function ScopePanel({
             ))}
           </div>
         </fieldset>
+        {graphql && (
+          <fieldset>
+            <legend className="text-sm">{t('detail.scopeGraphqlOpsLabel')}</legend>
+            <p className="mt-1 text-xs text-text-2">
+              {operations.length > 0 ? t('detail.scopeGraphqlOpsHint') : t('detail.scopeGraphqlAllOps')}
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {GRAPHQL_OPERATIONS.map((operation) => (
+                <CheckField
+                  key={operation}
+                  label={operation.toLowerCase()}
+                  checked={operations.includes(operation)}
+                  onChange={() => toggleOperation(operation)}
+                />
+              ))}
+            </div>
+          </fieldset>
+        )}
+        {graphql && (
+          <Field
+            label={t('detail.scopeGraphqlFieldsLabel')}
+            data
+            placeholder={t('detail.scopeGraphqlAllFields')}
+            value={rootFields}
+            onChange={(e) => setRootFields(e.target.value)}
+            hint={t('detail.scopeGraphqlFieldsHint')}
+          />
+        )}
         {offersConnection && (
           <CheckField
             label={t('detail.scopeIdentityCheck')}

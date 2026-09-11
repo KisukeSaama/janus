@@ -213,6 +213,8 @@ export function ApplicationsPage() {
               pathPrefix: existing?.pathPrefix ?? null,
               methods: existing?.methods ?? [],
               allowAccountIdentity: existing?.allowAccountIdentity ?? true,
+              graphqlOperations: existing?.graphqlOperations ?? [],
+              graphqlRootFields: existing?.graphqlRootFields ?? [],
             };
             if (!existing) return createGrant.mutateAsync(grantInput);
             if (existing.credentialId !== credential!.id || !existing.enabled) {

@@ -85,6 +85,7 @@ public class RegistryTransfer {
         applications.findAllByOwnerId(from.getId()).forEach(application -> {
             application.transferTo(to);
             keyCache.invalidate(application.getId());
+            traffic.forgetApplication(application.getId());
         });
         personalCredentials.forEach(credential -> {
             credential.transferTo(to.getId());

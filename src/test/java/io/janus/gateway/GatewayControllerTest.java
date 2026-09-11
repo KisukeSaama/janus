@@ -74,8 +74,17 @@ class GatewayControllerTest {
 
     @BeforeEach
     void setUp() {
+        var graphql = io.janus.gateway.graphql.GraphQlProperties.defaults();
         controller = new GatewayController(
-                providers, grants, authorizations, destinations, traffic, audit, metrics, new ObjectMapper());
+                new GatewayAdmission(providers, grants, authorizations, destinations),
+                new io.janus.gateway.graphql.GraphQlInspector(
+                        new ObjectMapper(), new io.janus.gateway.graphql.PersistedQueries(graphql), graphql),
+                new GraphQlStreams(graphql),
+                graphql,
+                traffic,
+                audit,
+                metrics,
+                new ObjectMapper());
         mvc = MockMvcBuilders.standaloneSetup(controller)
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .build();
@@ -525,13 +534,14 @@ class GatewayControllerTest {
 
         mvc.perform(get("/gateway/invented/v1/tracks"));
 
-        verify(metrics).record(isNull(), eq(AuditOutcome.DENIED), isNull(), eq(404), anyLong());
+        verify(metrics).record(isNull(), eq(AuditOutcome.DENIED), isNull(), eq(404), anyLong(), isNull());
     }
 
     @Test
     void tagsMetricsWithTheProviderThatAnswered() throws Exception {
         mvc.perform(get("/gateway/spotify/v1/tracks"));
 
-        verify(metrics).record(eq("spotify"), eq(AuditOutcome.SUCCESS), eq(CacheStatus.MISS), eq(200), anyLong());
+        verify(metrics)
+                .record(eq("spotify"), eq(AuditOutcome.SUCCESS), eq(CacheStatus.MISS), eq(200), anyLong(), isNull());
     }
 }

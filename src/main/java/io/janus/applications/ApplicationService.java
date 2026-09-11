@@ -10,6 +10,7 @@ import io.janus.accounts.AccessScope;
 import io.janus.accounts.AccountRepository;
 import io.janus.audit.AuditAction;
 import io.janus.audit.AuditService;
+import io.janus.gateway.TrafficPolicyRegistry;
 import io.janus.oauth.AccessTokenStore;
 import io.janus.oauth.RefreshTokenRepository;
 import io.janus.security.ApiKeyCache;
@@ -33,6 +34,7 @@ public class ApplicationService {
     private final AccountRepository accounts;
     private final AccessScope scope;
     private final AuditService audit;
+    private final TrafficPolicyRegistry traffic;
 
     public ApplicationService(
             ApplicationRepository repository,
@@ -42,7 +44,8 @@ public class ApplicationService {
             RefreshTokenRepository refreshTokens,
             AccountRepository accounts,
             AccessScope scope,
-            AuditService audit) {
+            AuditService audit,
+            TrafficPolicyRegistry traffic) {
         this.repository = repository;
         this.keys = keys;
         this.keyCache = keyCache;
@@ -51,6 +54,7 @@ public class ApplicationService {
         this.accounts = accounts;
         this.scope = scope;
         this.audit = audit;
+        this.traffic = traffic;
     }
 
     @Transactional(readOnly = true)
@@ -117,6 +121,8 @@ public class ApplicationService {
     private void forget(UUID id) {
         keyCache.invalidate(id);
         accessTokens.revokeApplication(id);
+        // And whatever it already holds open: a subscription outlives the key that opened it.
+        traffic.forgetApplication(id);
     }
 
     /**

@@ -100,6 +100,7 @@ public class ProviderService {
                 auth(request),
                 connection(request));
         provider.applyNormalization(request.normalization());
+        provider.applyGraphQl(request.graphQl());
         repository.save(provider);
         audit.recordAdmin(AuditAction.PROVIDER_CREATED, provider.getId(), provider.getSlug());
         return ProviderResponse.of(provider);
@@ -121,6 +122,7 @@ public class ProviderService {
                 request.allowPrivateDestination());
         provider.applyTrafficPolicy(request.trafficPolicy());
         provider.applyNormalization(request.normalization());
+        provider.applyGraphQl(request.graphQl());
         provider.applyAuth(auth(request));
         provider.applyConnection(connection(request));
         var personalCredentials = credentials.findAllByProviderId(id);

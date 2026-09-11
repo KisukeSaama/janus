@@ -65,6 +65,14 @@ public class Grant {
     @Column(name = "allow_account_identity", nullable = false)
     private boolean allowAccountIdentity = true;
 
+    /** The GraphQL operation types it admits, comma separated. Null is all of them. */
+    @Column(name = "graphql_operations", length = 40)
+    private String graphqlOperations;
+
+    /** The GraphQL root fields it admits, comma separated. Null is all of them. */
+    @Column(name = "graphql_root_fields", length = 1000)
+    private String graphqlRootFields;
+
     /**
      * The two columns above, read once rather than on every proxied call. Held here because a grant
      * is what the gateway's authorisation cache keeps, so this is parsed once per cached grant rather
@@ -138,12 +146,16 @@ public class Grant {
         this.pathPrefix = scope.storedPrefix();
         this.allowedMethods = scope.storedMethods();
         this.allowAccountIdentity = scope.admitsAccountIdentity();
+        this.graphqlOperations = scope.storedOperations();
+        this.graphqlRootFields = scope.storedRootFields();
         this.scope = scope;
     }
 
     public GrantScope getScope() {
         var held = scope;
-        if (held == null) this.scope = held = GrantScope.of(pathPrefix, allowedMethods, allowAccountIdentity);
+        if (held == null)
+            this.scope = held = GrantScope.of(
+                    pathPrefix, allowedMethods, allowAccountIdentity, graphqlOperations, graphqlRootFields);
         return held;
     }
 

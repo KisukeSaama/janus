@@ -1,5 +1,5 @@
 export * from './client';
 export * from './queries';
 export type * from './types';
-// The one value in a file of types: the methods a grant may name, in the order they are offered.
-export { HTTP_METHODS } from './types';
+// The values in a file of types: what a grant may name, in the order the console offers it.
+export { GRAPHQL_OPERATIONS, HTTP_METHODS } from './types';

@@ -144,6 +144,7 @@ export function DocsPage() {
                   { term: t('docs.call.queryTerm'), note: t('docs.call.queryNote') },
                   { term: t('docs.call.bodyTerm'), note: t('docs.call.bodyNote') },
                   { term: t('docs.call.refusedTerm'), note: t('docs.call.refusedNote') },
+                  { term: t('docs.call.graphqlTerm'), note: t('docs.call.graphqlNote') },
                 ]}
               />
             </Doc>
@@ -173,6 +174,7 @@ export function DocsPage() {
                   { term: 'X-Janus-RateLimit-Limit / -Remaining / -Reset', note: t('docs.handled.limit') },
                   { term: 'X-Janus-Upstream-Attempts', note: t('docs.handled.attempts') },
                   { term: 'X-Janus-Transform', note: t('docs.handled.transform') },
+                  { term: 'X-Janus-GraphQL-Errors', note: t('docs.handled.graphqlErrors') },
                   { term: 'Retry-After', note: t('docs.handled.retryAfter') },
                   { term: 'X-Janus-Correlation-Id', note: t('docs.handled.correlation') },
                 ]}

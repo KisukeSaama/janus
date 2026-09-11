@@ -31,8 +31,15 @@ class TrafficPolicyRegistryTest {
     private final UpstreamCooldown cooldown = new UpstreamCooldown();
     private final UpstreamTokenCache tokens = Mockito.mock(UpstreamTokenCache.class);
 
-    private final TrafficPolicyRegistry registry =
-            new TrafficPolicyRegistry(cache, authorizations, limiter, cooldown, tokens, new IdentityMemory());
+    private final TrafficPolicyRegistry registry = new TrafficPolicyRegistry(
+            cache,
+            authorizations,
+            limiter,
+            cooldown,
+            tokens,
+            new IdentityMemory(),
+            new GraphQlStreams(io.janus.gateway.graphql.GraphQlProperties.defaults()),
+            new io.janus.gateway.graphql.PersistedQueries(io.janus.gateway.graphql.GraphQlProperties.defaults()));
 
     private final UUID provider = UUID.randomUUID();
     private final UUID credential = UUID.randomUUID();

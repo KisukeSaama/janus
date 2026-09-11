@@ -44,6 +44,10 @@ import io.janus.shared.ErrorCode;
 public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
     public static final String APP_HEADER = "X-Janus-Application-Id";
     public static final String KEY_HEADER = "X-Janus-Api-Key";
+    /** Where a browser's WebSocket handshake can carry a token; see {@link #socketToken}. */
+    public static final String SOCKET_TOKEN_PREFIX = "janus.bearer.";
+
+    private static final String SOCKET_PROTOCOL_HEADER = "Sec-WebSocket-Protocol";
 
     private final ApplicationAuthenticator authenticator;
     private final AccessTokenStore accessTokens;
@@ -119,8 +123,30 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
     /** A token from the exchange. Resolved in memory: no hash comparison, nothing to throttle. */
     private Optional<GatewayPrincipal> bearer(HttpServletRequest request) {
         String header = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (header == null || !header.regionMatches(true, 0, "Bearer ", 0, 7)) return Optional.empty();
-        return accessTokens.resolve(header.substring(7).trim());
+        if (header != null && header.regionMatches(true, 0, "Bearer ", 0, 7))
+            return accessTokens.resolve(header.substring(7).trim());
+        String offered = socketToken(request);
+        return offered == null ? Optional.empty() : accessTokens.resolve(offered);
+    }
+
+    /**
+     * A bearer token offered as a WebSocket subprotocol, {@code janus.bearer.<token>}.
+     *
+     * <p>A browser cannot set a header on a WebSocket handshake; the one thing its API lets a page
+     * choose is the list of subprotocols. Carrying the token there is the established workaround, and
+     * the reason it is acceptable here is the reason the bearer is: a token is short-lived and
+     * revocable, which is why only the token may travel this way and never the API key. The server
+     * never selects this entry as the protocol in use, so it is not echoed back.
+     */
+    private static String socketToken(HttpServletRequest request) {
+        if (!"websocket".equalsIgnoreCase(request.getHeader(HttpHeaders.UPGRADE))) return null;
+        for (String value : Collections.list(request.getHeaders(SOCKET_PROTOCOL_HEADER)))
+            for (String protocol : value.split(",")) {
+                String candidate = protocol.trim();
+                if (candidate.startsWith(SOCKET_TOKEN_PREFIX) && candidate.length() > SOCKET_TOKEN_PREFIX.length())
+                    return candidate.substring(SOCKET_TOKEN_PREFIX.length());
+            }
+        return null;
     }
 
     /** The long-lived key, presented directly. Null rather than empty, to keep the caller readable. */

@@ -93,6 +93,46 @@ class ApiKeyAuthenticationFilterTest {
         assertThat(captured[0].applicationName()).isEqualTo("orders");
     }
 
+    private MockHttpServletRequest socketHandshake(String protocols, boolean upgrade) {
+        var request = new MockHttpServletRequest("GET", "/gateway/example/graphql");
+        request.setRemoteAddr("203.0.113.10");
+        if (upgrade) request.addHeader("Upgrade", "websocket");
+        request.addHeader("Sec-WebSocket-Protocol", protocols);
+        return request;
+    }
+
+    /**
+     * A browser cannot set a header on a WebSocket handshake, so its token travels in the list of
+     * subprotocols, which is the one thing the page may choose.
+     */
+    @Test
+    void authenticatesABearerTokenOfferedAsAWebSocketSubprotocol() throws Exception {
+        var principal = new GatewayPrincipal(application.getId(), "orders", UUID.randomUUID(), Set.of());
+        String token = accessTokens.issue(principal, 600);
+        var chain = Mockito.mock(FilterChain.class);
+
+        var response = invoke(
+                socketHandshake(
+                        "graphql-transport-ws, " + ApiKeyAuthenticationFilter.SOCKET_TOKEN_PREFIX + token, true),
+                chain);
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        verify(chain).doFilter(any(), any());
+    }
+
+    /** Only on a handshake: anywhere else, that header is not a way to authenticate. */
+    @Test
+    void ignoresASubprotocolTokenOutsideAWebSocketHandshake() throws Exception {
+        var principal = new GatewayPrincipal(application.getId(), "orders", UUID.randomUUID(), Set.of());
+        String token = accessTokens.issue(principal, 600);
+        var chain = Mockito.mock(FilterChain.class);
+
+        var response = invoke(socketHandshake(ApiKeyAuthenticationFilter.SOCKET_TOKEN_PREFIX + token, false), chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        verify(chain, never()).doFilter(any(), any());
+    }
+
     /** The other door: a token from the exchange, which is what a browser or an SDK will present. */
     @Test
     void authenticatesABearerTokenFromTheExchange() throws Exception {

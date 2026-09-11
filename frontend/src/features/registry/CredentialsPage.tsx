@@ -78,6 +78,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
   // The array declaration only means anything while normalisation is on, so it follows the switch
   // rather than sitting there inert — and a saved form would have cleared it anyway.
   const [normalizing, setNormalizing] = useState(false);
+  const [graphql, setGraphql] = useState(false);
   /** Whether this API also lets an account holder connect theirs, beside whatever it presents. */
   const [connectable, setConnectable] = useState(false);
   const [formError, setFormError] = useState('');
@@ -121,6 +122,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
   function openApi(provider: Provider) {
     setStrategy(provider.authType);
     setNormalizing(provider.normalizeJson ?? false);
+    setGraphql(Boolean(provider.graphqlPath));
     setConnectable(Boolean(provider.connectionAuthorizationUrl));
     setPanel({ kind: 'api', provider });
   }
@@ -201,6 +203,10 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
       cacheTtlSeconds: Number(form.get('cacheTtlSeconds') || 0),
       normalizeJson: form.get('normalizeJson') === 'on',
       jsonArrayPaths: String(form.get('jsonArrayPaths') ?? '') || null,
+      // Sent on every save, like the switch above: omitted reads as "not a GraphQL API".
+      graphqlPath: graphql ? String(form.get('graphqlPath') ?? '') || null : null,
+      graphqlMaxDepth: graphql ? Number(form.get('graphqlMaxDepth') || 0) : 0,
+      graphqlMaxAliases: graphql ? Number(form.get('graphqlMaxAliases') || 0) : 0,
       rateLimitPerMinute: Number(form.get('rateLimitPerMinute') || 0),
       rateLimitBurst: Number(form.get('rateLimitBurst') || 0),
       authType: strategy,
@@ -498,6 +504,14 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
             <CheckField label={t('providers.normalizeLabel')} name="normalizeJson" defaultChecked={panel.provider.normalizeJson ?? false} onChange={(e) => setNormalizing(e.currentTarget.checked)} hint={t('providers.normalizeHint')} />
             {normalizing && (
               <Field label={t('providers.arrayPathsLabel')} name="jsonArrayPaths" data autoComplete="off" maxLength={1000} placeholder="MediaContainer.Directory, Location" defaultValue={panel.provider.jsonArrayPaths ?? ''} hint={t('providers.arrayPathsHint')} />
+            )}
+            <CheckField label={t('providers.graphqlLabel')} name="graphql" defaultChecked={Boolean(panel.provider.graphqlPath)} onChange={(e) => setGraphql(e.currentTarget.checked)} hint={t('providers.graphqlHint')} />
+            {graphql && (
+              <>
+                <Field label={t('providers.graphqlPathLabel')} name="graphqlPath" required data autoComplete="off" maxLength={200} placeholder="/graphql" defaultValue={panel.provider.graphqlPath ?? '/graphql'} hint={t('providers.graphqlPathHint')} />
+                <Field label={t('providers.graphqlDepthLabel')} name="graphqlMaxDepth" type="number" min={0} max={100} data defaultValue={panel.provider.graphqlMaxDepth ?? 0} hint={t('providers.graphqlDepthHint')} />
+                <Field label={t('providers.graphqlAliasesLabel')} name="graphqlMaxAliases" type="number" min={0} max={10000} data defaultValue={panel.provider.graphqlMaxAliases ?? 0} hint={t('providers.graphqlAliasesHint')} />
+              </>
             )}
             <Field label={t('providers.rateLimitLabel')} name="rateLimitPerMinute" type="number" min={0} defaultValue={panel.provider.rateLimitPerMinute ?? 0} />
             <Field label={t('providers.burstLabel')} name="rateLimitBurst" type="number" min={0} defaultValue={panel.provider.rateLimitBurst ?? 0} />

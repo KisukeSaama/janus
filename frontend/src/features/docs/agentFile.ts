@@ -31,6 +31,12 @@ export type AgentApi = {
   methods: string[];
   /** Whether somebody has connected an account here, so calls must say whom they speak for. */
   connected: boolean;
+  /** Where this API's GraphQL endpoint is, when it is a GraphQL API. */
+  graphqlPath?: string;
+  /** The GraphQL operation types this service may send, when its grant names any. */
+  graphqlOperations: string[];
+  /** The root fields its operations may select, when its grant names any. */
+  graphqlRootFields: string[];
 };
 
 export type AgentTarget = {
@@ -98,20 +104,22 @@ Unless a line above narrows it, any path and any method under a slug is forwarde
 itself allows for the secret Janus presents is the only limit. A line that names a path or a set of
 methods is a ceiling this service was given: anything outside it is refused with 403 by Janus, before
 the API is called. An API at a slug not listed is not reachable at all.
-${conversionNote(apis)}
+${conversionNote(apis)}${graphqlNote(apis)}
 
 ## Errors
 
 \`Content-Type: application/problem+json\` means Janus refused and its \`detail\` says why; any other
 media type means the API itself answered.
 
-    400  dot segment, // or encoded separator in the path
+    400  dot segment, // or encoded separator in the path; a GraphQL document Janus cannot read
+         (graphql_invalid) or one deeper than the API accepts (graphql_too_complex)
     401  headers missing, malformed, or wrong
-    403  not connected to that API, connection paused, or a path or method outside what it was given
+    403  not connected to that API, connection paused, or a path, method, GraphQL operation or root
+         field outside what it was given
     404  no API at that slug, or its record is disabled
-    405  a method the gateway does not forward
+    405  a method the gateway does not forward, or a GraphQL mutation sent as GET
     413  body over the limit
-    429  a quota was reached; honour Retry-After
+    429  a quota was reached, or too many open subscriptions (stream_limit); honour Retry-After
     502  the API failed, or its address is no longer permitted
 
 Log \`X-Janus-Correlation-Id\`, present on every response, beside your own errors. Also returned:
@@ -174,6 +182,11 @@ function apiList(apis: AgentApi[]): string {
         api.normalizeJson ? '**JSON**' : '',
         api.pathPrefix ? `only \`${api.pathPrefix}\` and under` : '',
         api.methods.length > 0 ? `only ${api.methods.join(', ')}` : '',
+        api.graphqlPath ? `**GraphQL** at \`${api.graphqlPath}\`` : '',
+        api.graphqlOperations.length > 0
+          ? `only ${api.graphqlOperations.map((operation) => operation.toLowerCase()).join(', ')}`
+          : '',
+        api.graphqlRootFields.length > 0 ? `root fields ${api.graphqlRootFields.join(', ')}` : '',
         api.connected ? 'app **and** account' : '',
       ].filter(Boolean);
       return `- **${api.name}**: \`/gateway/${api.slug}/…\`${notes.length > 0 ? ` (${notes.join(', ')})` : ''}`;
@@ -196,5 +209,27 @@ APIs marked **JSON** reach you as JSON whatever their own documentation shows: J
 form-encoded and NDJSON responses on the way back. Parse JSON, add no XML parser and no new
 dependency for it. \`X-Janus-Transform\` names the conversion that ran, or says why none did — and
 sending \`Accept: application/xml\` returns the untouched original if you ever need it.
+`;
+}
+
+/**
+ * Written only when a listed API is a GraphQL one. An agent's reflex there is the vendor's SDK and its
+ * own auth link, which is exactly what Janus replaces, and it cannot know that queries are cached and
+ * retried for it unless it is told here.
+ */
+function graphqlNote(apis: AgentApi[]): string {
+  if (!apis.some((api) => api.graphqlPath)) return '';
+
+  return `
+APIs marked **GraphQL** take an ordinary GraphQL request at the path shown, e.g.
+\`$JANUS_URL/gateway/<slug>/graphql\`: POST JSON \`{"query", "variables", "operationName"}\`, or GET for
+a query. Use a plain GraphQL client pointed there with the two headers; no vendor SDK, no auth link.
+
+- Queries are cached, shared between identical calls and retried like a GET; mutations never are.
+- Subscriptions: send \`Accept: text/event-stream\`, or open a WebSocket (\`graphql-transport-ws\`) on the
+  same path. A browser passes its bearer token as the subprotocol \`janus.bearer.<token>\`.
+- A line saying "only query" refuses mutations with 403 \`graphql_operation_not_granted\`; "root fields"
+  refuses any other top-level field with \`graphql_field_not_granted\`.
+- A 200 can still carry GraphQL errors: \`X-Janus-GraphQL-Errors\` says how many.
 `;
 }

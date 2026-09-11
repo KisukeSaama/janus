@@ -14,6 +14,8 @@ import jakarta.validation.constraints.*;
  * @param methods the methods it may use; empty is all of them
  * @param allowAccountIdentity whether it may speak for the connected account; absent is yes, which
  *     is what every grant written before the question was asked already does
+ * @param graphqlOperations the GraphQL operation types it may send; empty is all of them
+ * @param graphqlRootFields the GraphQL root fields its operations may select; empty is all of them
  */
 public record GrantRequest(
         @NotNull UUID applicationId,
@@ -26,7 +28,11 @@ public record GrantRequest(
         List<@Size(max = 10) String> methods,
         // Boxed rather than primitive: a caller written before this field existed omits it, and the
         // answer for an omitted field here is "yes" rather than the false a boolean would default to.
-        Boolean allowAccountIdentity) {
+        Boolean allowAccountIdentity,
+        // Last, so callers written before a grant could narrow a GraphQL API still compile. Absent
+        // means everything, like the path prefix and the methods.
+        @Size(max = 3) List<@Size(max = 20) String> graphqlOperations,
+        @Size(max = 50) List<@Size(max = 100) String> graphqlRootFields) {
 
     /** Compatibility overload for callers written before a grant could refuse the account identity. */
     public GrantRequest(
@@ -47,6 +53,8 @@ public record GrantRequest(
                 rateLimitBurst,
                 pathPrefix,
                 methods,
+                null,
+                null,
                 null);
     }
 
@@ -56,13 +64,19 @@ public record GrantRequest(
 
     /**
      * Absent means the whole destination, which is what a grant that says nothing has always meant.
-     * The halves are read together so that omitting all of them is the one and only default.
+     * The parts are read together so that omitting all of them is the one and only default.
      */
     public GrantScope scope() {
         return GrantScope.of(
                 pathPrefix,
-                methods == null ? null : String.join(",", methods),
-                allowAccountIdentity == null || allowAccountIdentity);
+                joined(methods),
+                allowAccountIdentity == null || allowAccountIdentity,
+                joined(graphqlOperations),
+                joined(graphqlRootFields));
+    }
+
+    private static String joined(List<String> values) {
+        return values == null ? null : String.join(",", values);
     }
 
     private static int orZero(Integer value) {

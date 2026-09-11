@@ -9,7 +9,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.*;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.socket.client.ReactorNettyWebSocketClient;
 import reactor.netty.http.client.HttpClient;
+import reactor.netty.http.client.WebsocketClientSpec;
 
 import io.janus.providers.DestinationValidator;
 
@@ -66,12 +68,61 @@ public class GatewayHttpClientConfig {
                 responseTimeoutSeconds);
     }
 
+    /**
+     * The upstream half of a relayed GraphQL WebSocket. Built on the same client, and so on the same
+     * connection-time address check, as every proxied request: a socket is a connection like any other,
+     * and a DNS answer that changes between registration and connection is exactly as dangerous here.
+     * A frame may be as large as a response may.
+     */
+    @Bean
+    ReactorNettyWebSocketClient gatewayWebSocketClient(
+            DestinationValidator destinations,
+            @Value("${janus.gateway.max-response-bytes:10485760}") int maxResponseBytes,
+            @Value("${janus.gateway.connect-timeout-millis:5000}") int connectTimeoutMillis,
+            @Value("${janus.gateway.response-timeout-seconds:30}") long responseTimeoutSeconds) {
+        return socketClient(
+                httpClient(
+                        address -> destinations.isDisallowed(address, false),
+                        connectTimeoutMillis,
+                        responseTimeoutSeconds),
+                maxResponseBytes);
+    }
+
+    /** The same, for destinations declared as being on a local network. */
+    @Bean
+    ReactorNettyWebSocketClient gatewayPrivateWebSocketClient(
+            DestinationValidator destinations,
+            @Value("${janus.gateway.max-response-bytes:10485760}") int maxResponseBytes,
+            @Value("${janus.gateway.connect-timeout-millis:5000}") int connectTimeoutMillis,
+            @Value("${janus.gateway.response-timeout-seconds:30}") long responseTimeoutSeconds) {
+        return socketClient(
+                httpClient(
+                        address -> destinations.isDisallowed(address, true),
+                        connectTimeoutMillis,
+                        responseTimeoutSeconds),
+                maxResponseBytes);
+    }
+
+    private static ReactorNettyWebSocketClient socketClient(HttpClient http, int maxFrameBytes) {
+        return new ReactorNettyWebSocketClient(
+                http, () -> WebsocketClientSpec.builder().maxFramePayloadLength(maxFrameBytes));
+    }
+
     private WebClient client(
             Predicate<java.net.InetAddress> blocked,
             int maxResponseBytes,
             int connectTimeoutMillis,
             long responseTimeoutSeconds) {
-        HttpClient httpClient = HttpClient.create()
+        return WebClient.builder()
+                .clientConnector(new ReactorClientHttpConnector(
+                        httpClient(blocked, connectTimeoutMillis, responseTimeoutSeconds)))
+                .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(maxResponseBytes))
+                .build();
+    }
+
+    private static HttpClient httpClient(
+            Predicate<java.net.InetAddress> blocked, int connectTimeoutMillis, long responseTimeoutSeconds) {
+        return HttpClient.create()
                 // Redirects are a classic way to walk a proxy out of its allowlist: the caller is
                 // authorised for one route, and the upstream answers 302 to another host entirely.
                 .followRedirect(false)
@@ -86,10 +137,5 @@ public class GatewayHttpClientConfig {
                             && blocked.test(socketAddress.getAddress()))
                         throw new BlockedDestinationException("Destination resolves to a private or local address");
                 });
-
-        return WebClient.builder()
-                .clientConnector(new ReactorClientHttpConnector(httpClient))
-                .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(maxResponseBytes))
-                .build();
     }
 }
