@@ -23,6 +23,13 @@
     <jacoco.version>0.8.15</jacoco.version>
     <graphql-java.version>26.1</graphql-java.version>
     <!--
+      Ahead of Boot 4.1.0's BOM for CRITICAL advisories scan_dependencies fails on: Tomcat 11.0.22
+      (CVE-2026-65182, CVE-2026-65905, CVE-2026-68525) and Netty 4.2.15 (CVE-2026-75595). Drop both
+      once the parent is bumped to a release that pins these versions or later.
+    -->
+    <tomcat.version>11.0.25</tomcat.version>
+    <netty.version>4.2.17.Final</netty.version>
+    <!--
       Holds JaCoCo's agent flags. Declared empty so surefire's argLine stays valid when the agent
       has not run (`mvn surefire:test` on its own), rather than failing on an unresolved property.
     -->
