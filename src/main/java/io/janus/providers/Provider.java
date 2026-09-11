@@ -7,6 +7,7 @@ import jakarta.persistence.*;
 
 import io.janus.accounts.Account;
 import io.janus.credentials.*;
+import io.janus.gateway.graphql.GraphQlEndpoint;
 
 /**
  * Fixed upstream destination. Gateway callers never supply a URL; they name a provider slug.
@@ -68,6 +69,21 @@ public class Provider {
     /** Which elements must always come out as arrays; see {@code ArrayPaths}. */
     @Column(name = "json_array_paths", length = 1000)
     private String jsonArrayPaths;
+
+    /**
+     * Where this destination's GraphQL endpoint lives beneath its base URL, or null when it is not a
+     * GraphQL API. Only requests to this path are read as GraphQL; see {@code GraphQlEndpoint}.
+     */
+    @Column(name = "graphql_path", length = 200)
+    private String graphqlPath;
+
+    /** How deeply a document sent here may nest selection sets. Zero is no limit. */
+    @Column(name = "graphql_max_depth", nullable = false)
+    private int graphqlMaxDepth;
+
+    /** How many aliased fields one operation sent here may carry. Zero is no limit. */
+    @Column(name = "graphql_max_aliases", nullable = false)
+    private int graphqlMaxAliases;
 
     /** Ceiling on outbound calls to this destination, all callers combined. Zero is no ceiling. */
     @Column(name = "rate_limit_per_minute", nullable = false)
@@ -244,6 +260,28 @@ public class Provider {
     }
 
     /**
+     * Whether this destination is a GraphQL API, and what it accepts there.
+     *
+     * <p>Kept apart from the other policies for the same reason they are kept apart from each other:
+     * this one describes what the requests look like, and it is what lets every other policy tell a
+     * query from a mutation when both arrive as the same {@code POST}.
+     *
+     * @param path       the endpoint beneath the base URL, or null when this is not a GraphQL API
+     * @param maxDepth   deepest nesting of selection sets accepted; zero is no limit
+     * @param maxAliases most aliased fields one operation may carry; zero is no limit
+     */
+    public record GraphQl(String path, int maxDepth, int maxAliases) {
+        public GraphQl {
+            if (maxDepth < 0 || maxAliases < 0)
+                throw new IllegalArgumentException("A GraphQL limit cannot be negative");
+        }
+
+        public static GraphQl none() {
+            return new GraphQl(null, 0, 0);
+        }
+    }
+
+    /**
      * The authentication contract, which belongs to the API rather than to any one account: every
      * caller of a destination presents in the same way, and only the value differs between them.
      */
@@ -333,6 +371,14 @@ public class Provider {
     public void applyNormalization(Normalization normalization) {
         this.normalizeJson = normalization.enabled();
         this.jsonArrayPaths = normalization.enabled() ? blankToNull(normalization.arrayPaths()) : null;
+    }
+
+    /** Limits are only kept while an endpoint is declared, so a row never states a rule nothing reads. */
+    public void applyGraphQl(GraphQl graphQl) {
+        String path = graphQl == null ? null : GraphQlEndpoint.normalise(graphQl.path());
+        this.graphqlPath = path;
+        this.graphqlMaxDepth = path == null ? 0 : graphQl.maxDepth();
+        this.graphqlMaxAliases = path == null ? 0 : graphQl.maxAliases();
     }
 
     public final void applyTrafficPolicy(TrafficPolicy traffic) {
@@ -425,6 +471,26 @@ public class Provider {
 
     public String getJsonArrayPaths() {
         return jsonArrayPaths;
+    }
+
+    public boolean isGraphQl() {
+        return graphqlPath != null;
+    }
+
+    public GraphQl graphQl() {
+        return new GraphQl(graphqlPath, graphqlMaxDepth, graphqlMaxAliases);
+    }
+
+    public String getGraphqlPath() {
+        return graphqlPath;
+    }
+
+    public int getGraphqlMaxDepth() {
+        return graphqlMaxDepth;
+    }
+
+    public int getGraphqlMaxAliases() {
+        return graphqlMaxAliases;
     }
 
     public int getCacheTtlSeconds() {

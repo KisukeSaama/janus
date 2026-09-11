@@ -19,6 +19,8 @@ public record GrantResponse(
         String pathPrefix,
         List<String> methods,
         boolean allowAccountIdentity,
+        List<String> graphqlOperations,
+        List<String> graphqlRootFields,
         Instant createdAt,
         Instant updatedAt) {
 
@@ -40,6 +42,8 @@ public record GrantResponse(
                 // and nothing outside this class should have to know how a column spells a set.
                 scope.orderedMethods(),
                 scope.admitsAccountIdentity(),
+                scope.orderedOperations().stream().map(Enum::name).toList(),
+                scope.orderedRootFields(),
                 grant.getCreatedAt(),
                 grant.getUpdatedAt());
     }

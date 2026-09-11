@@ -80,6 +80,12 @@ export type Provider = {
   normalizeJson: boolean;
   /** Elements that must always be arrays once converted, comma-separated. */
   jsonArrayPaths?: string;
+  /** Where its GraphQL endpoint lives, beneath the base address. Absent: not a GraphQL API. */
+  graphqlPath?: string;
+  /** Deepest nesting a document sent there may have. Zero, or absent, is no limit. */
+  graphqlMaxDepth?: number;
+  /** Most aliased fields one operation sent there may carry. Zero, or absent, is no limit. */
+  graphqlMaxAliases?: number;
   /** Outbound ceiling for this destination, every caller combined. Zero is no ceiling. */
   rateLimitPerMinute: number;
   rateLimitBurst: number;
@@ -175,6 +181,10 @@ export type Grant = {
   methods: HttpMethod[];
   /** Whether it may speak for the connected account, rather than only as the service itself. */
   allowAccountIdentity: boolean;
+  /** The GraphQL operation types it admits, at the API's GraphQL endpoint. Empty, or absent, is all. */
+  graphqlOperations?: GraphQlOperation[];
+  /** The GraphQL root fields its operations may select. Empty, or absent, is all of them. */
+  graphqlRootFields?: string[];
   createdAt: string;
   updatedAt?: string;
 };
@@ -183,6 +193,11 @@ export type Grant = {
 export const HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 
 export type HttpMethod = (typeof HTTP_METHODS)[number];
+
+/** The kinds of GraphQL operation a grant may admit, in the order the console offers them. */
+export const GRAPHQL_OPERATIONS = ['QUERY', 'MUTATION', 'SUBSCRIPTION'] as const;
+
+export type GraphQlOperation = (typeof GRAPHQL_OPERATIONS)[number];
 
 export type Audit = {
   id: string;
@@ -290,6 +305,10 @@ export type ProviderInput = {
   cacheTtlSeconds?: number;
   normalizeJson?: boolean;
   jsonArrayPaths?: string | null;
+  /** Sent on every save: omitted reads as "not a GraphQL API" and would clear it. */
+  graphqlPath?: string | null;
+  graphqlMaxDepth?: number;
+  graphqlMaxAliases?: number;
   rateLimitPerMinute?: number;
   rateLimitBurst?: number;
   authType: AuthType;
@@ -347,6 +366,9 @@ export type GrantInput = {
   methods?: HttpMethod[];
   /** Absent is yes, which is what every grant written before the question existed already does. */
   allowAccountIdentity?: boolean;
+  /** Stated in full on every write, like the methods: omitted reads as "every one". */
+  graphqlOperations?: GraphQlOperation[];
+  graphqlRootFields?: string[];
 };
 
 /* ── Who may sign in ────────────────────────────────────────────────────── */

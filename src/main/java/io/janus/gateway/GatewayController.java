@@ -13,9 +13,8 @@ import tools.jackson.databind.ObjectMapper;
 
 import io.janus.audit.AuditOutcome;
 import io.janus.audit.AuditService;
-import io.janus.credentials.Identity;
 import io.janus.credentials.TokenExchangeException;
-import io.janus.grants.GrantRepository;
+import io.janus.gateway.graphql.*;
 import io.janus.providers.*;
 import io.janus.security.GatewayPrincipal;
 import io.janus.shared.ApiProblem;
@@ -34,6 +33,12 @@ import io.janus.shared.ErrorCode;
  * upstream can scope are for (see {@code GrantScope}), that ceiling is applied here, before the
  * credential is read.
  *
+ * <p>A GraphQL endpoint is where the path and the method stop saying anything: every operation is the
+ * same {@code POST} to the same address. There the document is read first (see
+ * {@link GraphQlInspector}), and what it asks for is what the grant, the store and the retries are
+ * decided on. A subscription, or a caller asking for an event stream, is relayed as it arrives rather
+ * than buffered, and is registered so that a revocation closes it.
+ *
  * <p>This class decides only who may call what. Once that is settled, {@link GatewayTrafficService}
  * owns the outbound half — reuse, allowances, retries — so a caller inherits all of it without
  * asking, and none of it can run before authorisation has.
@@ -51,28 +56,32 @@ public class GatewayController {
     private static final Set<HttpMethod> SUPPORTED_METHODS = Set.of(
             HttpMethod.GET, HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH, HttpMethod.DELETE, HttpMethod.HEAD);
 
-    private final ProviderRepository providers;
-    private final GrantRepository grants;
-    private final AuthorizationCache authorizations;
-    private final DestinationValidator destinations;
+    /** What a GraphQL client asks for when it wants each result as it happens rather than all at once. */
+    private static final List<MediaType> STREAMED =
+            List.of(MediaType.TEXT_EVENT_STREAM, MediaType.parseMediaType("multipart/mixed"));
+
+    private final GatewayAdmission admission;
+    private final GraphQlInspector inspector;
+    private final GraphQlStreams streams;
+    private final GraphQlProperties graphql;
     private final GatewayTrafficService traffic;
     private final AuditService audit;
     private final GatewayMetrics metrics;
     private final ObjectMapper mapper;
 
     public GatewayController(
-            ProviderRepository providers,
-            GrantRepository grants,
-            AuthorizationCache authorizations,
-            DestinationValidator destinations,
+            GatewayAdmission admission,
+            GraphQlInspector inspector,
+            GraphQlStreams streams,
+            GraphQlProperties graphql,
             GatewayTrafficService traffic,
             AuditService audit,
             GatewayMetrics metrics,
             ObjectMapper mapper) {
-        this.providers = providers;
-        this.grants = grants;
-        this.authorizations = authorizations;
-        this.destinations = destinations;
+        this.admission = admission;
+        this.inspector = inspector;
+        this.streams = streams;
+        this.graphql = graphql;
         this.traffic = traffic;
         this.audit = audit;
         this.metrics = metrics;
@@ -80,7 +89,7 @@ public class GatewayController {
     }
 
     @RequestMapping("/{slug}/**")
-    public ResponseEntity<byte[]> proxy(
+    public ResponseEntity<?> proxy(
             @PathVariable String slug,
             @AuthenticationPrincipal GatewayPrincipal principal,
             HttpServletRequest request,
@@ -97,68 +106,41 @@ public class GatewayController {
                         ErrorCode.METHOD_NOT_SUPPORTED,
                         "HTTP method is not supported by the gateway");
 
-            // Both reads go through the short-lived registry cache. What it holds is what an
-            // administrative change invalidates, so an authorisation decision is never older than
-            // the change that should have altered it — see AuthorizationCache.
-            var provider = authorizations
-                    .provider(slug, () -> providers.findBySlugAndEnabledTrue(slug))
-                    .orElseThrow(() -> new Denied(
-                            HttpStatus.NOT_FOUND, ErrorCode.PROVIDER_UNAVAILABLE, "Provider is not available"));
+            var provider = admission.provider(slug);
             call.reached(provider);
-
-            var grant = authorizations
-                    .grant(
-                            principal.applicationId(),
-                            provider.getId(),
-                            () -> grants.findActive(principal.applicationId(), provider.getId()))
-                    .orElseThrow(() -> new Denied(
-                            HttpStatus.FORBIDDEN, ErrorCode.GRANT_MISSING, "No active grant for this provider"));
-            if (!grant.getCredential().isEnabled())
-                throw new Denied(HttpStatus.FORBIDDEN, ErrorCode.CREDENTIAL_DISABLED, "Credential is disabled");
-
-            // What of the destination this grant admits, which is ordinarily all of it. Refused here,
-            // before the credential is read and before anything is forwarded, so a call outside the
-            // ceiling costs the upstream nothing and leaves the secret where it is.
+            var grant = admission.grant(principal, provider);
             var scope = grant.getScope();
-            if (!scope.admitsMethod(method.name()))
-                throw new Denied(
-                        HttpStatus.FORBIDDEN,
-                        ErrorCode.METHOD_NOT_GRANTED,
-                        "This grant does not admit " + method.name() + " on this API");
-            if (!scope.admitsPath(route.decodedPath()))
-                throw new Denied(
-                        HttpStatus.FORBIDDEN,
-                        ErrorCode.PATH_NOT_GRANTED,
-                        "This grant admits only " + scope.pathPrefix() + " and what is under it");
+            var headers = forwardedHeaders(request);
 
-            // Deliberately after the grant, and it used to be before it. A registered address can stop
-            // satisfying the rules it was accepted under — the deployment stops offering local
-            // destinations, or a base URL is edited — and what the validator says about that is
-            // specific enough to act on, which is exactly why it must not be readable by a caller who
-            // has no grant for this provider. Behind the grant, the caller is entitled to the reason.
-            try {
-                destinations.validateShape(provider.getBaseUrl(), provider.isAllowPrivateDestination());
-            } catch (IllegalArgumentException ex) {
-                throw new Denied(HttpStatus.BAD_GATEWAY, ErrorCode.PROVIDER_MISCONFIGURED, ex.getMessage());
+            // What a GraphQL call asks for, read before any other decision is made on it: at the
+            // endpoint, nothing else about the request says whether it reads or writes.
+            GraphQlCall operation = null;
+            if (GraphQlEndpoint.matches(provider.getGraphqlPath(), route.decodedPath())) {
+                var inspection = inspector.inspect(
+                        provider, method, headers, body, route.rawQuery(), enforcing(provider, grant));
+                if (inspection instanceof GraphQlInspector.UnknownPersistedQuery unknown)
+                    return persistedQueryNotFound(unknown, call);
+                if (inspection instanceof GraphQlInspector.Read read) operation = read.call();
+                call.graphql(operation);
+            } else if (scope.narrowsGraphQl() && inspector.looksLikeGraphQl(headers, body, route.rawQuery())) {
+                // The ceiling is kept where the document is read. Sent anywhere else, the same document
+                // would execute upstream without having been read here, which is the one way around it.
+                throw new Denied(
+                        HttpStatus.FORBIDDEN,
+                        ErrorCode.GRAPHQL_OUTSIDE_ENDPOINT,
+                        provider.isGraphQl()
+                                ? "This grant narrows GraphQL, which is only sent to " + provider.getGraphqlPath()
+                                : "This grant narrows GraphQL, and this API declares no GraphQL endpoint");
             }
 
-            // Read from the raw request, never from the forwarded headers: the X-Janus- namespace is
-            // stripped on the way out, which is exactly the property wanted here. The caller states
-            // this to Janus, and no upstream ever sees that it did.
-            Identity pinned;
-            try {
-                pinned = Identity.parse(request.getHeader(GatewayTrafficService.IDENTITY_HEADER));
-            } catch (IllegalArgumentException ex) {
-                throw new Denied(HttpStatus.BAD_REQUEST, ErrorCode.BAD_REQUEST, ex.getMessage());
-            }
-            // Whom this application may speak as, which the grant decides and a header does not.
-            // Refused here, beside the path and the method, and for the same reason: this is the
-            // ceiling, and nothing behind it should have to check the ceiling again.
-            if (pinned == Identity.ACCOUNT && !scope.admitsAccountIdentity())
-                throw new Denied(
-                        HttpStatus.FORBIDDEN,
-                        ErrorCode.IDENTITY_NOT_GRANTED,
-                        "This grant does not admit speaking for the connected account");
+            // At a GraphQL endpoint a grant that names operation types has already said what it admits,
+            // in the terms that mean something there; its methods would only refuse every query sent as
+            // the POST GraphQL requires. Everywhere else, methods and path decide as they always have.
+            if (operation == null || !scope.narrowsGraphQl()) admission.checkMethod(scope, method);
+            admission.checkPath(scope, route);
+            if (operation != null) GraphQlScope.check(scope, operation);
+            admission.checkDestination(provider);
+            var pinned = admission.pinned(scope, request.getHeader(GatewayTrafficService.IDENTITY_HEADER));
 
             var exchange = new GatewayExchange(
                     provider,
@@ -166,17 +148,22 @@ public class GatewayController {
                     principal.applicationId(),
                     method,
                     route,
-                    forwardedHeaders(request),
+                    headers,
                     body,
                     call.correlationId,
-                    pinned);
+                    pinned,
+                    operation);
+            if (operation != null && (operation.subscribes() || asksForStream(request))) return stream(exchange, call);
+
             var outcome = traffic.forward(exchange);
-
-            var headers = outcome.headers();
-            headers.set(CorrelationIdFilter.RESPONSE_HEADER, call.correlationId);
+            var answered = outcome.headers();
+            answered.set(CorrelationIdFilter.RESPONSE_HEADER, call.correlationId);
             call.finish(AuditOutcome.SUCCESS, outcome.status().value(), outcome.auditDetail(), outcome.cacheStatus());
-            return new ResponseEntity<>(outcome.body(), headers, outcome.status());
+            return new ResponseEntity<>(outcome.body(), answered, outcome.status());
 
+        } catch (GraphQlRefusal refusal) {
+            call.finish(AuditOutcome.DENIED, refusal.status().value(), refusal.getMessage(), null);
+            return problem(refusal.status(), refusal.code(), refusal.getMessage(), call, new HttpHeaders());
         } catch (Throttled throttled) {
             // Refused to protect an allowance, not because the caller lacked permission. The caller
             // is told exactly how long to wait, which is all it needs to behave correctly.
@@ -240,6 +227,88 @@ public class GatewayController {
     }
 
     /**
+     * Whether anything depends on reading the document. Where nothing does, a persisted query Janus
+     * has never seen is forwarded unread rather than sent back for its document, which is what lets a
+     * client using trusted documents work against an API nobody has narrowed.
+     */
+    private static boolean enforcing(Provider provider, io.janus.grants.Grant grant) {
+        return GraphQlScope.enforcing(provider, grant.getScope());
+    }
+
+    private static boolean asksForStream(HttpServletRequest request) {
+        String accept = request.getHeader(HttpHeaders.ACCEPT);
+        if (accept == null || accept.isBlank()) return false;
+        try {
+            for (var type : MediaType.parseMediaTypes(accept))
+                for (var streamed : STREAMED) if (streamed.includes(type) && !type.isWildcardType()) return true;
+        } catch (InvalidMediaTypeException ex) {
+            return false;
+        }
+        return false;
+    }
+
+    /**
+     * Relays a subscription as it arrives.
+     *
+     * <p>Admitted into {@link GraphQlStreams} before the upstream is ever called, so an application
+     * over its ceiling costs the upstream nothing, and so a revocation arriving while the connection is
+     * still being made closes it the moment it exists. Journalled when it opens rather than when it
+     * closes: a stream can last days, and an entry written only at its end is an entry a restart
+     * loses.
+     */
+    private ResponseEntity<?> stream(GatewayExchange exchange, Call call) {
+        var relay = new StreamRelay(graphql.maxStreamSeconds() * 1000);
+        var registration = streams.open(
+                new GraphQlStreams.Admission(
+                        exchange.applicationId(),
+                        exchange.grant().getId(),
+                        exchange.grant().getCredential().getId(),
+                        exchange.provider().getId()),
+                relay::close);
+        GatewayTrafficService.StreamedCall opened;
+        try {
+            opened = traffic.openStream(exchange, java.time.Duration.ofSeconds(graphql.streamIdleTimeoutSeconds()));
+        } catch (RuntimeException ex) {
+            registration.close();
+            throw ex;
+        }
+        relay.start(opened.body(), opened.secrets(), registration::close);
+
+        var headers = opened.headers();
+        headers.set(CorrelationIdFilter.RESPONSE_HEADER, call.correlationId);
+        // A reverse proxy that buffers responses holds a stream until it ends, which for a
+        // subscription is never. nginx reads this and passes each event on as it arrives.
+        headers.set("X-Accel-Buffering", "no");
+        call.finish(AuditOutcome.SUCCESS, opened.status().value(), "stream opened", CacheStatus.BYPASS);
+        return new ResponseEntity<>(relay.emitter(), headers, opened.status());
+    }
+
+    /**
+     * The answer an APQ server gives a hash it does not know: a GraphQL error the client library
+     * recognises, which makes it send the document alongside the hash. Janus verifies the pair and
+     * knows the hash from then on, so this is asked once per document, not once per call.
+     */
+    private ResponseEntity<byte[]> persistedQueryNotFound(GraphQlInspector.UnknownPersistedQuery unknown, Call call) {
+        var answer = Map.of(
+                "errors",
+                List.of(Map.of(
+                        "message",
+                        "PersistedQueryNotFound",
+                        "extensions",
+                        Map.of("code", "PERSISTED_QUERY_NOT_FOUND"))));
+        Object payload = unknown.batch() ? Collections.nCopies(unknown.entries(), answer) : answer;
+        var headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set(CorrelationIdFilter.RESPONSE_HEADER, call.correlationId);
+        call.finish(
+                AuditOutcome.SUCCESS,
+                HttpStatus.OK.value(),
+                "graphql, persisted query unknown to Janus, document requested",
+                null);
+        return new ResponseEntity<>(mapper.writeValueAsBytes(payload), headers, HttpStatus.OK);
+    }
+
+    /**
      * What is known about one call so far, so that every way it can end reports the same things
      * without six branches each rebuilding them.
      */
@@ -251,6 +320,7 @@ public class GatewayController {
         private UUID providerId;
         private String providerSlug;
         private String decodedPath;
+        private GraphQlCall graphql;
 
         private Call(HttpServletRequest request, GatewayPrincipal principal) {
             this.request = request;
@@ -266,7 +336,14 @@ public class GatewayController {
             this.providerSlug = provider.getSlug();
         }
 
+        private void graphql(GraphQlCall graphql) {
+            this.graphql = graphql;
+        }
+
         private void finish(AuditOutcome outcome, int status, String detail, CacheStatus cacheStatus) {
+            // Every GraphQL operation shares one path, so the path column alone says nothing about what
+            // was asked. The operation goes first in the detail, where a reader looks for it.
+            String described = graphql == null ? detail : graphql.describe() + (detail == null ? "" : ", " + detail);
             audit.recordGateway(new AuditService.GatewayEvent(
                     principal.applicationId(),
                     principal.ownerId(),
@@ -275,11 +352,17 @@ public class GatewayController {
                     request.getMethod(),
                     decodedPath,
                     status,
-                    detail,
+                    described,
                     correlationId));
             // The slug is only tagged once a provider was actually resolved. Tagging the requested
             // one would let any caller mint an unbounded number of time series.
-            metrics.record(providerSlug, outcome, cacheStatus, status, System.nanoTime() - startedAt);
+            metrics.record(
+                    providerSlug,
+                    outcome,
+                    cacheStatus,
+                    status,
+                    System.nanoTime() - startedAt,
+                    graphql == null ? null : graphql.governingType());
         }
     }
 

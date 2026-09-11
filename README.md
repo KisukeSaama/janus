@@ -42,7 +42,8 @@ src/main/java/io/janus/
   providers/      fixed destinations and SSRF validation
   credentials/    OpenBao-backed credential metadata
   grants/         application/provider bindings and their per-caller quotas
-  gateway/        authorization, path handling, the outbound proxy, and JSON normalisation
+  gateway/        authorization, path handling, the outbound proxy, JSON normalisation, and GraphQL
+                  (reading operations, streaming subscriptions, the WebSocket relay)
   audit/          immutable operational event stream
   security/       separate admin and gateway filter chains, key cache, throttling, per-client rate limit
   openbao/        minimal KV v2 integration
@@ -102,6 +103,9 @@ Everything below has a working default for development; the ones without a safe 
 | `JANUS_CACHE_STALE_IF_ERROR_SECONDS` | 300 | how long a stale response may answer while an upstream is failing |
 | `JANUS_TRANSFORM_ENABLED` | `true` | master switch for restating responses as JSON; `false` overrides every provider |
 | `JANUS_MAX_TRANSFORM_BYTES` | 2 MiB | largest body a conversion is attempted on. Far below the response limit on purpose: that one bounds what arrives, this one what a conversion has to build, and a conversion expands. Past it the original is returned unchanged. |
+| `JANUS_GRAPHQL_STREAM_IDLE_TIMEOUT_SECONDS` / `JANUS_GRAPHQL_MAX_STREAM_SECONDS` | 300 / 0 | how long a subscription may hear nothing from its upstream, and how long it may stay open at all (0: no limit). A reverse proxy in front must allow at least the first; both shipped nginx files allow 330 s. |
+| `JANUS_GRAPHQL_MAX_STREAMS_PER_APPLICATION` / `JANUS_GRAPHQL_MAX_OPERATIONS_PER_SOCKET` | 20 / 100 | open subscriptions one application may hold, over HTTP and WebSocket together (0: no limit), and operations one WebSocket may carry at once |
+| `JANUS_GRAPHQL_PERSISTED_QUERIES` / `JANUS_GRAPHQL_MAX_BATCH` | 5000 / 25 | persisted-query documents remembered across all destinations, and operations one batched request may carry |
 | `JANUS_THROTTLE_MAX_WAIT_MILLIS` | 2000 | how long a request may wait for a provider allowance before 429 |
 | `JANUS_THROTTLE_MAX_COOLDOWN_SECONDS` | 300 | ceiling on a pause taken from an upstream `Retry-After` |
 | `JANUS_RETRY_MAX_ATTEMPTS` / `JANUS_RETRY_INITIAL_BACKOFF_MILLIS` / `JANUS_RETRY_MAX_BACKOFF_MILLIS` | 2 / 200 / 2000 | retries after the first attempt, for idempotent methods only |
@@ -308,6 +312,7 @@ Every request is answered with headers stating what was done, so the behaviour i
 | `X-Janus-RateLimit-Limit` / `-Remaining` / `-Reset` | the calling application's own allowance, when one is set |
 | `X-Janus-Upstream-Attempts` | present when Janus retried |
 | `X-Janus-Transform` | what a response was restated from, or why it was not |
+| `X-Janus-GraphQL-Errors` | how many errors a GraphQL answer carried, which its `200` does not say |
 | `Retry-After` | always present on a 429 |
 
 **Reuse.** Enabled per provider, on by default. Janus obeys the upstream's `Cache-Control`, `Expires`, `ETag`, and `Vary`; a provider that states nothing is only cached if you give it a default freshness. `GET` and `HEAD` only. A stale entry with a validator is revalidated conditionally, so an unchanged resource costs a 304 rather than a body. A successful write invalidates that resource and everything under it. A caller can opt out per request with `Cache-Control: no-cache` or `no-store`. A served hit reads no credential: the secret never leaves OpenBao.
@@ -339,6 +344,20 @@ The setting says only *whether*, never *from what*: the converter is chosen from
 **A conversion is never a way for a request to fail.** A body that is not what its `Content-Type` announced, one over `JANUS_MAX_TRANSFORM_BYTES`, or one that arrived compressed is returned exactly as the upstream sent it, with the reason in `X-Janus-Transform`. A caller that receives XML where it expected JSON has a header saying why; a 502 would be a failure Janus invented and the upstream never had.
 
 Two things follow from the mapping. XML carries no types, so every value stays a string — inferring them would turn the identifier `"0123"` into `123`. And XML cannot say "this is a list", so an element seen once is indistinguishable from a list of one: a library holding one section would return an object where the same library holding two returns an array, and the client breaks on the day a section is added. Declare those elements on the provider — `Directory` applies wherever it appears, `MediaContainer.Directory` at that one place — and they are arrays whatever the data does. A caller can have the original for one request with `Accept: application/xml`, which is also why a normalised response carries `Vary: Accept`. It carries no `ETag`: the upstream issued that for the document it sent, and Janus goes on using it against the upstream rather than handing a caller a validator for a representation it never received.
+
+**GraphQL.** A GraphQL API is one address and one method, so everything above that is decided from the method would read a query that lists repositories and a mutation that deletes one as the same `POST`. Declare the endpoint on the provider (`graphqlPath`, usually `/graphql`) and Janus reads every operation sent there before deciding anything: the kind of operation, the root fields it selects, how deeply it nests and how many fields it aliases. It never executes the document and never needs the schema; the parser is graphql-java's, bounded by its own token and depth limits.
+
+What that buys, with no change to the calling service:
+
+- A **query** is treated as the read it is, however it travels. It is stored and reused (the body is part of the address, since every query shares the path), identical concurrent queries collapse into one upstream call, and a momentary failure is retried. A **mutation** is none of those, and a successful one drops every stored query at that endpoint for its credential, because what it changed cannot be told from the path.
+- An answer that carries `errors` is relayed as it came, counted in `X-Janus-GraphQL-Errors`, and never stored: a GraphQL server answers `200` to what it could not run, and storing that would share one caller's failure with everybody.
+- A query answered with no data and nothing but `UNAUTHENTICATED` or `FORBIDDEN` errors is read as the `401` or `403` it means, so the identity recovery below applies to it. What is remembered about an endpoint's identity is remembered per operation shape (kind and root fields), not for the whole endpoint.
+- **Batches** (a JSON array) are read operation by operation: they only read if every operation reads, and they write if any one does.
+- **Persisted queries** (APQ) are verified: a hash sent with its document is checked against it and remembered; a hash alone that Janus does not know is answered `PersistedQueryNotFound`, which makes every APQ client send the document. Where nothing depends on reading the document (no GraphQL ceiling on the grant, no limit on the destination) an unknown hash, or a trusted document sent by its id, is forwarded unread and treated as a write.
+- **Limits** are set per destination: maximum depth and maximum aliases, refused with `graphql_too_complex` before the credential is read. A batch is capped by `JANUS_GRAPHQL_MAX_BATCH`.
+- **Subscriptions** are relayed as they happen. Over HTTP, a subscription, or any operation sent with `Accept: text/event-stream` or `multipart/mixed`, is streamed line by line (each line scrubbed of the credential) rather than buffered. Over WebSocket, both `graphql-transport-ws` and the older `graphql-ws` are spoken on the same path: the handshake is authorised like a request, each `subscribe` is then read and checked against the grant like one, and a refused operation is answered with the protocol's own `error` message carrying the same `code`, while the socket stays open for the others. A browser, which cannot set a header on a WebSocket, passes its bearer token as the subprotocol `janus.bearer.<token>`; only a token may travel that way, never the API key. Every open stream is counted against `JANUS_GRAPHQL_MAX_STREAMS_PER_APPLICATION`, and closed the moment the grant, application or credential that admitted it changes.
+
+A **grant** on a GraphQL API can say which kinds of operation and which root fields it admits. At the endpoint, the operation types replace the methods, so a read-only grant is simply one that admits queries. A grant that narrows GraphQL also refuses a GraphQL document sent to any other path (`graphql_outside_endpoint`), since the upstream would execute it there without Janus having read it. The endpoint is matched without regard to case or a trailing slash, as the servers GraphQL runs on match it.
 
 Policy is set on the provider (reuse, default TTL, JSON normalisation, rate limit, burst) and on the grant (the application's own limit and burst, and optionally the path prefix and methods it may use). `GET /api/admin/gateway/traffic` reports what is held, how often it spared a call, and which providers are paused; `DELETE /api/admin/providers/{id}/cache` and `DELETE /api/admin/gateway/cache` drop stored responses when data changed upstream without Janus having changed it.
 
@@ -373,8 +392,13 @@ Everything Janus refuses is `application/problem+json`, in one shape, whichever 
 | `credential_disabled` | 403 | The grant exists; the credential behind it was switched off |
 | `path_not_granted` / `method_not_granted` | 403 | The grant admits only part of this API, and this path or method is outside it |
 | `identity_not_granted` | 403 | The call asked to speak for the connected account, and the grant does not admit that identity |
+| `graphql_invalid` | 400 | A GraphQL endpoint received a document Janus cannot read: a syntax error, several operations and no `operationName`, or a mutation sent as `GET` (answered `405`) |
+| `graphql_too_complex` | 400 | Deeper, more aliased, or a larger batch than the destination or the deployment accepts |
+| `graphql_operation_not_granted` / `graphql_field_not_granted` | 403 | The grant admits only some operation types or root fields, and this operation is outside them |
+| `graphql_outside_endpoint` | 403 | A grant that narrows GraphQL was used to send a GraphQL document to another path |
 | `rate_limit_client` / `rate_limit_grant` / `rate_limit_provider` | 429 | Which of the three allowances was hit — your own, or one shared with every other caller |
 | `provider_cooldown` | 429 | The provider asked for a pause and Janus is honouring it for everyone |
+| `stream_limit` | 429 | This application already holds as many open subscriptions as the deployment allows; close one |
 | `path_ambiguous` / `path_invalid` | 400 | The request path is not one that can be routed unambiguously |
 | `payload_too_large` | 413 | Over `JANUS_MAX_REQUEST_BYTES` |
 | `provider_misconfigured` | 502 | The registered base URL no longer satisfies this deployment's address rules; `detail` says which one |

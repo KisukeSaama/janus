@@ -55,13 +55,11 @@ public class GrantService {
 
     @Transactional
     public GrantResponse create(GrantRequest request) {
-        var grant = new Grant(
-                application(request.applicationId()),
-                provider(request.providerId()),
-                credential(request.credentialId()));
+        var provider = provider(request.providerId());
+        var grant = new Grant(application(request.applicationId()), provider, credential(request.credentialId()));
         grant.setEnabled(request.enabled());
         grant.applyQuota(request.quota());
-        grant.applyScope(request.scope());
+        grant.applyScope(scopeFor(provider, request));
         repository.save(grant);
         audit.recordAdmin(
                 AuditAction.GRANT_CREATED,
@@ -73,13 +71,11 @@ public class GrantService {
     @Transactional
     public GrantResponse update(UUID id, GrantRequest request) {
         var grant = require(id);
-        grant.bind(
-                application(request.applicationId()),
-                provider(request.providerId()),
-                credential(request.credentialId()));
+        var provider = provider(request.providerId());
+        grant.bind(application(request.applicationId()), provider, credential(request.credentialId()));
         grant.setEnabled(request.enabled());
         grant.applyQuota(request.quota());
-        grant.applyScope(request.scope());
+        grant.applyScope(scopeFor(provider, request));
         // A new allowance must not inherit the tokens the old one had left, and a narrowed grant must
         // not go on being authorised by the copy the gateway is holding.
         traffic.forgetGrant(id);
@@ -97,6 +93,18 @@ public class GrantService {
         repository.delete(grant);
         traffic.forgetGrant(id);
         audit.recordAdmin(AuditAction.GRANT_DELETED, providerId, id.toString());
+    }
+
+    /**
+     * A GraphQL ceiling on an API that declares no GraphQL endpoint would be a rule the gateway has
+     * nowhere to apply, and an operator reading it would believe it held. Refused where it is written.
+     */
+    private static GrantScope scopeFor(Provider provider, GrantRequest request) {
+        var scope = request.scope();
+        if (scope.narrowsGraphQl() && !provider.isGraphQl())
+            throw new IllegalArgumentException(
+                    "This API declares no GraphQL endpoint, so there is no operation for a GraphQL scope to narrow");
+        return scope;
     }
 
     /**

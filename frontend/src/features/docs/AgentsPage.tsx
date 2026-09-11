@@ -64,6 +64,9 @@ export function AgentsPage() {
           pathPrefix: c.grant.pathPrefix,
           methods: c.grant.methods,
           connected: Boolean(c.credential?.authorizedAt),
+          graphqlPath: c.provider.graphqlPath,
+          graphqlOperations: c.grant.graphqlOperations ?? [],
+          graphqlRootFields: c.grant.graphqlRootFields ?? [],
         });
       }
       byService.set(service.id, service);

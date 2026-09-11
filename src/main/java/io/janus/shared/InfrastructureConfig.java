@@ -6,6 +6,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 import io.janus.audit.AuditRetentionProperties;
 import io.janus.gateway.GatewayTrafficProperties;
+import io.janus.gateway.graphql.GraphQlProperties;
 import io.janus.notifications.NotificationProperties;
 import io.janus.oauth.OAuthProperties;
 import io.janus.openbao.OpenBaoProperties;
@@ -24,6 +25,7 @@ import io.janus.openbao.OpenBaoProperties;
 @EnableConfigurationProperties({
     OpenBaoProperties.class,
     GatewayTrafficProperties.class,
+    GraphQlProperties.class,
     NotificationProperties.class,
     OAuthProperties.class,
     AuditRetentionProperties.class

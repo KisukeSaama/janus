@@ -43,7 +43,8 @@ class ApplicationAdminControllerTest {
                 refreshTokens,
                 accounts,
                 scope,
-                audit);
+                audit,
+                Mockito.mock(io.janus.gateway.TrafficPolicyRegistry.class));
         mvc = MockMvcBuilders.standaloneSetup(new ApplicationAdminController(service))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();

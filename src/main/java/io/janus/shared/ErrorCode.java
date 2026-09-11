@@ -76,6 +76,26 @@ public enum ErrorCode {
      */
     IDENTITY_NOT_GRANTED,
 
+    // GraphQL, where what a call does is decided by its document rather than its path.
+    /**
+     * The call reached a GraphQL endpoint and is not a GraphQL request Janus can read: a syntax
+     * error, no operation, several with no {@code operationName} to choose between them, or a
+     * mutation sent as a GET. Refused rather than forwarded, because every decision below depends on
+     * having read it.
+     */
+    GRAPHQL_INVALID,
+    /** The document goes deeper, or aliases more fields, than this destination accepts. */
+    GRAPHQL_TOO_COMPLEX,
+    /** The grant admits only some kinds of operation, and this is not one of them. */
+    GRAPHQL_OPERATION_NOT_GRANTED,
+    /** The grant admits only some root fields, and the operation selects one outside them. */
+    GRAPHQL_FIELD_NOT_GRANTED,
+    /**
+     * A grant that narrows GraphQL was used to send a GraphQL document somewhere other than the
+     * destination's declared endpoint, where Janus would not have read it.
+     */
+    GRAPHQL_OUTSIDE_ENDPOINT,
+
     // Allowances.
     /** The per-address ceiling on calls to Janus itself. */
     RATE_LIMIT_CLIENT,
@@ -85,6 +105,11 @@ public enum ErrorCode {
     RATE_LIMIT_PROVIDER,
     /** The provider asked for a pause and Janus is honouring it for everyone. */
     PROVIDER_COOLDOWN,
+    /**
+     * This application already holds as many open subscriptions as a deployment allows one to. Its
+     * own code: the repair is closing a stream, not waiting.
+     */
+    STREAM_LIMIT,
 
     // Reaching the upstream.
     /** The provider's registered address is not usable under this deployment's rules. */

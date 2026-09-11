@@ -14,6 +14,7 @@ import io.janus.credentials.*;
  * @param jsonArrayPaths elements that must always be arrays once converted, comma-separated
  * @param connectionAuthorizationUrl the account connection this API offers, null throughout when it
  *     offers none
+ * @param graphqlPath where its GraphQL endpoint lives, or null when it is not a GraphQL API
  */
 public record ProviderResponse(
         UUID id,
@@ -46,6 +47,9 @@ public record ProviderResponse(
         String signatureParameter,
         String timestampHeader,
         String timestampParameter,
+        String graphqlPath,
+        int graphqlMaxDepth,
+        int graphqlMaxAliases,
         boolean activated,
         Instant createdAt,
         Instant updatedAt) {
@@ -88,6 +92,9 @@ public record ProviderResponse(
                 signature == null ? null : signature.signatureParameter(),
                 signature == null ? null : signature.timestampHeader(),
                 signature == null ? null : signature.timestampParameter(),
+                provider.getGraphqlPath(),
+                provider.getGraphqlMaxDepth(),
+                provider.getGraphqlMaxAliases(),
                 activated,
                 provider.getCreatedAt(),
                 provider.getUpdatedAt());

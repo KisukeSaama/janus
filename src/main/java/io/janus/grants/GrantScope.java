@@ -1,6 +1,9 @@
 package io.janus.grants;
 
 import java.util.*;
+import java.util.regex.Pattern;
+
+import io.janus.gateway.graphql.OperationType;
 
 /**
  * How much of a destination's surface one grant admits.
@@ -29,17 +32,41 @@ import java.util.*;
  * naming a destination rather than a decision anybody took, and this is where it becomes one. It
  * admits the account identity by default, because that is what every grant written before it did.
  *
- * @param pathPrefix           the path under which this grant admits calls, or {@code null} for all
- * @param methods              the methods it admits, or empty for all of them
+ * <p>The last two say the same thing as the first two, in the terms a GraphQL API is used in. There
+ * every call is the same {@code POST} to the same path, so a prefix and a set of methods cannot tell
+ * reading from writing: which kinds of operation, and which root fields, can. At the destination's
+ * GraphQL endpoint the operation types stand in for the methods, and a read-only grant is one that
+ * admits queries. Everywhere else the prefix and the methods go on deciding, as before.
+ *
+ * @param pathPrefix            the path under which this grant admits calls, or {@code null} for all
+ * @param methods               the methods it admits, or empty for all of them
  * @param admitsAccountIdentity whether this grant may speak for the connected account, rather than
- *                             only as the application itself
+ *                              only as the application itself
+ * @param graphqlOperations     the kinds of GraphQL operation it admits, or empty for all of them
+ * @param graphqlRootFields     the root fields a GraphQL operation may select, or empty for all
  */
-public record GrantScope(String pathPrefix, Set<String> methods, boolean admitsAccountIdentity) {
+public record GrantScope(
+        String pathPrefix,
+        Set<String> methods,
+        boolean admitsAccountIdentity,
+        Set<OperationType> graphqlOperations,
+        Set<String> graphqlRootFields) {
 
     /** The whole destination, which is what a grant with nothing stated has always meant. */
-    public static final GrantScope EVERYTHING = new GrantScope(null, Set.of(), true);
+    public static final GrantScope EVERYTHING = new GrantScope(null, Set.of(), true, Set.of(), Set.of());
 
     private static final int MAX_PREFIX = 512;
+    private static final int MAX_ROOT_FIELDS = 50;
+    private static final int MAX_STORED_ROOT_FIELDS = 1000;
+
+    /** A GraphQL name, which is exactly what a root field is. */
+    private static final Pattern FIELD_NAME = Pattern.compile("[_A-Za-z][_0-9A-Za-z]*");
+
+    /**
+     * Reaches nothing: it names the type of the object it is selected on. Admitted whatever a grant
+     * lists, because clients add it on their own and refusing it would break them for no protection.
+     */
+    private static final String TYPENAME = "__typename";
 
     /**
      * The methods the gateway forwards at all, in the order they are read in: naming any other one is
@@ -50,31 +77,59 @@ public record GrantScope(String pathPrefix, Set<String> methods, boolean admitsA
     public GrantScope {
         pathPrefix = normalise(pathPrefix);
         methods = methods == null ? Set.of() : Set.copyOf(methods);
+        graphqlOperations = graphqlOperations == null ? Set.of() : Set.copyOf(graphqlOperations);
+        graphqlRootFields = graphqlRootFields == null ? Set.of() : Set.copyOf(graphqlRootFields);
+    }
+
+    /** For callers written before a grant could narrow a GraphQL API. */
+    public GrantScope(String pathPrefix, Set<String> methods, boolean admitsAccountIdentity) {
+        this(pathPrefix, methods, admitsAccountIdentity, Set.of(), Set.of());
+    }
+
+    /** For callers written before a grant could narrow a GraphQL API. */
+    public static GrantScope of(String pathPrefix, String methods, boolean admitsAccountIdentity) {
+        return of(pathPrefix, methods, admitsAccountIdentity, null, null);
     }
 
     /**
-     * Reads a prefix and the comma-separated methods a column holds, and refuses a prefix that two
-     * layers could read differently rather than storing one that would never match anything.
+     * Reads what the columns hold, each list comma-separated, and refuses a prefix that two layers
+     * could read differently rather than storing one that would never match anything.
      *
      * <p>The same method reads a stored row and a submitted form, so the refusal is what reports a
      * mistyped prefix where it was typed. A stored row cannot reach it: {@code ck_grant_path_prefix}
      * holds the column to the same rules, so the only way past the constraint is the way past this.
      *
-     * <p>Nothing here is read as admitting more than was written. Both halves absent is the one
+     * <p>Nothing here is read as admitting more than was written. Everything absent is the one
      * default, and it is the whole destination, which is what a grant has always meant.
      */
-    public static GrantScope of(String pathPrefix, String methods, boolean admitsAccountIdentity) {
-        if (isBlank(pathPrefix) && isBlank(methods) && admitsAccountIdentity) return EVERYTHING;
+    public static GrantScope of(
+            String pathPrefix,
+            String methods,
+            boolean admitsAccountIdentity,
+            String graphqlOperations,
+            String graphqlRootFields) {
+        if (isBlank(pathPrefix)
+                && isBlank(methods)
+                && admitsAccountIdentity
+                && isBlank(graphqlOperations)
+                && isBlank(graphqlRootFields)) return EVERYTHING;
         var named = new LinkedHashSet<String>();
-        if (!isBlank(methods))
-            for (String method : methods.split(","))
-                if (!method.isBlank()) named.add(method.trim().toUpperCase(Locale.ROOT));
-        return new GrantScope(pathPrefix, named, admitsAccountIdentity);
+        for (String method : split(methods)) named.add(method.toUpperCase(Locale.ROOT));
+        var operations = EnumSet.noneOf(OperationType.class);
+        for (String operation : split(graphqlOperations)) operations.add(OperationType.parse(operation));
+        // Case kept: GraphQL names are case-sensitive, and `Viewer` is not `viewer`.
+        var fields = new LinkedHashSet<>(split(graphqlRootFields));
+        return new GrantScope(pathPrefix, named, admitsAccountIdentity, operations, fields);
     }
 
     /** Whether anything at all is narrowed, which is what the console shows and the journal records. */
     public boolean narrows() {
-        return pathPrefix != null || !methods.isEmpty() || !admitsAccountIdentity;
+        return pathPrefix != null || !methods.isEmpty() || !admitsAccountIdentity || narrowsGraphQl();
+    }
+
+    /** Whether this grant says anything about GraphQL operations, and so has to read them to be kept. */
+    public boolean narrowsGraphQl() {
+        return !graphqlOperations.isEmpty() || !graphqlRootFields.isEmpty();
     }
 
     /**
@@ -96,6 +151,14 @@ public record GrantScope(String pathPrefix, Set<String> methods, boolean admitsA
         return methods.isEmpty() || methods.contains(method.toUpperCase(Locale.ROOT));
     }
 
+    public boolean admitsOperation(OperationType type) {
+        return graphqlOperations.isEmpty() || graphqlOperations.contains(type);
+    }
+
+    public boolean admitsRootField(String field) {
+        return graphqlRootFields.isEmpty() || graphqlRootFields.contains(field) || TYPENAME.equals(field);
+    }
+
     /** The prefix as a column holds it. */
     public String storedPrefix() {
         return pathPrefix;
@@ -109,6 +172,28 @@ public record GrantScope(String pathPrefix, Set<String> methods, boolean admitsA
     /** The methods as a column holds them: comma separated. */
     public String storedMethods() {
         return methods.isEmpty() ? null : String.join(",", orderedMethods());
+    }
+
+    /** Query, mutation, subscription: the order a reader expects them in. */
+    public List<OperationType> orderedOperations() {
+        return Arrays.stream(OperationType.values())
+                .filter(graphqlOperations::contains)
+                .toList();
+    }
+
+    public String storedOperations() {
+        return graphqlOperations.isEmpty()
+                ? null
+                : String.join(",", orderedOperations().stream().map(Enum::name).toList());
+    }
+
+    /** Alphabetical, so the same list reads the same way however it was typed. */
+    public List<String> orderedRootFields() {
+        return graphqlRootFields.stream().sorted().toList();
+    }
+
+    public String storedRootFields() {
+        return graphqlRootFields.isEmpty() ? null : String.join(",", orderedRootFields());
     }
 
     /**
@@ -132,14 +217,30 @@ public record GrantScope(String pathPrefix, Set<String> methods, boolean admitsA
         return prefix.equals("/") ? null : prefix;
     }
 
+    private static List<String> split(String value) {
+        if (isBlank(value)) return List.of();
+        var parts = new ArrayList<String>();
+        for (String part : value.split(",")) if (!part.isBlank()) parts.add(part.trim());
+        return parts;
+    }
+
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
     }
 
-    /** Refuses a method the gateway does not forward, so a typo is reported where it is written. */
+    /** Refuses what the gateway could never match, so a typo is reported where it is written. */
     public void validate() {
         for (String method : methods)
             if (!KNOWN.contains(method))
                 throw new IllegalArgumentException("'" + method + "' is not a method the gateway forwards");
+        if (graphqlRootFields.size() > MAX_ROOT_FIELDS)
+            throw new IllegalArgumentException("A grant names at most " + MAX_ROOT_FIELDS + " root fields");
+        for (String field : graphqlRootFields)
+            if (!FIELD_NAME.matcher(field).matches())
+                throw new IllegalArgumentException("'" + field + "' is not a GraphQL field name");
+        String stored = storedRootFields();
+        if (stored != null && stored.length() > MAX_STORED_ROOT_FIELDS)
+            throw new IllegalArgumentException(
+                    "The root fields are longer than " + MAX_STORED_ROOT_FIELDS + " characters");
     }
 }

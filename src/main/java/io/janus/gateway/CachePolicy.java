@@ -50,12 +50,29 @@ final class CachePolicy {
             String method,
             GatewayPath route,
             HttpHeaders request) {
+        return key(providerId, credentialId, identity, method, route, request, null);
+    }
+
+    /**
+     * @param body the request body, for the one kind of call whose body is what it asks for: a GraphQL
+     *     query sent as a POST, where every query shares the path and only the document differs.
+     *     Null for everything else, which is addressed by its URL as HTTP intends.
+     */
+    static String key(
+            UUID providerId,
+            UUID credentialId,
+            Identity identity,
+            String method,
+            GatewayPath route,
+            HttpHeaders request,
+            byte[] body) {
         String variant = String.join(
                 "|",
                 Objects.requireNonNullElse(route.rawPath(), ""),
                 Objects.requireNonNullElse(route.rawQuery(), ""),
                 Objects.requireNonNullElse(request.getFirst(HttpHeaders.ACCEPT), ""),
-                Objects.requireNonNullElse(request.getFirst(HttpHeaders.ACCEPT_LANGUAGE), ""));
+                Objects.requireNonNullElse(request.getFirst(HttpHeaders.ACCEPT_LANGUAGE), ""),
+                body == null ? "" : digest(body));
         return resourcePrefix(providerId, credentialId, identity)
                 + route.decodedPath()
                 + SEPARATOR
@@ -281,9 +298,13 @@ final class CachePolicy {
 
     /** Package-private: the store derives its secondary keys with the same function. */
     static String digest(String value) {
+        return digest(value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    static String digest(byte[] value) {
         try {
             var sha256 = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(sha256.digest(value.getBytes(StandardCharsets.UTF_8)));
+            return HexFormat.of().formatHex(sha256.digest(value));
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 is required", ex);
         }

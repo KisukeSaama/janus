@@ -34,6 +34,9 @@ import io.janus.credentials.Identity;
 public class IdentityMemory {
     static final int MAX_TRACKED_ROUTES = 50_000;
 
+    /** Longest operation shape kept in a key. */
+    private static final int MAX_OPERATION_KEY = 200;
+
     /** How large the current generation may grow before it displaces the older one. */
     private static final int GENERATION = MAX_TRACKED_ROUTES / 2;
 
@@ -47,7 +50,16 @@ public class IdentityMemory {
 
     /** What was learned for this endpoint, or empty when it has never been reached. */
     public Optional<Identity> recall(UUID credentialId, String method, String decodedPath) {
-        String key = key(credentialId, method, decodedPath);
+        return recall(credentialId, method, decodedPath, null);
+    }
+
+    /**
+     * @param operation the shape of a GraphQL operation, or null. Every operation shares one path, and
+     *     one of them wanting the account says nothing about the others: without this, the first
+     *     personal query would send every query as the account from then on.
+     */
+    public Optional<Identity> recall(UUID credentialId, String method, String decodedPath, String operation) {
+        String key = key(credentialId, method, decodedPath, operation);
         var learned = recent.get(key);
         if (learned != null) return Optional.of(learned);
 
@@ -60,10 +72,14 @@ public class IdentityMemory {
     }
 
     public void remember(UUID credentialId, String method, String decodedPath, Identity identity) {
+        remember(credentialId, method, decodedPath, null, identity);
+    }
+
+    public void remember(UUID credentialId, String method, String decodedPath, String operation, Identity identity) {
         // Checked before the write, not after: rotating afterwards would let the generation settle one
         // entry above its ceiling every time, and the ceiling is the whole point of having one.
         if (recent.size() >= GENERATION) rotate();
-        recent.put(key(credentialId, method, decodedPath), identity);
+        recent.put(key(credentialId, method, decodedPath, operation), identity);
     }
 
     /**
@@ -112,7 +128,12 @@ public class IdentityMemory {
      * different scopes, so an endpoint one of them may reach with the application's token is one the
      * other may not.
      */
-    private static String key(UUID credentialId, String method, String decodedPath) {
-        return credentialId + " " + method + " " + RouteTemplate.of(decodedPath);
+    private static String key(UUID credentialId, String method, String decodedPath, String operation) {
+        String route = credentialId + " " + method + " " + RouteTemplate.of(decodedPath);
+        if (operation == null) return route;
+        // Bounded like everything else a caller shapes: a document selecting a hundred root fields is
+        // one endpoint, not a hundred-field key.
+        return route + " "
+                + (operation.length() <= MAX_OPERATION_KEY ? operation : operation.substring(0, MAX_OPERATION_KEY));
     }
 }

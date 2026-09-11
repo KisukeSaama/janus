@@ -180,6 +180,17 @@ janus:
       max-attempts: ${JANUS_RETRY_MAX_ATTEMPTS:2}
       initial-backoff-millis: ${JANUS_RETRY_INITIAL_BACKOFF_MILLIS:200}
       max-backoff-millis: ${JANUS_RETRY_MAX_BACKOFF_MILLIS:2000}
+    # GraphQL. What a destination accepts, depth and aliases, is set on the destination; these bound
+    # what this process holds open for all of them. A subscription holds a socket for as long as it
+    # lasts, which a request never does, so the per-application ceiling is what keeps one service
+    # opening them in a loop from exhausting the instance for everybody.
+    graphql:
+      stream-idle-timeout-seconds: ${JANUS_GRAPHQL_STREAM_IDLE_TIMEOUT_SECONDS:300}
+      max-stream-seconds: ${JANUS_GRAPHQL_MAX_STREAM_SECONDS:0}
+      max-streams-per-application: ${JANUS_GRAPHQL_MAX_STREAMS_PER_APPLICATION:20}
+      max-operations-per-socket: ${JANUS_GRAPHQL_MAX_OPERATIONS_PER_SOCKET:100}
+      persisted-queries: ${JANUS_GRAPHQL_PERSISTED_QUERIES:5000}
+      max-batch: ${JANUS_GRAPHQL_MAX_BATCH:25}
   notifications:
     check-cron: ${JANUS_EXPIRY_CHECK_CRON:0 15 7 * * *}
     zone: ${JANUS_EXPIRY_CHECK_ZONE:UTC}

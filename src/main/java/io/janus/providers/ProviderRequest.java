@@ -69,7 +69,12 @@ public record ProviderRequest(
         TokenClientAuth connectionClientAuth,
         // The header an exchange puts its client id on, for the APIs that want it beside the token
         // rather than only inside it. Last in the record, so callers written before it still compile.
-        @Size(max = 100) String clientIdHeader) {
+        @Size(max = 100) String clientIdHeader,
+        // Where the GraphQL endpoint lives, for an API that is one, and what it accepts there. Last
+        // for the same reason as everything above: unstated means it is not a GraphQL API.
+        @Size(max = 200) String graphqlPath,
+        @Min(0) @Max(100) Integer graphqlMaxDepth,
+        @Min(0) @Max(10000) Integer graphqlMaxAliases) {
 
     public ProviderRequest {
         name = name == null ? null : name.trim();
@@ -122,6 +127,9 @@ public record ProviderRequest(
                 null,
                 null,
                 null,
+                null,
+                null,
+                null,
                 null);
     }
 
@@ -154,6 +162,11 @@ public record ProviderRequest(
 
     public Provider.Normalization normalization() {
         return new Provider.Normalization(normalizeJson != null && normalizeJson, jsonArrayPaths);
+    }
+
+    /** Blank is "not a GraphQL API", and limits stated without an endpoint are dropped with it. */
+    public Provider.GraphQl graphQl() {
+        return new Provider.GraphQl(graphqlPath, orZero(graphqlMaxDepth), orZero(graphqlMaxAliases));
     }
 
     public Provider.TrafficPolicy trafficPolicy() {
