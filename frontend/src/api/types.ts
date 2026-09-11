@@ -318,6 +318,14 @@ export type ProviderInput = {
   tokenScopes?: string | null;
   tokenClientAuth?: TokenClientAuth | null;
   clientIdHeader?: string | null;
+  /** The signing recipe. Null on every other strategy, which is what clears it. */
+  signatureAlgorithm?: SignatureAlgorithm | null;
+  signatureTemplate?: string | null;
+  signatureEncoding?: SignatureEncoding | null;
+  signatureHeader?: string | null;
+  signatureParameter?: string | null;
+  timestampHeader?: string | null;
+  timestampParameter?: string | null;
   /** The account connection, or null throughout when the API offers none. */
   connectionAuthorizationUrl?: string | null;
   connectionTokenUrl?: string | null;

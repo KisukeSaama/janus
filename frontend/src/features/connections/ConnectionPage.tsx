@@ -11,14 +11,12 @@ import {
   useDeleteGrant,
   useGrants,
   usePingProvider,
-  useProviderCapabilities,
   useProviders,
   usePurgeProviderCache,
   useRotateApplicationKey,
   useUpdateCredential,
   useOAuthCallback,
   useUpdateGrant,
-  useUpdateProvider,
   GRAPHQL_OPERATIONS,
   HTTP_METHODS,
   type Credential,
@@ -26,8 +24,6 @@ import {
   type GraphQlOperation,
   type HttpMethod,
   type Identity,
-  type Provider,
-  type ProviderInput,
 } from '../../api';
 import {
   Block,
@@ -49,6 +45,7 @@ import {
 import { useI18n } from '../../i18n';
 import { buildConnections, curlFor, gatewayUrl, type Connection } from '../../lib/connections';
 import { useErrorMessage } from '../../lib/errors';
+import { ProviderEditPanel } from './ProviderForm';
 
 /**
  * One connection, and everything anybody asks about it: how to call it, where it goes, how often,
@@ -87,7 +84,6 @@ export function ConnectionPage({
   const updateGrant = useUpdateGrant();
   const deleteGrant = useDeleteGrant();
   const updateCredential = useUpdateCredential();
-  const updateProvider = useUpdateProvider();
   const purgeCache = usePurgeProviderCache();
   const pingProvider = usePingProvider();
   const rotateKey = useRotateApplicationKey();
@@ -245,7 +241,7 @@ export function ConnectionPage({
                 )}
                 {identity.role !== 'USER' && (
                   <button className="btn btn-sm btn-secondary" onClick={() => setPanel('destination')}>
-                    {t('detail.destinationEdit')}
+                    {t('credentials.editApi')}
                   </button>
                 )}
               </span>
@@ -463,14 +459,8 @@ export function ConnectionPage({
       </div>
 
       {panel === 'destination' && provider && identity.role !== 'USER' && (
-        <DestinationPanel
-          provider={provider}
-          onClose={() => setPanel('closed')}
-          onSave={async (input) => {
-            await updateProvider.mutateAsync({ id: provider.id, input });
-            setPanel('closed');
-          }}
-        />
+        // The same panel as the catalogue's "Edit API": one API, one form, wherever it is opened.
+        <ProviderEditPanel provider={provider} onClose={() => setPanel('closed')} />
       )}
       {panel === 'quota' && (
         <QuotaPanel
@@ -574,211 +564,6 @@ function Diagnosis({
 }
 
 /* ── Editing, one question at a time ───────────────────────────────────── */
-
-/**
- * The destination itself, edited where it is read. A registered API used to be a row in a registry
- * table one click away from the connection that is the only reason it exists; there is no second
- * place to keep in sync now.
- */
-function DestinationPanel({
-  provider,
-  onClose,
-  onSave,
-}: {
-  provider: Provider;
-  onClose: () => void;
-  onSave: (input: ProviderInput) => Promise<void>;
-}) {
-  const { t } = useI18n();
-  const describe = useErrorMessage();
-  const capabilities = useProviderCapabilities();
-  const [error, setError] = useState('');
-  // The array declaration only means anything while normalisation is on, so it follows the switch
-  // rather than sitting there inert.
-  const [normalizing, setNormalizing] = useState(provider.normalizeJson);
-  // The same for the GraphQL endpoint and its limits: there is nothing to limit without one.
-  const [graphql, setGraphql] = useState(Boolean(provider.graphqlPath));
-
-  async function submit(e: FormEvent<HTMLFormElement>) {
-    const form = new FormData(e.currentTarget);
-    setError('');
-    try {
-      await onSave({
-        name: String(form.get('name') ?? ''),
-        slug: String(form.get('slug') ?? ''),
-        baseUrl: String(form.get('baseUrl') ?? ''),
-        enabled: form.get('enabled') === 'on',
-        allowPrivateDestination: form.get('allowPrivateDestination') === 'on',
-        cacheEnabled: form.get('cacheEnabled') === 'on',
-        cacheTtlSeconds: Number(form.get('cacheTtlSeconds') || 0),
-        normalizeJson: form.get('normalizeJson') === 'on',
-        jsonArrayPaths: String(form.get('jsonArrayPaths') ?? '') || null,
-        graphqlPath: graphql ? String(form.get('graphqlPath') ?? '') || null : null,
-        graphqlMaxDepth: graphql ? Number(form.get('graphqlMaxDepth') || 0) : 0,
-        graphqlMaxAliases: graphql ? Number(form.get('graphqlMaxAliases') || 0) : 0,
-        rateLimitPerMinute: Number(form.get('rateLimitPerMinute') || 0),
-        rateLimitBurst: Number(form.get('rateLimitBurst') || 0),
-        authType: provider.authType,
-        headerName: provider.headerName,
-        queryParameter: provider.queryParameter,
-        tokenUrl: provider.tokenUrl,
-        tokenScopes: provider.tokenScopes,
-        tokenClientAuth: provider.tokenClientAuth,
-        clientIdHeader: provider.clientIdHeader,
-      });
-    } catch (x) {
-      setError(describe(x));
-    }
-  }
-
-  return (
-    <SidePanel title={t('detail.destinationEdit')} intro={t('providers.panelIntro')} onClose={onClose}>
-      <FormLayout onSubmit={submit} submitLabel={t('common.saveChanges')} error={error}>
-        <Field label={t('providers.fieldName')} name="name" required autoComplete="off" defaultValue={provider.name} />
-        <Field
-          label={t('providers.fieldSlug')}
-          name="slug"
-          required
-          data
-          autoComplete="off"
-          defaultValue={provider.slug}
-          hint={t('providers.slugHint')}
-        />
-        <Field
-          label={t('providers.fieldBaseUrl')}
-          name="baseUrl"
-          type="url"
-          required
-          data
-          autoComplete="off"
-          defaultValue={provider.baseUrl}
-        />
-        {/*
-          Shown when the deployment offers it, and also whenever this destination already carries it
-          — a deployment that withdraws the option must not leave a field the form silently unsets.
-        */}
-        {(capabilities.data?.privateDestinations || provider.allowPrivateDestination) && (
-          <CheckField
-            label={t('connect.lan')}
-            name="allowPrivateDestination"
-            defaultChecked={provider.allowPrivateDestination}
-            hint={t('connect.lanHint')}
-          />
-        )}
-        <CheckField
-          label={t('providers.enabledLabel')}
-          name="enabled"
-          defaultChecked={provider.enabled}
-          hint={t('providers.enabledHint')}
-        />
-
-        <div className="space-y-5 border-t border-line pt-5">
-          <div>
-            <p className="stamp text-text-2">{t('providers.policySection')}</p>
-            <p className="mt-1.5 text-xs text-text-2">{t('providers.policyIntro')}</p>
-          </div>
-          <CheckField
-            label={t('providers.cacheLabel')}
-            name="cacheEnabled"
-            defaultChecked={provider.cacheEnabled}
-            hint={t('providers.cacheHint')}
-          />
-          <Field
-            label={t('providers.cacheTtlLabel')}
-            name="cacheTtlSeconds"
-            type="number"
-            min={0}
-            max={86400}
-            data
-            defaultValue={provider.cacheTtlSeconds}
-            hint={t('providers.cacheTtlHint')}
-          />
-          <CheckField
-            label={t('providers.normalizeLabel')}
-            name="normalizeJson"
-            defaultChecked={provider.normalizeJson}
-            onChange={(e) => setNormalizing(e.currentTarget.checked)}
-            hint={t('providers.normalizeHint')}
-          />
-          {normalizing && (
-            <Field
-              label={t('providers.arrayPathsLabel')}
-              name="jsonArrayPaths"
-              data
-              autoComplete="off"
-              maxLength={1000}
-              placeholder="MediaContainer.Directory, Location"
-              defaultValue={provider.jsonArrayPaths ?? ''}
-              hint={t('providers.arrayPathsHint')}
-            />
-          )}
-          <CheckField
-            label={t('providers.graphqlLabel')}
-            name="graphql"
-            defaultChecked={Boolean(provider.graphqlPath)}
-            onChange={(e) => setGraphql(e.currentTarget.checked)}
-            hint={t('providers.graphqlHint')}
-          />
-          {graphql && (
-            <>
-              <Field
-                label={t('providers.graphqlPathLabel')}
-                name="graphqlPath"
-                required
-                data
-                autoComplete="off"
-                maxLength={200}
-                placeholder="/graphql"
-                defaultValue={provider.graphqlPath ?? '/graphql'}
-                hint={t('providers.graphqlPathHint')}
-              />
-              <Field
-                label={t('providers.graphqlDepthLabel')}
-                name="graphqlMaxDepth"
-                type="number"
-                min={0}
-                max={100}
-                data
-                defaultValue={provider.graphqlMaxDepth ?? 0}
-                hint={t('providers.graphqlDepthHint')}
-              />
-              <Field
-                label={t('providers.graphqlAliasesLabel')}
-                name="graphqlMaxAliases"
-                type="number"
-                min={0}
-                max={10000}
-                data
-                defaultValue={provider.graphqlMaxAliases ?? 0}
-                hint={t('providers.graphqlAliasesHint')}
-              />
-            </>
-          )}
-          <Field
-            label={t('providers.rateLimitLabel')}
-            name="rateLimitPerMinute"
-            type="number"
-            min={0}
-            max={1000000}
-            data
-            defaultValue={provider.rateLimitPerMinute}
-            hint={t('providers.rateLimitHint')}
-          />
-          <Field
-            label={t('providers.burstLabel')}
-            name="rateLimitBurst"
-            type="number"
-            min={0}
-            max={100000}
-            data
-            defaultValue={provider.rateLimitBurst}
-            hint={t('providers.burstHint')}
-          />
-        </div>
-      </FormLayout>
-    </SidePanel>
-  );
-}
 
 function QuotaPanel({
   grant,
