@@ -7,15 +7,11 @@ import {
   useDeleteCredential,
   useDeleteProvider,
   usePingProvider,
-  useProviderCapabilities,
   useProviderCatalog,
   useUpdateCredential,
-  useUpdateProvider,
-  type AuthType,
   type Credential,
   type Identity,
   type Provider,
-  type TokenClientAuth,
 } from '../../api';
 import {
   CheckField,
@@ -32,7 +28,6 @@ import {
   RecordCell,
   RowMenu,
   SearchField,
-  SelectField,
   SidePanel,
   SkeletonRows,
   type Column,
@@ -43,15 +38,7 @@ import { useI18n } from '../../i18n';
 import { useErrorMessage } from '../../lib/errors';
 import { fromDateInput, NOTICE_DAYS, toDateInput, WARNING_DAYS } from '../../lib/expiry';
 import { ConnectFlow } from '../connections/ConnectFlow';
-
-const STRATEGIES: AuthType[] = [
-  'BEARER',
-  'API_KEY_HEADER',
-  'API_KEY_QUERY',
-  'BASIC',
-  'OAUTH2_CLIENT_CREDENTIALS',
-  'NONE',
-];
+import { ProviderEditPanel } from '../connections/ProviderForm';
 
 type Panel =
   | { kind: 'activate'; provider: Provider }
@@ -66,7 +53,6 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
   const { t, tEnum } = useI18n();
   const describe = useErrorMessage();
   const [, navigate] = useLocation();
-  const capabilities = useProviderCapabilities();
   const administrator = identity.role !== 'USER';
 
   const [query, setQuery] = useState('');
@@ -74,13 +60,6 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
   const [page, setPage] = useState(0);
   const [panel, setPanel] = useState<Panel>(null);
   const [connecting, setConnecting] = useState(false);
-  const [strategy, setStrategy] = useState<AuthType>('BEARER');
-  // The array declaration only means anything while normalisation is on, so it follows the switch
-  // rather than sitting there inert — and a saved form would have cleared it anyway.
-  const [normalizing, setNormalizing] = useState(false);
-  const [graphql, setGraphql] = useState(false);
-  /** Whether this API also lets an account holder connect theirs, beside whatever it presents. */
-  const [connectable, setConnectable] = useState(false);
   const [formError, setFormError] = useState('');
   const [error, setError] = useState('');
 
@@ -97,7 +76,6 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
   const createCredential = useCreateCredential();
   const updateCredential = useUpdateCredential();
   const deleteCredential = useDeleteCredential();
-  const updateProvider = useUpdateProvider();
   const deleteProvider = useDeleteProvider();
   const pingProvider = usePingProvider();
 
@@ -117,14 +95,6 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
   function close() {
     setPanel(null);
     setFormError('');
-  }
-
-  function openApi(provider: Provider) {
-    setStrategy(provider.authType);
-    setNormalizing(provider.normalizeJson ?? false);
-    setGraphql(Boolean(provider.graphqlPath));
-    setConnectable(Boolean(provider.connectionAuthorizationUrl));
-    setPanel({ kind: 'api', provider });
   }
 
   /** The contract the API states, which a credential only ever repeats back. */
@@ -182,52 +152,6 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
       } else {
         await createCredential.mutateAsync(credentialInput(provider, form));
       }
-      close();
-    } catch (x) {
-      setFormError(describe(x));
-    }
-  }
-
-  async function submitApi(e: FormEvent<HTMLFormElement>) {
-    const form = new FormData(e.currentTarget);
-    if (!panel || panel.kind !== 'api') return;
-    const input = {
-      name: String(form.get('name') ?? ''),
-      slug: String(form.get('slug') ?? ''),
-      baseUrl: String(form.get('baseUrl') ?? ''),
-      enabled: form.get('enabled') === 'on',
-      // Sent on every save. Omitting it read as no, so saving anything else on a local destination
-      // unset it and the address it already carried was refused.
-      allowPrivateDestination: form.get('allowPrivateDestination') === 'on',
-      cacheEnabled: form.get('cacheEnabled') === 'on',
-      cacheTtlSeconds: Number(form.get('cacheTtlSeconds') || 0),
-      normalizeJson: form.get('normalizeJson') === 'on',
-      jsonArrayPaths: String(form.get('jsonArrayPaths') ?? '') || null,
-      // Sent on every save, like the switch above: omitted reads as "not a GraphQL API".
-      graphqlPath: graphql ? String(form.get('graphqlPath') ?? '') || null : null,
-      graphqlMaxDepth: graphql ? Number(form.get('graphqlMaxDepth') || 0) : 0,
-      graphqlMaxAliases: graphql ? Number(form.get('graphqlMaxAliases') || 0) : 0,
-      rateLimitPerMinute: Number(form.get('rateLimitPerMinute') || 0),
-      rateLimitBurst: Number(form.get('rateLimitBurst') || 0),
-      authType: strategy,
-      headerName: String(form.get('headerName') ?? '') || null,
-      queryParameter: String(form.get('queryParameter') ?? '') || null,
-      tokenUrl: String(form.get('tokenUrl') ?? '') || null,
-      tokenScopes: String(form.get('tokenScopes') ?? '') || null,
-      tokenClientAuth: (String(form.get('tokenClientAuth') ?? '') || null) as TokenClientAuth | null,
-      clientIdHeader: String(form.get('clientIdHeader') ?? '') || null,
-      // Cleared as a block when the box is unticked, so withdrawing a connection is one gesture
-      // rather than three emptied fields the backend would refuse as half a flow.
-      connectionAuthorizationUrl: connectable ? String(form.get('connectionAuthorizationUrl') ?? '') || null : null,
-      connectionTokenUrl: connectable ? String(form.get('connectionTokenUrl') ?? '') || null : null,
-      connectionScopes: connectable ? String(form.get('connectionScopes') ?? '') || null : null,
-      connectionClientAuth: connectable
-        ? ((String(form.get('connectionClientAuth') ?? '') || null) as TokenClientAuth | null)
-        : null,
-    };
-    setFormError('');
-    try {
-      await updateProvider.mutateAsync({ id: panel.provider.id, input });
       close();
     } catch (x) {
       setFormError(describe(x));
@@ -351,7 +275,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
                     key: 'edit',
                     label: t('credentials.editApi'),
                     group: t('credentials.groupAdmin'),
-                    onSelect: () => openApi(provider),
+                    onSelect: () => setPanel({ kind: 'api', provider }),
                   },
                   {
                     key: 'delete',
@@ -448,77 +372,7 @@ export function CredentialsPage({ identity }: { identity: Identity }) {
         </SidePanel>
       )}
 
-      {panel?.kind === 'api' && (
-        <SidePanel title={t('credentials.editApi')} intro={t('credentials.adminIntro')} onClose={close}>
-          <FormLayout onSubmit={submitApi} submitLabel={t('common.saveChanges')} error={formError}>
-            <Field label={t('providers.fieldName')} name="name" required defaultValue={panel.provider.name} />
-            <Field label={t('providers.fieldSlug')} name="slug" required data defaultValue={panel.provider.slug} />
-            <Field label={t('providers.fieldBaseUrl')} name="baseUrl" required data defaultValue={panel.provider.baseUrl} />
-            {/*
-              Shown when the deployment offers it, and also whenever this destination already carries
-              it — a deployment that withdraws the option must not leave a field the form silently
-              unsets.
-            */}
-            {(capabilities.data?.privateDestinations || panel.provider.allowPrivateDestination) && (
-              <CheckField
-                label={t('connect.lan')}
-                name="allowPrivateDestination"
-                defaultChecked={panel.provider.allowPrivateDestination}
-                hint={t('connect.lanHint')}
-              />
-            )}
-            <SelectField
-              label={t('credentials.fieldStrategy')}
-              name="authType"
-              value={strategy}
-              onChange={(event) => setStrategy(event.target.value as AuthType)}
-              options={STRATEGIES.map((value) => ({ value, label: tEnum('authType', value) }))}
-            />
-            {strategy === 'API_KEY_HEADER' && <Field label={t('credentials.fieldHeader')} name="headerName" required data defaultValue={panel.provider.headerName} />}
-            {strategy === 'API_KEY_QUERY' && <Field label={t('credentials.fieldQueryParameter')} name="queryParameter" required data defaultValue={panel.provider.queryParameter} />}
-            {strategy === 'OAUTH2_CLIENT_CREDENTIALS' && (
-              <>
-                <Field label={t('credentials.fieldTokenUrl')} name="tokenUrl" required data defaultValue={panel.provider.tokenUrl} />
-                <Field label={t('credentials.fieldTokenScopes')} name="tokenScopes" data defaultValue={panel.provider.tokenScopes} />
-                <SelectField label={t('credentials.fieldTokenClientAuth')} name="tokenClientAuth" defaultValue={panel.provider.tokenClientAuth ?? 'BASIC'} options={[{ value: 'BASIC', label: t('credentials.tokenClientAuthBasic') }, { value: 'POST', label: t('credentials.tokenClientAuthPost') }]} />
-                <Field label={t('credentials.fieldClientIdHeader')} name="clientIdHeader" data autoComplete="off" placeholder="Client-Id" defaultValue={panel.provider.clientIdHeader} hint={t('credentials.clientIdHeaderHint')} />
-              </>
-            )}
-            <CheckField
-              label={t('providers.connectionLabel')}
-              name="connectable"
-              hint={t('providers.connectionHint')}
-              checked={connectable}
-              onChange={(event) => setConnectable(event.target.checked)}
-            />
-            {connectable && (
-              <>
-                <Field label={t('credentials.fieldAuthorizationUrl')} name="connectionAuthorizationUrl" required data defaultValue={panel.provider.connectionAuthorizationUrl} hint={t('credentials.authorizationUrlHint')} />
-                <Field label={t('credentials.fieldTokenUrl')} name="connectionTokenUrl" required data defaultValue={panel.provider.connectionTokenUrl} />
-                <Field label={t('credentials.fieldTokenScopes')} name="connectionScopes" data defaultValue={panel.provider.connectionScopes} hint={t('credentials.tokenScopesHintUser')} />
-                <SelectField label={t('credentials.fieldTokenClientAuth')} name="connectionClientAuth" defaultValue={panel.provider.connectionClientAuth ?? 'BASIC'} options={[{ value: 'BASIC', label: t('credentials.tokenClientAuthBasic') }, { value: 'POST', label: t('credentials.tokenClientAuthPost') }]} />
-              </>
-            )}
-            <CheckField label={t('providers.cacheLabel')} name="cacheEnabled" defaultChecked={panel.provider.cacheEnabled ?? true} />
-            <Field label={t('providers.cacheTtlLabel')} name="cacheTtlSeconds" type="number" min={0} defaultValue={panel.provider.cacheTtlSeconds ?? 0} />
-            <CheckField label={t('providers.normalizeLabel')} name="normalizeJson" defaultChecked={panel.provider.normalizeJson ?? false} onChange={(e) => setNormalizing(e.currentTarget.checked)} hint={t('providers.normalizeHint')} />
-            {normalizing && (
-              <Field label={t('providers.arrayPathsLabel')} name="jsonArrayPaths" data autoComplete="off" maxLength={1000} placeholder="MediaContainer.Directory, Location" defaultValue={panel.provider.jsonArrayPaths ?? ''} hint={t('providers.arrayPathsHint')} />
-            )}
-            <CheckField label={t('providers.graphqlLabel')} name="graphql" defaultChecked={Boolean(panel.provider.graphqlPath)} onChange={(e) => setGraphql(e.currentTarget.checked)} hint={t('providers.graphqlHint')} />
-            {graphql && (
-              <>
-                <Field label={t('providers.graphqlPathLabel')} name="graphqlPath" required data autoComplete="off" maxLength={200} placeholder="/graphql" defaultValue={panel.provider.graphqlPath ?? '/graphql'} hint={t('providers.graphqlPathHint')} />
-                <Field label={t('providers.graphqlDepthLabel')} name="graphqlMaxDepth" type="number" min={0} max={100} data defaultValue={panel.provider.graphqlMaxDepth ?? 0} hint={t('providers.graphqlDepthHint')} />
-                <Field label={t('providers.graphqlAliasesLabel')} name="graphqlMaxAliases" type="number" min={0} max={10000} data defaultValue={panel.provider.graphqlMaxAliases ?? 0} hint={t('providers.graphqlAliasesHint')} />
-              </>
-            )}
-            <Field label={t('providers.rateLimitLabel')} name="rateLimitPerMinute" type="number" min={0} defaultValue={panel.provider.rateLimitPerMinute ?? 0} />
-            <Field label={t('providers.burstLabel')} name="rateLimitBurst" type="number" min={0} defaultValue={panel.provider.rateLimitBurst ?? 0} />
-            <CheckField label={t('providers.enabledLabel')} name="enabled" defaultChecked={panel.provider.enabled ?? true} />
-          </FormLayout>
-        </SidePanel>
-      )}
+      {panel?.kind === 'api' && <ProviderEditPanel provider={panel.provider} onClose={close} />}
 
       {connecting && (
         <ConnectFlow
