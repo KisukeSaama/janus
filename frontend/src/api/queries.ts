@@ -4,6 +4,7 @@ import { api, del, download, post, put } from './client';
 import type {
   Account,
   AccountInput,
+  AgentFile,
   Application,
   ApplicationInput,
   AuditPage,
@@ -13,6 +14,10 @@ import type {
   GrantInput,
   Identity,
   IssuedApplication,
+  McpAuthorization,
+  McpConnection,
+  McpDecision,
+  McpServer,
   NotificationFeed,
   Provider,
   ProviderCapabilities,
@@ -50,6 +55,15 @@ export const keys = {
   oauthCallback: ['oauth-callback'] as const,
   session: ['session'] as const,
   accounts: ['accounts'] as const,
+  /**
+   * The coding agent's file, per calling service. The server writes it from the records every other
+   * key here names, so any write to those makes every copy of it stale; see `invalidate`.
+   */
+  agentFile: ['agent-file'] as const,
+  agentFileFor: (applicationId?: string) => ['agent-file', applicationId ?? ''] as const,
+  mcpServer: ['mcp-server'] as const,
+  mcpConnections: ['mcp-connections'] as const,
+  mcpAuthorization: (request: string) => ['mcp-authorization', request] as const,
   audit: (page: number, size: number, filter: AuditFilter) =>
     ['audit', page, size, filter.outcome ?? '', filter.from ?? '', filter.to ?? ''] as const,
 };
@@ -196,10 +210,15 @@ export function useTraffic() {
 
 /* ── What a change makes stale ─────────────────────────────────────────── */
 
-/** Anything that touches a record also writes an audit event, so the activity stream follows. */
+/**
+ * Anything that touches a record also writes an audit event, so the activity stream follows. The
+ * coding agent's file follows too: it is a rendering of services, APIs, secrets and grants together,
+ * and marking it stale costs nothing while nobody has it on screen.
+ */
 function invalidate(client: QueryClient, ...touched: readonly (readonly unknown[])[]) {
   for (const key of touched) void client.invalidateQueries({ queryKey: key });
   void client.invalidateQueries({ queryKey: ['audit'] });
+  void client.invalidateQueries({ queryKey: keys.agentFile });
 }
 
 export function useCreateApplication() {
@@ -431,5 +450,87 @@ export function useTransferRecords() {
       post<{ services: number; apis: number }>(`/accounts/${from}/transfer?to=${to}`),
     onSuccess: () =>
       invalidate(client, keys.accounts, keys.applications, keys.providers, keys.credentials, keys.grants),
+  });
+}
+
+/* ── The coding agent's file, and the assistants that act over MCP ──────── */
+
+/**
+ * `JANUS.md` for one calling service, or the placeholder file when none is named.
+ *
+ * Written by the server rather than here, so the file a person downloads and the file an assistant
+ * fetches over MCP are the same file, and both carry the address Janus is configured to answer on
+ * rather than whichever one this console happened to be opened at. The previous file stays on screen
+ * while the next service's loads, so the page does not collapse between two choices.
+ */
+export function useAgentFile(applicationId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: keys.agentFileFor(applicationId),
+    queryFn: () => {
+      const query = applicationId ? `?${new URLSearchParams({ applicationId })}` : '';
+      return api<AgentFile>(`/agent-file${query}`);
+    },
+    enabled,
+    placeholderData: (previous) => previous,
+    staleTime: RECORD_STALE_MS,
+  });
+}
+
+/** Where the MCP endpoint answers. Configuration, like the OAuth callback: asked once per session. */
+export function useMcpServer() {
+  return useQuery({
+    queryKey: keys.mcpServer,
+    queryFn: () => api<McpServer>('/mcp/server'),
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * One pending authorization request, read by the consent screen.
+ *
+ * Asked once and never again. A request is decided exactly once, so a refetch on window focus after
+ * the decision went out would come back 404 and flip the screen to "expired" under the reader in the
+ * instant before the browser leaves. A 404 is an answer rather than a blip, so nothing is retried.
+ */
+export function useMcpAuthorization(request: string) {
+  return useQuery({
+    queryKey: keys.mcpAuthorization(request),
+    queryFn: () => api<McpAuthorization>(`/mcp/authorizations/${encodeURIComponent(request)}`),
+    enabled: request !== '',
+    retry: false,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
+ * Approving or refusing a request. Both answer with the address the browser must go to next, because
+ * the client is owed an answer either way; following it is the screen's job, not the cache's.
+ */
+export function useDecideMcpAuthorization() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ request, approve }: { request: string; approve: boolean }) =>
+      post<McpDecision>(`/mcp/authorizations/${encodeURIComponent(request)}/${approve ? 'approve' : 'deny'}`),
+    onSuccess: (_, { approve }) => {
+      if (approve) void client.invalidateQueries({ queryKey: keys.mcpConnections });
+    },
+  });
+}
+
+/** The assistants this account has let in. Its own only: nobody revokes somebody else's. */
+export function useMcpConnections() {
+  return useQuery({
+    queryKey: keys.mcpConnections,
+    queryFn: () => api<McpConnection[]>('/mcp/connections'),
+    staleTime: RECORD_STALE_MS,
+  });
+}
+
+export function useRevokeMcpConnection() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => del(`/mcp/connections/${encodeURIComponent(id)}`),
+    onSuccess: () => invalidate(client, keys.mcpConnections),
   });
 }

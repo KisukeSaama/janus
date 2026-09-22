@@ -1,13 +1,14 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState } from 'react';
 import { Download } from 'lucide-react';
 
-import { useApplications, useCredentials, useGrants, useProviders } from '../../api';
-import { PageHead } from '../../components';
+import { useAgentFile, useApplications } from '../../api';
+import { Notice, PageHead } from '../../components';
 import { useI18n } from '../../i18n';
-import { buildConnections } from '../../lib/connections';
+import { useErrorMessage } from '../../lib/errors';
+import { toPath } from '../../app/routes';
 
-import { agentFile, AGENT_FILE_NAME, AGENT_PLACEHOLDER, type AgentApi, type AgentTarget } from './agentFile';
-import { Bullet, Note, prose, Steps } from './parts';
+import { AGENT_FILE_NAME } from './agentFile';
+import { Bullet, Note, prose, Section, Steps } from './parts';
 
 /**
  * The page for the developer whose next line of code will be written by an agent.
@@ -23,84 +24,42 @@ import { Bullet, Note, prose, Steps } from './parts';
  *
  * It is written for one calling service, because that is what a repository is: one application id,
  * and the APIs that service is allowed to reach. Choosing the service is therefore the only question
- * this page asks.
+ * this page asks. The file itself is the server's to write: the same one an assistant connected over
+ * MCP fetches for itself, so the two can never disagree.
  */
-
-type Service = { id: string; name: string; apis: AgentApi[] };
-
-export function AgentsPage() {
+export function AgentsPage({ onOpenMcp }: { onOpenMcp: () => void }) {
   const { t, tc, formatNumber } = useI18n();
+  const describe = useErrorMessage();
 
-  // The same four queries every other page reads, so this one costs no request of its own.
-  const grants = useGrants();
+  // The services list every other page reads; the file itself is one request per service chosen.
   const applications = useApplications();
-  const providers = useProviders();
-  const credentials = useCredentials();
 
-  const services = useMemo<Service[]>(() => {
-    const connections = buildConnections(
-      grants.data ?? [],
-      applications.data ?? [],
-      providers.data ?? [],
-      credentials.data ?? [],
-    );
-
-    const byService = new Map<string, Service>();
-    for (const c of connections) {
-      const service = byService.get(c.grant.applicationId) ?? {
-        id: c.grant.applicationId,
-        name: c.grant.applicationName,
-        apis: [],
-      };
-      // Only what would be forwarded right now. An API behind a disabled record is one the file
-      // would promise and the gateway would refuse.
-      if (c.live && c.provider) {
-        service.apis.push({
-          name: c.grant.providerName,
-          slug: c.provider.slug,
-          normalizeJson: c.provider.normalizeJson,
-          // The two things an agent cannot work out from the API's own documentation: how much of it
-          // this service was given, and that some of its endpoints answer for a person instead.
-          pathPrefix: c.grant.pathPrefix,
-          methods: c.grant.methods,
-          connected: Boolean(c.credential?.authorizedAt),
-          graphqlPath: c.provider.graphqlPath,
-          graphqlOperations: c.grant.graphqlOperations ?? [],
-          graphqlRootFields: c.grant.graphqlRootFields ?? [],
-        });
-      }
-      byService.set(service.id, service);
-    }
-
-    return [...byService.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [grants.data, applications.data, providers.data, credentials.data]);
+  const services = useMemo(
+    () => [...(applications.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    [applications.data],
+  );
 
   const [chosen, setChosen] = useState('');
   const service = services.find((s) => s.id === chosen) ?? services[0];
 
-  const target: AgentTarget = service
-    ? {
-        origin: window.location.origin,
-        serviceName: service.name,
-        applicationId: service.id,
-        apis: [...service.apis].sort((a, b) => a.name.localeCompare(b.name)),
-      }
-    : AGENT_PLACEHOLDER;
-
-  const file = agentFile(target);
-  const apiCount = target.apis.length;
+  // Held back until the services have landed, so the placeholder file is not fetched on the way to
+  // the real one. With no service at all, the placeholder is the file.
+  const agentFile = useAgentFile(service?.id, !applications.isPending);
+  const file = agentFile.data;
+  const apiCount = file?.apiCount ?? 0;
 
   return (
     <>
       <PageHead section={t('nav.reference')} title={t('agents.title')} intro={t('agents.lead')} />
+      {agentFile.isError && <Notice>{describe(agentFile.error)}</Notice>}
 
       <div className="max-w-[72ch] space-y-10">
         {/* Which service the file speaks for. Held open at one row so the page does not reflow under
-            the reader when the four queries land. */}
+            the reader when the services land. */}
         <div className="panel flex min-h-[3.75rem] flex-col gap-x-4 gap-y-2 px-4 py-3 sm:flex-row sm:items-center">
           <p className="stamp shrink-0 text-text-2">{t('agents.for')}</p>
           {services.length === 0 ? (
-            <p className="text-sm text-text-2">{grants.isPending ? '' : t('agents.noService')}</p>
+            <p className="text-sm text-text-2">{applications.isPending ? '' : t('agents.noService')}</p>
           ) : services.length === 1 ? (
             <p className="text-sm">{services[0].name}</p>
           ) : (
@@ -123,17 +82,41 @@ export function AgentsPage() {
         <section className="panel px-4 py-4 sm:px-5">
           <div className="flex flex-col gap-x-6 gap-y-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
-              <p className="data text-sm font-medium">{AGENT_FILE_NAME}</p>
-              <p className="mt-1 text-sm text-text-2">
-                {apiCount === 0 ? t('agents.fileEmpty') : tc('agents.fileApis', apiCount)}
+              <p className="data text-sm font-medium">{file?.fileName ?? AGENT_FILE_NAME}</p>
+              {/* Held at its line while the file loads, so the button beside it does not jump. */}
+              <p className="mt-1 min-h-5 text-sm text-text-2">
+                {!file ? '' : apiCount === 0 ? t('agents.fileEmpty') : tc('agents.fileApis', apiCount)}
               </p>
             </div>
-            <button className="btn btn-primary shrink-0" onClick={() => download(AGENT_FILE_NAME, file)}>
+            <button
+              className="btn btn-primary shrink-0"
+              disabled={!file}
+              onClick={() => file && download(file.fileName, file.content)}
+            >
               <Download size={15} strokeWidth={2.25} />
               {t('agents.download')}
             </button>
           </div>
-          <Note>{t('agents.fileNote', { tokens: formatNumber(estimateTokens(file)) })}</Note>
+          {file && <Note>{t('agents.fileNote', { tokens: formatNumber(estimateTokens(file.content)) })}</Note>}
+
+          {/*
+            The same file, without the download: an assistant connected over MCP asks for it by name.
+            A real link, so it can be opened in a new tab, and the console's own navigator on a click.
+          */}
+          <p className="mt-3.5 max-w-[72ch] border-t border-line pt-3.5 text-sm text-text-2">
+            {prose(t('agents.mcpNote'))}{' '}
+            <a
+              href={toPath({ page: 'mcp' })}
+              className="text-accent-text underline underline-offset-2 hover:no-underline"
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                e.preventDefault();
+                onOpenMcp();
+              }}
+            >
+              {t('agents.mcpLink')}
+            </a>
+          </p>
         </section>
 
         <Section title={t('agents.holds.title')} lead={t('agents.holds.lead')}>
@@ -175,16 +158,6 @@ export function AgentsPage() {
         </Section>
       </div>
     </>
-  );
-}
-
-function Section({ title, lead, children }: { title: string; lead: string; children: ReactNode }) {
-  return (
-    <section>
-      <h2 className="border-t border-line pt-6 text-lg font-semibold tracking-title">{title}</h2>
-      <p className="mb-5 mt-2 max-w-[68ch] text-sm text-text-2">{prose(lead)}</p>
-      {children}
-    </section>
   );
 }
 

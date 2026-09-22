@@ -1,0 +1,222 @@
+{
+  "shapes": {
+    "api": {
+      "required": ["name", "slug", "baseUrl", "authType"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 120, "description": "Display name, e.g. \"Spotify\"." },
+        "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,78}[a-z0-9]$", "description": "Gateway path segment: callers reach the API at /gateway/<slug>/…. Lowercase letters, digits, hyphens; unique." },
+        "baseUrl": { "type": "string", "maxLength": 500, "description": "The upstream's base address, e.g. https://api.spotify.com. HTTPS, public address unless allowPrivateDestination." },
+        "enabled": { "type": "boolean", "description": "Whether the gateway forwards to it. Defaults to true on create." },
+        "authType": { "type": "string", "enum": ["NONE", "BEARER", "API_KEY_HEADER", "API_KEY_QUERY", "BASIC", "OAUTH2_CLIENT_CREDENTIALS", "HMAC_SIGNATURE"], "description": "How the upstream expects its secret. The secret value itself is never set here: it is stored by a person in the Janus console." },
+        "headerName": { "type": ["string", "null"], "maxLength": 100, "description": "Header carrying the key, for API_KEY_HEADER (required) or HMAC_SIGNATURE (optional key header)." },
+        "queryParameter": { "type": ["string", "null"], "maxLength": 100, "description": "Query parameter carrying the key, for API_KEY_QUERY." },
+        "tokenUrl": { "type": ["string", "null"], "maxLength": 500, "description": "Token endpoint, for OAUTH2_CLIENT_CREDENTIALS." },
+        "tokenScopes": { "type": ["string", "null"], "maxLength": 500, "description": "Space-separated scopes requested at the token endpoint." },
+        "tokenClientAuth": { "type": ["string", "null"], "enum": ["BASIC", "POST", null], "description": "How Janus presents its client credentials at the token endpoint. Default BASIC." },
+        "clientIdHeader": { "type": ["string", "null"], "maxLength": 100, "description": "Header that repeats the client id beside the token, for APIs such as Twitch (Client-Id)." },
+        "signatureAlgorithm": { "type": ["string", "null"], "enum": ["HMAC_SHA256", "HMAC_SHA512", null], "description": "HMAC_SIGNATURE only." },
+        "signatureTemplate": { "type": ["string", "null"], "maxLength": 500, "description": "HMAC_SIGNATURE only: what is signed, from {method} {path} {query} {body} {timestamp} {timestamp_ms}, e.g. {timestamp}{method}{path}{body}." },
+        "signatureEncoding": { "type": ["string", "null"], "enum": ["HEX", "BASE64", null], "description": "HMAC_SIGNATURE only." },
+        "signatureHeader": { "type": ["string", "null"], "maxLength": 100, "description": "HMAC_SIGNATURE: header the signature is sent in." },
+        "signatureParameter": { "type": ["string", "null"], "maxLength": 100, "description": "HMAC_SIGNATURE: query parameter the signature is sent in, instead of a header." },
+        "timestampHeader": { "type": ["string", "null"], "maxLength": 100, "description": "HMAC_SIGNATURE: header carrying the timestamp." },
+        "timestampParameter": { "type": ["string", "null"], "maxLength": 100, "description": "HMAC_SIGNATURE: query parameter carrying the timestamp." },
+        "cacheEnabled": { "type": "boolean", "description": "Reuse responses the upstream marks reusable. Default true." },
+        "cacheTtlSeconds": { "type": "integer", "minimum": 0, "maximum": 86400, "description": "Freshness assumed when the upstream states none; 0 leaves it to the upstream." },
+        "rateLimitPerMinute": { "type": "integer", "minimum": 0, "maximum": 1000000, "description": "Outbound ceiling for this API, all callers together; 0 is none." },
+        "rateLimitBurst": { "type": "integer", "minimum": 0, "maximum": 100000, "description": "How much of the allowance may be spent at once; 0 derives a tenth." },
+        "allowPrivateDestination": { "type": "boolean", "description": "Register a LAN service (media server, NAS…). Refused unless the deployment offers it: see whoami.privateDestinations." },
+        "normalizeJson": { "type": "boolean", "description": "Convert XML, form-encoded and NDJSON responses to JSON for callers." },
+        "jsonArrayPaths": { "type": ["string", "null"], "maxLength": 1000, "description": "With normalizeJson: comma-separated element names or dotted paths that must always be arrays." },
+        "connectionAuthorizationUrl": { "type": ["string", "null"], "maxLength": 500, "description": "Account connection (a person's OAuth consent): the provider's authorisation page. Set together with connectionTokenUrl, or neither." },
+        "connectionTokenUrl": { "type": ["string", "null"], "maxLength": 500, "description": "Account connection: the provider's token endpoint." },
+        "connectionScopes": { "type": ["string", "null"], "maxLength": 500, "description": "Account connection: space-separated scopes." },
+        "connectionClientAuth": { "type": ["string", "null"], "enum": ["BASIC", "POST", null], "description": "Account connection: how the client authenticates at the token endpoint." },
+        "graphqlPath": { "type": ["string", "null"], "maxLength": 200, "description": "For a GraphQL API: the endpoint path, e.g. /graphql. Null means not a GraphQL API." },
+        "graphqlMaxDepth": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Deepest document accepted; 0 is no limit." },
+        "graphqlMaxAliases": { "type": "integer", "minimum": 0, "maximum": 10000, "description": "Most aliases accepted; 0 is no limit." }
+      }
+    },
+    "app": {
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 120, "description": "Name of the calling service, unique in your registry." },
+        "description": { "type": ["string", "null"], "maxLength": 500 },
+        "enabled": { "type": "boolean", "description": "Whether it may call the gateway. Defaults to true on create." },
+        "allowedOrigins": { "type": "array", "maxItems": 10, "items": { "type": "string", "maxLength": 255 }, "description": "Browser origins allowed to present this service's tokens, e.g. https://app.example.com. Empty means any." }
+      }
+    },
+    "grant": {
+      "required": ["applicationId", "providerId", "credentialId"],
+      "properties": {
+        "applicationId": { "type": "string", "format": "uuid", "description": "The app (calling service) being given access." },
+        "providerId": { "type": "string", "format": "uuid", "description": "The API it may call." },
+        "credentialId": { "type": "string", "format": "uuid", "description": "Which stored credential for that API the gateway presents. See list_credentials; it must belong to the same API." },
+        "enabled": { "type": "boolean", "description": "Defaults to true on create." },
+        "rateLimitPerMinute": { "type": "integer", "minimum": 0, "maximum": 1000000, "description": "What this app may ask of this API per minute; 0 is no ceiling." },
+        "rateLimitBurst": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "pathPrefix": { "type": ["string", "null"], "maxLength": 512, "description": "Only paths under this prefix, e.g. /v1/albums. Null or empty is the whole API." },
+        "methods": { "type": "array", "items": { "type": "string", "enum": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] }, "description": "Methods admitted; empty is all. [\"GET\",\"HEAD\"] makes a read-only grant." },
+        "allowAccountIdentity": { "type": "boolean", "description": "Whether the app may speak for the connected account (X-Janus-Identity: account). Default true." },
+        "graphqlOperations": { "type": "array", "maxItems": 3, "items": { "type": "string", "enum": ["QUERY", "MUTATION", "SUBSCRIPTION"] }, "description": "GraphQL APIs: operation types admitted; empty is all." },
+        "graphqlRootFields": { "type": "array", "maxItems": 50, "items": { "type": "string", "maxLength": 100 }, "description": "GraphQL APIs: root fields admitted; empty is all." }
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "whoami",
+      "title": "Who am I",
+      "description": "The Janus account this assistant acts as, its role (only SUPER_ADMIN and ADMIN may create, change or delete APIs; everyone manages their own apps and grants), and what this deployment allows. Call this first.",
+      "readOnly": true,
+      "inputSchema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "list_apis",
+      "title": "List APIs",
+      "description": "Search the API catalogue (the upstream destinations Janus proxies to, shared by the whole deployment). 'activated' says whether you hold a credential for it.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Matches name or slug." },
+          "page": { "type": "integer", "minimum": 0, "default": 0 },
+          "size": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+        }
+      }
+    },
+    {
+      "name": "get_api",
+      "title": "Get an API",
+      "description": "One API's full configuration, by id or by slug.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "slug": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "create_api",
+      "title": "Register an API",
+      "description": "Register an upstream API in the catalogue (administrators only). This declares where it is and how it expects its secret, not the secret: a person stores the secret in the Janus console afterwards, and no app can call the API until a grant exists.",
+      "shape": "api",
+      "mode": "create"
+    },
+    {
+      "name": "update_api",
+      "title": "Change an API",
+      "description": "Change an API (administrators only). Only the fields you pass change; pass null to clear an optional field. Changing authType or the address affects every caller.",
+      "shape": "api",
+      "mode": "update"
+    },
+    {
+      "name": "delete_api",
+      "title": "Delete an API",
+      "description": "Delete an API with every credential and grant attached to it, for every account (administrators only). Irreversible: confirm with the user first.",
+      "destructive": true,
+      "inputSchema": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "string", "format": "uuid" } }
+      }
+    },
+    {
+      "name": "ping_api",
+      "title": "Ping an API",
+      "description": "Check whether an API's base address answers right now (administrators only). Makes one outbound request.",
+      "readOnly": true,
+      "openWorld": true,
+      "inputSchema": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "string", "format": "uuid" } }
+      }
+    },
+    {
+      "name": "list_apps",
+      "title": "List apps",
+      "description": "Your apps: the calling services that present an application id and API key to the gateway.",
+      "readOnly": true,
+      "inputSchema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "create_app",
+      "title": "Register an app",
+      "description": "Register a calling service. Its API key is NOT returned here, deliberately: keys never pass through an assistant. Tell the user to issue it with 'Rotate key' on the app in the Janus console and put it in the service's secret store as JANUS_API_KEY.",
+      "shape": "app",
+      "mode": "create"
+    },
+    {
+      "name": "update_app",
+      "title": "Change an app",
+      "description": "Change an app. Only the fields you pass change. Disabling it refuses its calls immediately.",
+      "shape": "app",
+      "mode": "update"
+    },
+    {
+      "name": "delete_app",
+      "title": "Delete an app",
+      "description": "Delete an app and its grants; its key stops working immediately. Irreversible: confirm with the user first.",
+      "destructive": true,
+      "inputSchema": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "string", "format": "uuid" } }
+      }
+    },
+    {
+      "name": "list_credentials",
+      "title": "List credentials",
+      "description": "Your stored credentials, as metadata only (which API, how it is sent, whether an account consent is pending, expiry). Secret values are never readable. A grant needs one of these for its API; if none exists, ask the user to add it in the console.",
+      "readOnly": true,
+      "inputSchema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "list_grants",
+      "title": "List grants",
+      "description": "Your grants: which app may call which API, with which credential, and within which limits.",
+      "readOnly": true,
+      "inputSchema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "create_grant",
+      "title": "Grant an app access to an API",
+      "description": "Allow one of your apps to call one API through the gateway, presenting one of your credentials for it. Without a grant the gateway answers 403.",
+      "shape": "grant",
+      "mode": "create"
+    },
+    {
+      "name": "update_grant",
+      "title": "Change a grant",
+      "description": "Change a grant's limits or scope. Only the fields you pass change.",
+      "shape": "grant",
+      "mode": "update"
+    },
+    {
+      "name": "delete_grant",
+      "title": "Revoke a grant",
+      "description": "Remove an app's access to an API; its calls are refused immediately. Confirm with the user first.",
+      "destructive": true,
+      "inputSchema": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "string", "format": "uuid" } }
+      }
+    },
+    {
+      "name": "get_janus_md",
+      "title": "Get JANUS.md",
+      "description": "The JANUS.md instruction file for a calling service: how its code must call APIs through the gateway, and which APIs it may call. Write the returned content verbatim to JANUS.md at the root of that service's repository, and reference it from CLAUDE.md or AGENTS.md (e.g. a line '@JANUS.md'). It never contains a secret. Fetch it again after grants change.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "applicationId": { "type": "string", "format": "uuid", "description": "The app whose repository this is. Omit for a generic template." }
+        }
+      }
+    }
+  ]
+}

@@ -66,8 +66,15 @@ public class AuditService {
      * outcome parameter on purpose: a mutation that fails throws and its transaction rolls back, so
      * the only administrative change there is to record is one that happened.
      */
-    public void recordAdmin(AuditAction action, UUID providerId, String detail) {
+    public void recordAdmin(AuditAction action, UUID providerId, String stated) {
         var actor = scope.signedIn().orElse(null);
+        // An assistant acting over MCP acts as the person who let it in, and is named beside them.
+        String detail = actor == null
+                ? stated
+                : scope.assistant()
+                        .map(assistant ->
+                                (stated == null ? "" : stated + " ") + "(via MCP: " + assistant.clientName() + ")")
+                        .orElse(stated);
         // Nobody signed in means Janus acted on its own — a startup reconciliation, a scheduled
         // sweep. Naming an administrator that did not act would be worse than naming nobody.
         var entry = actor == null

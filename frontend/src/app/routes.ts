@@ -17,7 +17,8 @@ export type Page =
   | 'credentials'
   | 'accounts'
   | 'documentation'
-  | 'agents';
+  | 'agents'
+  | 'mcp';
 
 /** The dashboard carries an optional connection: the record it lists, opened from its list. */
 export type Location =
@@ -32,6 +33,7 @@ const PATHS: Record<Page, string> = {
   accounts: '/accounts',
   documentation: '/documentation',
   agents: '/documentation/ai-coding',
+  mcp: '/documentation/mcp',
 };
 
 /** The title a page prints, and the group it belongs to. Both live here so no view invents its own. */
@@ -43,6 +45,7 @@ export const PAGE_TITLE: Record<Page, MessageKey> = {
   accounts: 'accounts.title',
   documentation: 'docs.title',
   agents: 'agents.title',
+  mcp: 'mcp.title',
 };
 
 export const PAGE_SECTION: Record<Page, MessageKey> = {
@@ -53,6 +56,7 @@ export const PAGE_SECTION: Record<Page, MessageKey> = {
   accounts: 'nav.administration',
   documentation: 'nav.reference',
   agents: 'nav.reference',
+  mcp: 'nav.reference',
 };
 
 /** A connection keeps its own address: it is a record, not a state of the dashboard. */
@@ -70,7 +74,9 @@ export function parsePath(pathname: string): Location {
   if (segments[0] === 'activity') return { page: 'activity' };
   if (segments[0] === 'accounts') return { page: 'accounts' };
   if (segments[0] === 'documentation') {
-    return { page: segments[1] === 'ai-coding' ? 'agents' : 'documentation' };
+    if (segments[1] === 'ai-coding') return { page: 'agents' };
+    if (segments[1] === 'mcp') return { page: 'mcp' };
+    return { page: 'documentation' };
   }
   if (segments[0] === 'registry') {
     const page = segments[1];
@@ -97,8 +103,29 @@ function subscribe(notify: () => void) {
 /** Snapshot has to be referentially stable, so the raw pathname is the store and parsing happens after. */
 const snapshot = () => window.location.pathname;
 
+/**
+ * Where an MCP client's authorization request lands. Deliberately not a `Page`: it is not a place in
+ * the console but a question put to whoever is signed in, answered once, after which the browser
+ * leaves for the client that asked. It is recognised above the console, before any rail is drawn.
+ */
+export const CONSENT_PATH = '/mcp/authorize';
+
+/**
+ * Leaves the console for another site altogether: the one navigation that is not the console's own.
+ * A function of its own so that it is the one place a test stands in for, since a browser's
+ * `location` cannot be replaced from a script.
+ */
+export function leaveFor(url: string) {
+  window.location.assign(url);
+}
+
+/** The raw address, for the one decision taken above the console: whether this is the consent screen. */
+export function usePathname(): string {
+  return useSyncExternalStore(subscribe, snapshot, () => '/');
+}
+
 export function useLocation(): [Location, (to: Location, options?: { replace?: boolean }) => void] {
-  const pathname = useSyncExternalStore(subscribe, snapshot, () => '/');
+  const pathname = usePathname();
 
   const navigate = useCallback((to: Location, options?: { replace?: boolean }) => {
     const path = toPath(to);

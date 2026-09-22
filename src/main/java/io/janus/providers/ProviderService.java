@@ -85,6 +85,18 @@ public class ProviderService {
                 content, result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages());
     }
 
+    /** One catalogue entry, by identifier. Readable by everyone, like the catalogue it belongs to. */
+    @Transactional(readOnly = true)
+    public ProviderResponse get(UUID id) {
+        return ProviderResponse.of(require(id));
+    }
+
+    @Transactional(readOnly = true)
+    public ProviderResponse getBySlug(String slug) {
+        return ProviderResponse.of(
+                repository.findBySlug(slug).orElseThrow(() -> new NotFoundException("Provider not found")));
+    }
+
     @Transactional
     public ProviderResponse create(ProviderRequest request) {
         requireAdministrator();

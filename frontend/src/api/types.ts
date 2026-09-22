@@ -415,3 +415,37 @@ export type AccountInput = {
   /** Sent only when somebody changes their own password, which is the one case that has to prove it. */
   currentPassword?: string | null;
 };
+
+/* ── AI assistants, over MCP ────────────────────────────────────────────── */
+
+/**
+ * One pending request from an MCP client to act as the signed-in account, as the consent screen reads
+ * it. The name is whatever the client registered itself as, so it is a claim rather than an identity;
+ * the redirect is the one thing Janus can vouch for, because that is where the code will be sent.
+ */
+export type McpAuthorization = {
+  clientName: string;
+  redirectUri: string;
+  redirectHost: string;
+  /** Whether the code goes back to a program on this machine rather than to a site somewhere else. */
+  loopback: boolean;
+  expiresAt: string;
+};
+
+/** Where the browser goes next, approved or not: the client is owed an answer either way. */
+export type McpDecision = { redirectUrl: string };
+
+/** An assistant this account has let in, until it is revoked or its grant runs out. */
+export type McpConnection = {
+  id: string;
+  clientName: string;
+  createdAt: string;
+  /** Null until it has made a call. */
+  lastUsedAt: string | null;
+  expiresAt: string;
+};
+
+export type McpServer = { url: string };
+
+/** The coding agent's file, as the server writes it for one calling service. */
+export type AgentFile = { fileName: string; content: string; apiCount: number };

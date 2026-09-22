@@ -1,10 +1,14 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { keys, useSession } from './api';
 import { Console } from './app/Console';
+import { CONSENT_PATH, usePathname } from './app/routes';
 import { SignIn } from './app/SignIn';
 import { isAuthError } from './lib/errors';
+
+// Reached only from an MCP client's authorization request, so it is not in the first bundle.
+const ConsentPage = lazy(() => import('./app/Consent').then((m) => ({ default: m.ConsentPage })));
 
 /**
  * One client for the whole console.
@@ -54,10 +58,24 @@ export default function App() {
  * Whether to show the console or the sign-in screen is the answer to one request, so it is asked as
  * one. The blank first frame is deliberate: a sign-in form that appears for an instant before the
  * session comes back reads as having been signed out.
+ *
+ * An MCP client's authorization request is answered here too, above the console rather than inside
+ * it: the consent screen stands alone, with no rail offering seven other places to go in the middle
+ * of a decision. Signing in does not move the address, so a request that arrived signed out is the
+ * screen that appears the moment the session lands.
  */
 function Gate() {
   const session = useSession();
+  const pathname = usePathname();
 
   if (session.isPending) return <main className="min-h-svh" aria-busy="true" />;
-  return session.data ? <Console identity={session.data} /> : <SignIn />;
+  if (!session.data) return <SignIn />;
+  if (pathname === CONSENT_PATH) {
+    return (
+      <Suspense fallback={<main className="min-h-svh" aria-busy="true" />}>
+        <ConsentPage identity={session.data} />
+      </Suspense>
+    );
+  }
+  return <Console identity={session.data} />;
 }
