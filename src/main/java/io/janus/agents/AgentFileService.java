@@ -1,5 +1,7 @@
 package io.janus.agents;
 
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.UUID;
 
@@ -19,6 +21,10 @@ import io.janus.shared.NotFoundException;
  * <p>Only what would be forwarded is listed. An API behind a disabled grant, service, destination or
  * credential is one the file would promise and the gateway would refuse — checked in the order the
  * gateway checks them, like the console's own view of a connection.
+ *
+ * <p>"Right now" is why the file carries the day it was written: it lands in a repository and is read
+ * on every task thereafter, long after a grant may have been withdrawn, and an agent that cannot see
+ * how old its instructions are has no reason to suspect them.
  */
 @Service
 public class AgentFileService {
@@ -44,7 +50,8 @@ public class AgentFileService {
     /** The file for one service, or the placeholder when none is named. */
     @Transactional(readOnly = true)
     public Rendered render(UUID applicationId) {
-        if (applicationId == null) return rendered(AgentFile.placeholder(origin));
+        var today = LocalDate.now(ZoneOffset.UTC);
+        if (applicationId == null) return rendered(AgentFile.placeholder(origin, today));
         var owner = scope.ownerFilter();
         var application = applications
                 .findOwnedBy(applicationId, owner)
@@ -55,7 +62,8 @@ public class AgentFileService {
                 .map(AgentFileService::api)
                 .sorted(Comparator.comparing(AgentFile.Api::name, String.CASE_INSENSITIVE_ORDER))
                 .toList();
-        return rendered(new AgentFile.Target(origin, application.getName(), applicationId.toString(), apis));
+        return rendered(
+                new AgentFile.Target(origin, application.getName(), applicationId.toString(), apis, today));
     }
 
     private static Rendered rendered(AgentFile.Target target) {

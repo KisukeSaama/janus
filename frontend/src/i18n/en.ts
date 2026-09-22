@@ -61,7 +61,6 @@ export const en = {
     administration: 'Administration',
     documentation: 'Documentation',
     agents: 'AI coding',
-    mcp: 'AI assistants',
   },
   state: {
     label: 'State',
@@ -136,7 +135,7 @@ export const en = {
     abandonDescription: 'Nothing has been created yet. What you have typed here is lost.',
     abandonConfirm: 'Leave',
 
-    s1Title: 'The API you want to call',
+    s1Title: 'Target API',
     s1Lead: 'Janus only ever forwards to this address.',
     apiName: 'What is this API called',
     apiNamePlaceholder: 'Payments',
@@ -149,9 +148,9 @@ export const en = {
     slugLead: 'Your services call this instead of the API.',
     slugEdit: 'Change it',
 
-    s2Title: 'What that API expects',
+    s2Title: 'Authentication',
     s2Lead: 'The contract is shared by the deployment. Each account provides its own key.',
-    s2TitleOpen: 'This API expects nothing',
+    s2TitleOpen: 'No authentication',
     s2LeadOpen: 'Nothing is stored. Everything else still applies: quotas, cache, journal.',
     howSent: 'How the API expects it',
     authBearer: 'Bearer token',
@@ -254,9 +253,9 @@ export const en = {
   },
   /* ── Registering a service, and saying what it reaches ───────────────── */
   service: {
-    s1Title: 'The service that will call',
+    s1Title: 'Calling service',
     s1Lead: 'Its identity at the gateway. It gets a key, shown once.',
-    s2Title: 'Which APIs may it call?',
+    s2Title: 'API access',
     s2Lead: 'Every box ticked is an access rule, revocable afterwards.',
     registerApi: 'Register an API',
     activate: 'Activate',
@@ -289,7 +288,7 @@ export const en = {
   /* ── The dashboard, the console's home ───────────────────────────────── */
   dashboard: {
     title: 'Dashboard',
-    lead: 'What is running, and what needs you.',
+    lead: 'Connection status and pending actions.',
     liveOf: '{live}/{total} live',
     due: 'Coming due',
     dueAll: 'Open the secrets',
@@ -317,25 +316,25 @@ export const en = {
   /* ── One connection, everything about it ─────────────────────────────── */
   detail: {
     subtitle: '{app} calls {api}',
-    lead: 'How to call it, and how to stop it.',
+    lead: 'Request, limits, credentials and revocation.',
     blockedGrant: 'Paused. Nothing is forwarded until you resume it.',
     blockedApplication: '{name} is disabled. Its calls are refused.',
     blockedProvider: '{name} is disabled. Every call answers 404.',
     blockedCredential: '{name} is disabled. Calls are refused before OpenBao is read.',
     fix: 'Fix it in the registry',
 
-    callTitle: 'How to call it',
+    callTitle: 'Request',
     callLead: 'Send this instead of calling the API.',
     endpoint: 'Address',
     identifier: 'Application id',
     example: 'A complete request',
     keyNote: 'Shown once. If lost, rotate it.',
 
-    destinationTitle: 'Where it goes',
+    destinationTitle: 'Destination',
     destinationLead: 'The real address, behind the gateway.',
     destinationEdit: 'Change the destination',
-    quotaTitle: 'How often',
-    quotaLead: 'What this service alone may ask.',
+    quotaTitle: 'Quota',
+    quotaLead: 'The limit for this service alone.',
     quotaEdit: 'Change the quota',
     quotaLabel: 'Requests per minute',
     quotaHint: 'What this service alone may ask of this API. 0 is no ceiling.',
@@ -343,7 +342,7 @@ export const en = {
     burstHint: 'Calls allowed at once. 0 uses a tenth of the limit.',
     quotaValue: '{count}/min',
     quotaNone: 'No limit set',
-    scopeTitle: 'How much of it',
+    scopeTitle: 'Scope',
     scopeLead: 'A ceiling for a key this API cannot narrow itself.',
     scopeEdit: 'Change the scope',
     scopePathLabel: 'Path prefix',
@@ -364,9 +363,9 @@ export const en = {
     scopeGraphqlFieldsHint: 'Comma-separated, e.g. viewer, repository. Empty is every field.',
     scopeGraphqlAllFields: 'Every field',
 
-    openTitle: 'What Janus presents',
+    openTitle: 'Authentication',
     openLead: 'Nothing: this API is open.',
-    secretTitle: 'The secret Janus presents',
+    secretTitle: 'API secret',
     secretLead: 'Held in OpenBao under {ref}, sent as {mode}.',
     secretReplace: 'Replace the secret',
     // Consent, which is the one thing on this page an administrator cannot settle alone.
@@ -385,14 +384,14 @@ export const en = {
     secretNewHint: 'Overwrites OpenBao at once. Cannot be undone.',
     secretSave: 'Replace it',
 
-    keyTitle: 'The key the service holds',
+    keyTitle: 'Service key',
     keyIssued: 'Issued {age}',
     keyRotate: 'Rotate key',
     keyRotateConfirm: 'Confirm rotation',
     keyRotating: 'Rotating',
     keyRotateDescription: 'New key for {name}. The current one stops working.',
 
-    stopTitle: 'Stop it',
+    stopTitle: 'Pause and removal',
     pause: 'Pause',
     pauseConfirm: 'Confirm pause',
     pausing: 'Pausing',
@@ -407,7 +406,7 @@ export const en = {
   /* ── Activity ────────────────────────────────────────────────────────── */
   activity: {
     title: 'Activity',
-    lead: 'Everything that happened at the gateway.',
+    lead: 'Log of calls through the gateway.',
   },
   /* ── The registry, for editing one record at a time ──────────────────── */
   registry: {
@@ -654,7 +653,7 @@ export const en = {
    */
   docs: {
     title: 'Documentation',
-    lead: 'How a service calls an API through Janus.',
+    lead: 'Integrating a service with an API through Janus.',
     onThisPage: 'On this page',
     use: {
       label: 'Examples use',
@@ -669,7 +668,7 @@ export const en = {
       note: 'Method, path, query, body, and response are unchanged. There is no SDK to install.',
     },
     need: {
-      title: 'What you need',
+      title: 'Prerequisites',
       lead: 'Three values, all on the connection page.',
       address: 'Gateway address',
       addressNote: 'Replaces the API’s own address in your code.',
@@ -691,7 +690,7 @@ export const en = {
       note: 'One client per service, one key per service. The key belongs in your secret store, never in the repository.',
     },
     call: {
-      title: 'What you may call',
+      title: 'Access scope',
       lead: 'A connection opens the whole API.',
       pathTerm: 'The path',
       pathNote: '`{gateway}/v1/orders` reaches the API at `/v1/orders`. Janus keeps no list of allowed paths.',
@@ -722,8 +721,8 @@ export const en = {
       note: 'A refused exchange answers RFC 6749 JSON, not `problem+json`.',
     },
     handled: {
-      title: 'What Janus already does',
-      lead: 'Reuse, allowances, retries. Each response states what happened.',
+      title: 'Caching, quotas and retries',
+      lead: 'Already handled by Janus. Each response states what happened.',
       cache: '`HIT`, `MISS`, `REVALIDATED`, `STALE`, `COALESCED`, or `BYPASS`.',
       identity: '`app` or `account`: whom the call spoke for. Send `X-Janus-Identity` on every call to an API that has both. Leaving it off works, but costs a round trip and is never applied to a refused `POST`.',
       age: 'Seconds since the response served to you was fetched.',
@@ -739,7 +738,7 @@ export const en = {
       timeout: 'Janus waits 30 seconds for the API, so give your own client a little more than that.',
     },
     fail: {
-      title: 'When a call fails',
+      title: 'Errors',
       lead: 'Only Janus answers `application/problem+json`, with the reason in `detail`.',
       s400: 'The path was refused before routing: a dot segment, a `//`, or an encoded separator.',
       s401: 'The credentials are missing, malformed, wrong, or presented from an origin the service did not declare. Repeated failures from one address are blocked for a while.',
@@ -753,7 +752,7 @@ export const en = {
         'Log `X-Janus-Correlation-Id` beside your own errors. The same identifier is on the event under Activity, with the reason Janus recorded.',
     },
     sound: {
-      title: 'Keeping it sound',
+      title: 'Best practices',
       lead: 'Six habits that keep a connection revocable.',
       one: 'One key per service. A key two services share cannot be revoked for one of them.',
       narrow: 'Narrow the secret at the API, and the connection here when the API has no scopes to give. A path prefix and a set of methods are what a key that cannot be narrowed at the source still admits.',
@@ -763,35 +762,44 @@ export const en = {
       environments: 'One Janus per environment. The address you call decides which environment you are in.',
     },
   },
-  /* ── The file a coding agent reads ───────────────────────────────────────
-   * The page is read once, to fetch a file; the file itself is English whatever this dictionary says,
-   * because it is read by a model, not by the operator.
+  /* ── AI coding: the file a coding agent reads, and the console handed to an assistant ──
+   * One page, two directions, and the page's first job is to say which is which. The file itself is
+   * English whatever this dictionary says, because it is read by a model, not by the operator.
    */
   agents: {
     title: 'AI coding',
-    lead: 'A file for your repository: your coding agent calls your APIs through Janus.',
+    lead: 'Two ways an AI agent works with Janus. Use either, or both.',
+    split: {
+      fileWhere: 'In your repository',
+      file: 'Your coding agent writes code that calls your APIs through the gateway, and never holds their secrets.',
+      mcpWhere: 'In this console',
+      mcp: 'Your assistant registers APIs and services and grants access, as you, instead of you filling in the forms.',
+      bridge: 'They meet at one tool: an assistant connected over MCP fetches the file itself with `get_janus_md`.',
+    },
+    file: {
+      title: 'The JANUS.md file',
+      lead: 'Written for one service: its id, and the APIs it may call today.',
+    },
     for: 'File for',
     noService: 'No service is registered yet, so the file carries sample values.',
     download: 'Download JANUS.md',
     fileEmpty: 'No API reachable yet — the file says how to ask for one.',
     'fileApis#one': 'One API, with the gateway path it answers on.',
     'fileApis#other': '{count} APIs, with the gateway path each one answers on.',
-    fileNote: 'English, about {tokens} tokens. It carries the gateway address and the application id; never the key.',
-    mcpNote: 'An assistant connected over MCP fetches this file itself, with `get_janus_md`, and writes it into the repository.',
-    mcpLink: 'Connect an assistant',
+    fileNote: 'English, about {tokens} tokens, dated the day it is written. It carries the gateway address and the application id; never the key.',
     holds: {
-      title: 'What it tells the agent',
-      lead: 'What it cannot read from your repository.',
+      title: 'File contents',
+      lead: 'The context your repository does not give the agent.',
       gateway:
         'Calls go to `/gateway/<api>` with two headers, and this project never holds the API’s own secret.',
       routes: 'Which APIs this service may call, and the gateway address each one answers on.',
       handled:
         'What not to build: Janus already caches, retries, throttles, and renews OAuth2 tokens. The agent reads the headers instead of writing that code.',
       errors: 'How to tell a refusal by Janus from a failure of the API, and what each status means.',
-      missing: 'What to ask you for when the API it needs is not connected yet — instead of installing an SDK and asking for a client secret.',
+      missing: 'What to do when the API it needs is not connected yet: register it over MCP with your agreement, or ask you — never install an SDK and ask for a client secret.',
     },
     place: {
-      title: 'Where it goes',
+      title: 'Location',
       lead: 'At the root of the repository, named as downloaded: the agent finds it by name.',
       step1: 'Drop `JANUS.md` at the root and commit it.',
       step2: 'Point your agent at it: `@JANUS.md` in `CLAUDE.md`, or a line in `AGENTS.md`.',
@@ -799,18 +807,20 @@ export const en = {
       note: 'Download it again after connecting a new API: the APIs it lists are the ones connected today.',
     },
     ask: {
-      title: 'Then just ask',
+      title: 'Usage',
       lead: 'The task in your own words. The file supplies the rest.',
       exampleLabel: 'What you type',
       example: '“Fetch the current user’s playlists from Spotify.”',
       note: 'The agent calls the gateway, sends the two headers, and stops to ask you if Spotify is not connected yet.',
     },
-    safe: {
-      title: 'What it does not carry',
-      lead: 'The file is committed, so it holds nothing that could not be.',
-      key: 'No key. The agent reads it from the environment, and never writes it into a file.',
-      id: 'The application id is in it and is not a secret: alone, it opens nothing.',
-      stale: 'The list goes stale rather than wrong. A call to an API not on it is refused by Janus, not by the file.',
+    never: {
+      title: 'Secrets and keys',
+      lead: 'The boundary Janus holds for your services, it holds for the file and the assistant alike.',
+      key: 'The file carries no key. The agent reads `JANUS_API_KEY` from the environment and never writes it into a file.',
+      id: 'The application id is in the file and is not a secret: alone, it opens nothing.',
+      secrets: 'The assistant never reads a secret: names, APIs and dates, never a value. Values go to the vault and stay there.',
+      keys: 'The assistant never receives a service’s key. A service it registers comes back without one: issue it from Registry → Applications.',
+      stale: 'The file goes stale rather than wrong. A call to an API no longer granted is refused by Janus, and the agent is told to fetch a fresh copy, not to work around it.',
     },
   },
   /* ── An AI assistant let into the console, over MCP ──────────────────────
@@ -818,13 +828,11 @@ export const en = {
    * never sees. The client's name is its own claim, so the copy never presents it as a fact.
    */
   mcp: {
-    title: 'AI assistants',
-    lead: 'Let Claude or another assistant set up APIs, services and access for you, over MCP.',
+    title: 'MCP server',
+    lead: 'Your assistant signs in through your browser, you approve it as yourself, and from then on it acts with your role — recorded in the activity log under your name.',
     serverLabel: 'MCP server address',
-    serverNote: 'The assistant signs in through your browser: you approve it here, as yourself, and can revoke it at any time.',
+    serverNote: 'Give it this address. You can revoke it at any time, below.',
     setup: {
-      title: 'Connect an assistant',
-      lead: 'Give it the address above. It opens your browser to ask for your approval.',
       codeTitle: 'Claude Code',
       codeLabel: 'In a terminal',
       codeNote: 'Then run `/mcp` in Claude Code and choose `janus` to sign in.',
@@ -836,8 +844,7 @@ export const en = {
       other: 'Any MCP client that speaks Streamable HTTP with OAuth sign-in: give it the server address, and it sends you here to approve.',
     },
     can: {
-      title: 'What it can do',
-      lead: 'Whatever you could do in this console, as you, and recorded in the activity log under your name.',
+      title: 'Permissions',
       apisAdmin: 'List, register, change and delete APIs in the catalogue.',
       apisUser: 'List the APIs in the catalogue. Registering or changing one is for administrators.',
       services: 'List, register, change and delete your services.',
@@ -846,18 +853,11 @@ export const en = {
       ping: 'Check whether an API answers.',
       file: 'Fetch a service’s `JANUS.md` with `get_janus_md`, and write it into the repository it works in.',
     },
-    never: {
-      title: 'What it can never do',
-      lead: 'The boundary Janus holds for your services, it holds for the assistant too.',
-      secrets: 'Read a secret. Values go to the vault and never come back out.',
-      keys: 'Receive a service’s API key. Keys are issued and rotated here, in the console, and nowhere else.',
-      created: 'A service it registers comes back without its key: issue one from Registry → Applications.',
-    },
     connections: {
       title: 'Connected assistants',
       lead: 'Yours only. Revoking one ends its access at once; what it already changed stays.',
       emptyTitle: 'No assistant connected',
-      emptyHint: 'Connect one with the address above. It is listed here once you approve it.',
+      emptyHint: 'Connect one with the MCP server address above. It is listed here once you approve it.',
     },
     colClient: 'Assistant',
     colLastUsed: 'Last used',
@@ -883,7 +883,7 @@ export const en = {
     loopback: 'A program on this computer. Claude Code and other local assistants are answered this way.',
     remoteTitle: 'A remote site.',
     remote: 'Approving sends {host} a code that acts as you. Continue only if you started this connection and recognise the address.',
-    canTitle: 'It will be able to',
+    canTitle: 'Allowed',
     canLead: 'Act as {name} ({role}), with everything recorded under your name:',
     can: {
       apisAdmin: 'List, register, change and delete APIs in the catalogue.',
@@ -892,12 +892,12 @@ export const en = {
       credentials: 'List your stored secrets — names and dates only — and check whether an API answers.',
       file: 'Fetch the JANUS.md file for any of your services.',
     },
-    neverTitle: 'It will never',
+    neverTitle: 'Never allowed',
     never: {
       secrets: 'Read a secret. Values stay in the vault.',
       keys: 'See or receive an API key. Keys are only issued and rotated in this console.',
     },
-    revoke: 'You can revoke it at any time under Reference → AI assistants.',
+    revoke: 'You can revoke it at any time under Reference → AI coding.',
     expires: 'This request expires at {time}.',
     approve: 'Approve',
     deny: 'Deny',
@@ -989,7 +989,7 @@ export const en = {
     SYSTEM: 'system',
   },
   traffic: {
-    title: 'Handled for the callers',
+    title: 'Cache and paused APIs',
     intro: 'Since this instance started.',
     spared: 'Calls spared',
     spareRatio: '{percent}% of reusable reads',

@@ -17,8 +17,7 @@ export type Page =
   | 'credentials'
   | 'accounts'
   | 'documentation'
-  | 'agents'
-  | 'mcp';
+  | 'agents';
 
 /** The dashboard carries an optional connection: the record it lists, opened from its list. */
 export type Location =
@@ -33,7 +32,6 @@ const PATHS: Record<Page, string> = {
   accounts: '/accounts',
   documentation: '/documentation',
   agents: '/documentation/ai-coding',
-  mcp: '/documentation/mcp',
 };
 
 /** The title a page prints, and the group it belongs to. Both live here so no view invents its own. */
@@ -45,7 +43,6 @@ export const PAGE_TITLE: Record<Page, MessageKey> = {
   accounts: 'accounts.title',
   documentation: 'docs.title',
   agents: 'agents.title',
-  mcp: 'mcp.title',
 };
 
 export const PAGE_SECTION: Record<Page, MessageKey> = {
@@ -56,7 +53,6 @@ export const PAGE_SECTION: Record<Page, MessageKey> = {
   accounts: 'nav.administration',
   documentation: 'nav.reference',
   agents: 'nav.reference',
-  mcp: 'nav.reference',
 };
 
 /** A connection keeps its own address: it is a record, not a state of the dashboard. */
@@ -74,8 +70,8 @@ export function parsePath(pathname: string): Location {
   if (segments[0] === 'activity') return { page: 'activity' };
   if (segments[0] === 'accounts') return { page: 'accounts' };
   if (segments[0] === 'documentation') {
-    if (segments[1] === 'ai-coding') return { page: 'agents' };
-    if (segments[1] === 'mcp') return { page: 'mcp' };
+    // `/documentation/mcp` was a page of its own; the assistant is now the second half of AI coding.
+    if (segments[1] === 'ai-coding' || segments[1] === 'mcp') return { page: 'agents' };
     return { page: 'documentation' };
   }
   if (segments[0] === 'registry') {

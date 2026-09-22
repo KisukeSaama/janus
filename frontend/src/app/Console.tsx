@@ -39,7 +39,6 @@ const CredentialsPage = lazy(() =>
 );
 const DocsPage = lazy(() => import('../features/docs/DocsPage').then((m) => ({ default: m.DocsPage })));
 const AgentsPage = lazy(() => import('../features/docs/AgentsPage').then((m) => ({ default: m.AgentsPage })));
-const McpPage = lazy(() => import('../features/docs/McpPage').then((m) => ({ default: m.McpPage })));
 const AccountsPage = lazy(() =>
   import('../features/accounts/AccountsPage').then((m) => ({ default: m.AccountsPage })),
 );
@@ -172,8 +171,7 @@ export function Console({ identity }: { identity: Identity }) {
             {location.page === 'credentials' && <CredentialsPage identity={identity} />}
             {location.page === 'accounts' && <AccountsPage identity={identity} />}
             {location.page === 'documentation' && <DocsPage />}
-            {location.page === 'agents' && <AgentsPage onOpenMcp={() => go('mcp')} />}
-            {location.page === 'mcp' && <McpPage identity={identity} />}
+            {location.page === 'agents' && <AgentsPage identity={identity} />}
           </Suspense>
         </main>
       </div>

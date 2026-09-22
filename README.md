@@ -305,6 +305,14 @@ Janus serves a [Model Context Protocol](https://modelcontextprotocol.io) endpoin
 change and delete APIs, apps and grants, list credentials as metadata, ping an API, and fetch the
 `JANUS.md` for an app so it can write it into that app's repository (`get_janus_md`).
 
+The two are not alternatives. `JANUS.md` is for the agent working **in a repository**: how its code
+calls APIs through the gateway, and which ones it may call. MCP is for the assistant working **in the
+console**: registering those APIs and granting them. The file is written by the server, so the one
+downloaded from the console and the one fetched over MCP are the same file. It is dated, and tells an
+agent that a listed API refused with 403 `grant_missing` means the file is stale — fetch it again,
+do not work around it; and that an API it lacks may be registered over MCP with the operator's
+agreement, or asked for otherwise. Both are documented in the console under **Reference → AI coding**.
+
 ```sh
 claude mcp add --transport http janus https://janus.example.com/mcp
 ```
@@ -315,7 +323,7 @@ screen that shows where the code will be sent. From then on it acts **as that pe
 person's role** — an ordinary account cannot change the API catalogue through MCP any more than it
 can in the console — and its changes are journalled under their name, marked `via MCP: <client>`.
 Tokens are opaque, stored hashed, bound to the `/mcp` resource, and stop working when the account
-is disabled or its password changes. **Documentation → AI assistants** lists and revokes them.
+is disabled or its password changes. **Reference → AI coding** lists and revokes them.
 
 Two things never pass through an assistant: secrets (a credential's value is stored in the console)
 and API keys (`create_app` returns the app without its key; issue it with *Rotate key*).

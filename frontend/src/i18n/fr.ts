@@ -58,7 +58,6 @@ export const fr: Messages = {
     administration: 'Administration',
     documentation: 'Documentation',
     agents: 'Codage par IA',
-    mcp: 'Assistants IA',
   },
   state: {
     label: 'État',
@@ -133,7 +132,7 @@ export const fr: Messages = {
     abandonDescription: 'Rien n’a encore été créé. Ce qui est saisi ici sera perdu.',
     abandonConfirm: 'Quitter',
 
-    s1Title: 'L’API que vous voulez appeler',
+    s1Title: 'API cible',
     s1Lead: 'Janus ne transmet jamais ailleurs qu’à cette adresse.',
     apiName: 'Comment s’appelle cette API',
     apiNamePlaceholder: 'Paiements',
@@ -146,9 +145,9 @@ export const fr: Messages = {
     slugLead: 'Vos services appellent ceci au lieu de l’API.',
     slugEdit: 'Le modifier',
 
-    s2Title: 'Ce que cette API attend',
+    s2Title: 'Authentification',
     s2Lead: 'Le contrat vaut pour tout le déploiement. Chaque compte fournit sa propre clé.',
-    s2TitleOpen: 'Cette API n’attend rien',
+    s2TitleOpen: 'Aucune authentification',
     s2LeadOpen: 'Rien n’est stocké. Le reste s’applique quand même : quotas, cache, journal.',
     howSent: 'Comment l’API l’attend',
     authBearer: 'Jeton Bearer',
@@ -254,9 +253,9 @@ export const fr: Messages = {
   },
   /* ── Enregistrer un service, et dire ce qu’il atteint ────────────────── */
   service: {
-    s1Title: 'Le service qui appellera',
+    s1Title: 'Service appelant',
     s1Lead: 'Son identité à la passerelle. Il recevra une clé, affichée une seule fois.',
-    s2Title: 'Quelles APIs peut-il appeler ?',
+    s2Title: 'Accès aux API',
     s2Lead: 'Chaque case cochée est une règle d’accès, révocable ensuite.',
     registerApi: 'Enregistrer une API',
     activate: 'Activer',
@@ -289,7 +288,7 @@ export const fr: Messages = {
   /* ── Le tableau de bord, l’accueil de la console ─────────────────────── */
   dashboard: {
     title: 'Tableau de bord',
-    lead: 'Ce qui tourne, et ce qui demande une action.',
+    lead: 'État des connexions et actions en attente.',
     liveOf: '{live}/{total} en service',
     due: 'Prochaines échéances',
     dueAll: 'Ouvrir les secrets',
@@ -317,25 +316,25 @@ export const fr: Messages = {
   /* ── Une connexion, tout ce qui la concerne ──────────────────────────── */
   detail: {
     subtitle: '{app} appelle {api}',
-    lead: 'Comment l’appeler, et comment l’arrêter.',
+    lead: 'Appel, limites, identifiants et révocation.',
     blockedGrant: 'En pause. Rien n’est transmis tant que vous ne la reprenez pas.',
     blockedApplication: '{name} est désactivé. Ses appels sont refusés.',
     blockedProvider: '{name} est désactivée. Chaque appel répond 404.',
     blockedCredential: '{name} est désactivé. Les appels sont refusés avant OpenBao.',
     fix: 'Corriger dans le registre',
 
-    callTitle: 'Comment l’appeler',
+    callTitle: 'Requête',
     callLead: 'À envoyer au lieu d’appeler l’API.',
     endpoint: 'Adresse',
     identifier: 'Identifiant d’application',
     example: 'Une requête complète',
     keyNote: 'Affichée une seule fois. Perdue, elle se renouvelle.',
 
-    destinationTitle: 'Où ça va',
+    destinationTitle: 'Destination',
     destinationLead: 'L’adresse réelle, derrière la passerelle.',
     destinationEdit: 'Modifier la destination',
-    quotaTitle: 'À quelle fréquence',
-    quotaLead: 'Ce que ce service seul peut demander.',
+    quotaTitle: 'Quota',
+    quotaLead: 'La limite propre à ce service.',
     quotaEdit: 'Modifier le quota',
     quotaLabel: 'Requêtes par minute',
     quotaHint: 'Ce que ce service seul peut demander à cette API. 0 : aucun plafond.',
@@ -343,7 +342,7 @@ export const fr: Messages = {
     burstHint: 'Appels autorisés d’un coup. 0 : un dixième de la limite.',
     quotaValue: '{count}/min',
     quotaNone: 'Aucun plafond',
-    scopeTitle: 'Quelle partie',
+    scopeTitle: 'Portée',
     scopeLead: 'Un plafond pour une clé que cette API ne sait pas restreindre.',
     scopeEdit: 'Modifier la portée',
     scopePathLabel: 'Préfixe de chemin',
@@ -364,9 +363,9 @@ export const fr: Messages = {
     scopeGraphqlFieldsHint: 'Séparés par des virgules, ex. viewer, repository. Vide : tous.',
     scopeGraphqlAllFields: 'Tous les champs',
 
-    openTitle: 'Ce que Janus présente',
+    openTitle: 'Authentification',
     openLead: 'Rien : cette API est ouverte.',
-    secretTitle: 'Le secret que Janus présente',
+    secretTitle: 'Secret de l’API',
     secretLead: 'Détenu dans OpenBao sous {ref}, envoyé en {mode}.',
     secretReplace: 'Remplacer le secret',
     // Consent, which is the one thing on this page that an administrator cannot settle alone.
@@ -386,14 +385,14 @@ export const fr: Messages = {
     secretNewHint: 'Écrase aussitôt OpenBao. Irréversible.',
     secretSave: 'Le remplacer',
 
-    keyTitle: 'La clé que détient le service',
+    keyTitle: 'Clé du service',
     keyIssued: 'Émise {age}',
     keyRotate: 'Renouveler la clé',
     keyRotateConfirm: 'Confirmer',
     keyRotating: 'Renouvellement',
     keyRotateDescription: 'Nouvelle clé pour {name}. L’actuelle cesse de fonctionner.',
 
-    stopTitle: 'L’arrêter',
+    stopTitle: 'Pause et suppression',
     pause: 'Mettre en pause',
     pauseConfirm: 'Confirmer',
     pausing: 'Mise en pause',
@@ -408,7 +407,7 @@ export const fr: Messages = {
   /* ── Activité ────────────────────────────────────────────────────────── */
   activity: {
     title: 'Activité',
-    lead: 'Tout ce qui s’est passé sur la passerelle.',
+    lead: 'Journal des appels passés par la passerelle.',
   },
   /* ── Le registre, pour modifier un enregistrement à la fois ──────────── */
   registry: {
@@ -652,14 +651,14 @@ export const fr: Messages = {
    */
   docs: {
     title: 'Documentation',
-    lead: 'Comment un service appelle une API à travers Janus.',
+    lead: 'Intégrer un service à une API via Janus.',
     onThisPage: 'Sur cette page',
     use: {
       label: 'Exemples pour',
       none: 'Aucune connexion n’existe encore : les exemples portent des valeurs d’illustration.',
     },
     flow: {
-      title: 'Le principe',
+      title: 'Fonctionnement',
       lead: 'Votre service détient une clé Janus, jamais celle de l’API.',
       step1: 'Votre service envoie la requête qu’il aurait envoyée à l’API, avec deux en-têtes en plus.',
       step2: 'Janus vérifie la clé et la règle d’accès, puis lit le secret.',
@@ -667,7 +666,7 @@ export const fr: Messages = {
       note: 'Méthode, chemin, paramètres, corps et réponse sont inchangés. Il n’y a aucun SDK à installer.',
     },
     need: {
-      title: 'Ce qu’il vous faut',
+      title: 'Prérequis',
       lead: 'Trois valeurs, toutes sur la page de la connexion.',
       address: 'Adresse de la passerelle',
       addressNote: 'Remplace l’adresse de l’API dans votre code.',
@@ -690,7 +689,7 @@ export const fr: Messages = {
       note: 'Un client par service, une clé par service. La clé appartient à votre coffre de secrets, jamais au dépôt.',
     },
     call: {
-      title: 'Ce que vous pouvez appeler',
+      title: 'Périmètre d’accès',
       lead: 'Une connexion ouvre toute l’API.',
       pathTerm: 'Le chemin',
       pathNote: '`{gateway}/v1/orders` atteint l’API sur `/v1/orders`. Janus ne tient aucune liste de chemins autorisés.',
@@ -721,8 +720,8 @@ export const fr: Messages = {
       note: 'Un échange refusé répond en JSON RFC 6749, pas en `problem+json`.',
     },
     handled: {
-      title: 'Ce que Janus fait déjà',
-      lead: 'Réutilisation, quotas, reprises. Chaque réponse dit ce qui s’est passé.',
+      title: 'Cache, quotas et reprises',
+      lead: 'Déjà gérés par Janus. Chaque réponse dit ce qui s’est passé.',
       cache: '`HIT`, `MISS`, `REVALIDATED`, `STALE`, `COALESCED` ou `BYPASS`.',
       identity: '`app` ou `account` : au nom de qui l’appel a parlé. Envoyez `X-Janus-Identity` à chaque appel vers une API qui a les deux. L’omettre fonctionne, mais coûte un aller-retour et ne s’applique jamais à un `POST` refusé.',
       age: 'Secondes écoulées depuis que la réponse servie a été obtenue.',
@@ -738,7 +737,7 @@ export const fr: Messages = {
       timeout: 'Janus attend l’API 30 secondes : accordez un peu plus à votre propre client.',
     },
     fail: {
-      title: 'Quand un appel échoue',
+      title: 'Erreurs',
       lead: 'Seul Janus répond en `application/problem+json`, avec la raison dans `detail`.',
       s400: 'Le chemin a été refusé avant tout routage : un segment `.` ou `..`, un `//`, ou un séparateur encodé.',
       s401: 'Les identifiants sont absents, mal formés, faux, ou présentés depuis une origine que le service n’a pas déclarée. Les échecs répétés depuis une même adresse sont bloqués un moment.',
@@ -752,7 +751,7 @@ export const fr: Messages = {
         'Journalisez `X-Janus-Correlation-Id` à côté de vos propres erreurs. Le même identifiant figure sur l’événement dans Activité, avec la raison enregistrée par Janus.',
     },
     sound: {
-      title: 'Garder les choses saines',
+      title: 'Bonnes pratiques',
       lead: 'Six habitudes qui gardent une connexion révocable.',
       one: 'Une clé par service. Une clé partagée par deux services ne peut pas être révoquée pour un seul.',
       narrow: 'Restreignez le secret côté API, et la connexion ici quand l’API n’a aucune portée à donner. Un préfixe de chemin et des méthodes, c’est ce qu’admet encore une clé qu’on ne peut pas restreindre à la source.',
@@ -762,13 +761,24 @@ export const fr: Messages = {
       environments: 'Un Janus par environnement. L’adresse que vous appelez décide de l’environnement où vous êtes.',
     },
   },
-  /* ── Le fichier que lit un agent de code ─────────────────────────────────
-   * La page se lit une fois, pour récupérer un fichier ; le fichier, lui, reste en anglais quoi que
-   * dise ce dictionnaire, puisqu’il est lu par un modèle et non par l’exploitant.
+  /* ── Codage par IA : le fichier que lit un agent, et la console confiée à un assistant ──
+   * Une page, deux sens, et son premier travail est de dire lequel est lequel. Le fichier, lui, reste
+   * en anglais quoi que dise ce dictionnaire, puisqu’il est lu par un modèle et non par l’exploitant.
    */
   agents: {
     title: 'Codage par IA',
-    lead: 'Un fichier pour votre dépôt : votre agent appelle vos API par Janus.',
+    lead: 'Deux façons pour un agent IA de travailler avec Janus. L’une, l’autre, ou les deux.',
+    split: {
+      fileWhere: 'Dans votre dépôt',
+      file: 'Votre agent de code écrit du code qui appelle vos API par la passerelle, sans jamais détenir leurs secrets.',
+      mcpWhere: 'Dans cette console',
+      mcp: 'Votre assistant enregistre API et services et accorde les accès, en votre nom, à la place des formulaires.',
+      bridge: 'Les deux se rejoignent sur un outil : un assistant connecté par MCP récupère lui-même le fichier avec `get_janus_md`.',
+    },
+    file: {
+      title: 'Fichier JANUS.md',
+      lead: 'Écrit pour un service : son identifiant, et les API qu’il peut appeler aujourd’hui.',
+    },
     for: 'Fichier pour',
     noService: 'Aucun service n’est enregistré : le fichier porte des valeurs d’illustration.',
     download: 'Télécharger JANUS.md',
@@ -776,12 +786,10 @@ export const fr: Messages = {
     'fileApis#one': 'Une API, avec le chemin de passerelle sur lequel elle répond.',
     'fileApis#other': '{count} APIs, avec le chemin de passerelle sur lequel chacune répond.',
     fileNote:
-      'En anglais, environ {tokens} jetons. Il porte l’adresse de la passerelle et l’identifiant d’application ; jamais la clé.',
-    mcpNote: 'Un assistant connecté par MCP récupère ce fichier lui-même, avec `get_janus_md`, et l’écrit dans le dépôt.',
-    mcpLink: 'Connecter un assistant',
+      'En anglais, environ {tokens} jetons, daté du jour où il est écrit. Il porte l’adresse de la passerelle et l’identifiant d’application ; jamais la clé.',
     holds: {
-      title: 'Ce qu’il apprend à l’agent',
-      lead: 'Ce qu’il ne peut pas lire dans votre dépôt.',
+      title: 'Contenu du fichier',
+      lead: 'Le contexte que votre dépôt ne donne pas à l’agent.',
       gateway:
         'Les appels vont sur `/<utilisateur>/gateway/<api>` avec deux en-têtes, et ce projet ne détient jamais le secret de l’API.',
       routes: 'Quelles APIs ce service peut appeler, et sur quelle adresse de passerelle chacune répond.',
@@ -789,10 +797,10 @@ export const fr: Messages = {
         'Ce qu’il ne doit pas écrire : Janus met déjà en cache, réessaie, limite le débit et renouvelle les jetons OAuth2. L’agent lit les en-têtes au lieu de recoder tout ça.',
       errors: 'Comment distinguer un refus de Janus d’une panne de l’API, et ce que dit chaque statut.',
       missing:
-        'Ce qu’il doit vous demander quand l’API dont il a besoin n’est pas connectée — au lieu d’installer un SDK et de réclamer un secret client.',
+        'Que faire quand l’API dont il a besoin n’est pas connectée : l’enregistrer par MCP avec votre accord, ou vous la demander — jamais installer un SDK et réclamer un secret client.',
     },
     place: {
-      title: 'Où le poser',
+      title: 'Emplacement',
       lead: 'À la racine du dépôt, sous le nom téléchargé : l’agent le trouve par son nom.',
       step1: 'Déposez `JANUS.md` à la racine et versionnez-le.',
       step2: 'Pointez votre agent dessus : `@JANUS.md` dans `CLAUDE.md`, ou une ligne dans `AGENTS.md`.',
@@ -800,28 +808,28 @@ export const fr: Messages = {
       note: 'Retéléchargez-le après avoir connecté une nouvelle API : les APIs listées sont celles connectées aujourd’hui.',
     },
     ask: {
-      title: 'Ensuite, demandez',
+      title: 'Utilisation',
       lead: 'La tâche dans vos mots. Le fichier fournit le reste.',
       exampleLabel: 'Ce que vous tapez',
       example: '« Récupère les playlists de l’utilisateur courant sur Spotify. »',
       note: 'L’agent appelle la passerelle, envoie les deux en-têtes, et s’arrête pour vous solliciter si Spotify n’est pas encore connectée.',
     },
-    safe: {
-      title: 'Ce qu’il ne contient pas',
-      lead: 'Le fichier est versionné : il ne porte rien qui ne puisse l’être.',
-      key: 'Aucune clé. L’agent la lit dans l’environnement et ne l’écrit jamais dans un fichier.',
-      id: 'L’identifiant d’application y figure et n’est pas un secret : seul, il n’ouvre rien.',
-      stale: 'La liste vieillit sans devenir fausse. Un appel vers une API qui n’y figure pas est refusé par Janus, pas par le fichier.',
+    never: {
+      title: 'Secrets et clés',
+      lead: 'La frontière que Janus tient pour vos services, il la tient pour le fichier comme pour l’assistant.',
+      key: 'Le fichier ne porte aucune clé. L’agent lit `JANUS_API_KEY` dans l’environnement et ne l’écrit jamais dans un fichier.',
+      id: 'L’identifiant d’application figure dans le fichier et n’est pas un secret : seul, il n’ouvre rien.',
+      secrets: 'L’assistant ne lit jamais un secret : noms, API et dates, jamais une valeur. Les valeurs partent dans le coffre et y restent.',
+      keys: 'L’assistant ne reçoit jamais la clé d’un service. Un service qu’il enregistre revient sans clé : émettez-la depuis Registre → Applications.',
+      stale: 'Le fichier vieillit sans devenir faux. Un appel vers une API qui n’est plus accordée est refusé par Janus, et l’agent a pour consigne d’en récupérer une copie fraîche, pas de contourner le refus.',
     },
   },
   mcp: {
-    title: 'Assistants IA',
-    lead: 'Laissez Claude ou un autre assistant configurer API, services et accès pour vous, par MCP.',
+    title: 'Serveur MCP',
+    lead: 'Votre assistant se connecte par votre navigateur, vous l’approuvez en votre nom, et dès lors il agit avec votre rôle — consigné sous votre nom dans l’activité.',
     serverLabel: 'Adresse du serveur MCP',
-    serverNote: 'L’assistant se connecte par votre navigateur : vous l’approuvez ici, en votre nom, et pouvez le révoquer à tout moment.',
+    serverNote: 'Donnez-lui cette adresse. Vous pouvez le révoquer à tout moment, plus bas.',
     setup: {
-      title: 'Connecter un assistant',
-      lead: 'Donnez-lui l’adresse ci-dessus. Il ouvre votre navigateur pour demander votre accord.',
       codeTitle: 'Claude Code',
       codeLabel: 'Dans un terminal',
       codeNote: 'Puis lancez `/mcp` dans Claude Code et choisissez `janus` pour vous connecter.',
@@ -833,8 +841,7 @@ export const fr: Messages = {
       other: 'Tout client MCP qui parle Streamable HTTP avec une connexion OAuth : donnez-lui l’adresse du serveur, il vous envoie ici pour approuver.',
     },
     can: {
-      title: 'Ce qu’il peut faire',
-      lead: 'Ce que vous pourriez faire dans cette console, en votre nom, et consigné sous votre nom dans l’activité.',
+      title: 'Autorisations',
       apisAdmin: 'Lister, enregistrer, modifier et supprimer les API du catalogue.',
       apisUser: 'Lister les API du catalogue. En enregistrer ou en modifier une revient aux administrateurs.',
       services: 'Lister, enregistrer, modifier et supprimer vos services.',
@@ -843,18 +850,11 @@ export const fr: Messages = {
       ping: 'Vérifier qu’une API répond.',
       file: 'Récupérer le `JANUS.md` d’un service avec `get_janus_md`, et l’écrire dans le dépôt où il travaille.',
     },
-    never: {
-      title: 'Ce qu’il ne pourra jamais faire',
-      lead: 'La frontière que Janus tient pour vos services, il la tient aussi pour l’assistant.',
-      secrets: 'Lire un secret. Les valeurs partent dans le coffre et n’en ressortent jamais.',
-      keys: 'Recevoir la clé d’API d’un service. Les clés sont émises et renouvelées ici, dans la console, et nulle part ailleurs.',
-      created: 'Un service qu’il enregistre revient sans sa clé : émettez-en une depuis Registre → Applications.',
-    },
     connections: {
       title: 'Assistants connectés',
       lead: 'Les vôtres uniquement. En révoquer un coupe son accès aussitôt ; ce qu’il a déjà modifié reste.',
       emptyTitle: 'Aucun assistant connecté',
-      emptyHint: 'Connectez-en un avec l’adresse ci-dessus. Il apparaît ici une fois approuvé.',
+      emptyHint: 'Connectez-en un avec l’adresse du serveur MCP ci-dessus. Il apparaît ici une fois approuvé.',
     },
     colClient: 'Assistant',
     colLastUsed: 'Dernière utilisation',
@@ -879,7 +879,7 @@ export const fr: Messages = {
     loopback: 'Un programme sur cet ordinateur. C’est ainsi que Claude Code et les autres assistants locaux reçoivent la réponse.',
     remoteTitle: 'Un site distant.',
     remote: 'Approuver envoie à {host} un code qui agit en votre nom. Continuez seulement si vous avez lancé cette connexion et reconnaissez l’adresse.',
-    canTitle: 'Il pourra',
+    canTitle: 'Autorisé',
     canLead: 'Agir en tant que {name} ({role}), tout étant consigné sous votre nom :',
     can: {
       apisAdmin: 'Lister, enregistrer, modifier et supprimer les API du catalogue.',
@@ -888,12 +888,12 @@ export const fr: Messages = {
       credentials: 'Lister vos secrets enregistrés — noms et dates seulement — et vérifier qu’une API répond.',
       file: 'Récupérer le fichier JANUS.md de n’importe lequel de vos services.',
     },
-    neverTitle: 'Il ne pourra jamais',
+    neverTitle: 'Jamais autorisé',
     never: {
       secrets: 'Lire un secret. Les valeurs restent dans le coffre.',
       keys: 'Voir ou recevoir une clé d’API. Les clés ne sont émises et renouvelées que dans cette console.',
     },
-    revoke: 'Vous pourrez le révoquer à tout moment dans Référence → Assistants IA.',
+    revoke: 'Vous pourrez le révoquer à tout moment dans Référence → Codage par IA.',
     expires: 'Cette demande expire à {time}.',
     approve: 'Approuver',
     deny: 'Refuser',
@@ -985,7 +985,7 @@ export const fr: Messages = {
     SYSTEM: 'système',
   },
   traffic: {
-    title: 'Pris en charge pour les appelants',
+    title: 'Cache et API en pause',
     intro: 'Depuis le démarrage de cette instance.',
     spared: 'Appels évités',
     spareRatio: '{percent} % des lectures réutilisables',
