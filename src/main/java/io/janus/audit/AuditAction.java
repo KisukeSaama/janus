@@ -48,5 +48,10 @@ public enum AuditAction {
     ACCOUNT_SIGNED_IN,
     ACCOUNT_SIGNED_OUT,
 
+    // Somebody let an AI assistant act as them over MCP, or took that back. The assistant's own
+    // changes are recorded under the ordinary actions, attributed to that person.
+    MCP_CLIENT_AUTHORIZED,
+    MCP_CLIENT_REVOKED,
+
     ADMIN_AUTHENTICATION
 }

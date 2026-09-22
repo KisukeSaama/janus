@@ -97,6 +97,14 @@ janus:
     # loop everybody else's problem: their tokens went, and each of them found itself
     # unauthenticated for no reason it could see. Zero derives a tenth of the figure above.
     max-active-tokens-per-application: ${JANUS_MAX_ACTIVE_TOKENS_PER_APPLICATION:0}
+  # AI assistants configuring Janus over MCP, at ${janus.public-url}/mcp. Each is let in by a person on
+  # the console's consent screen and acts as that person. The access token is what reaches every
+  # call; the refresh token is what an assistant keeps between sessions, rotated on each use, and
+  # revoked from the console's "AI assistants" page. Both lifetimes bound how long a consent outlives
+  # the laptop it was given on.
+  mcp:
+    access-token-ttl: ${JANUS_MCP_ACCESS_TOKEN_TTL:1h}
+    refresh-token-ttl: ${JANUS_MCP_REFRESH_TOKEN_TTL:30d}
   # Nothing but the schedule deletes from the journal, and every call — and every refused attempt at
   # one — writes to it, so how long it is kept is the setting that decides how much disk Janus asks
   # for over a year. Two ages. Traffic is written by whoever is knocking rather than by anything

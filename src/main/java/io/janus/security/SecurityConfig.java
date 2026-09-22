@@ -30,6 +30,8 @@ import tools.jackson.databind.ObjectMapper;
 import io.janus.audit.AuditService;
 import io.janus.credentials.CredentialAuthorizationService;
 import io.janus.gateway.GatewayCorsConfigurationSource;
+import io.janus.mcp.McpBearerFilter;
+import io.janus.mcp.McpOAuthService;
 import io.janus.shared.ApiProblem;
 import io.janus.shared.CorrelationIdFilter;
 import io.janus.shared.ErrorCode;
@@ -114,13 +116,53 @@ public class SecurityConfig {
     @Bean
     @Order(2)
     SecurityFilterChain oauth(HttpSecurity http, GatewayCorsConfigurationSource gatewayCors) throws Exception {
-        return http.securityMatcher("/oauth/**")
+        // The MCP authorisation server's discovery documents are here too: they are read by a client
+        // that has no token yet, which is exactly the situation this chain is for.
+        return http.securityMatcher("/oauth/**", "/.well-known/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(gatewayCors))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .securityContext(context -> context.securityContextRepository(new NullSecurityContextRepository()))
                 .requestCache(RequestCacheConfigurer::disable)
                 .authorizeHttpRequests(requests -> requests.anyRequest().permitAll())
+                .headers(headers -> headers.frameOptions(frame -> frame.deny())
+                        .referrerPolicy(
+                                referrer -> referrer.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER)))
+                .build();
+    }
+
+    /**
+     * MCP chain. An AI assistant presenting a token a person issued to it in the console, and acting
+     * as that person.
+     *
+     * <p>Stateless like the gateway, and for the same reason: nothing here reads a session, so the
+     * console's cookie arriving on a request authenticates nobody. What does authenticate is the
+     * bearer token, read by {@link McpBearerFilter} into the very principal a console session holds —
+     * which is what lets every service below apply its ordinary rules to the assistant unchanged.
+     */
+    @Bean
+    @Order(3)
+    SecurityFilterChain mcp(
+            HttpSecurity http,
+            McpOAuthService oauth,
+            ObjectMapper mapper,
+            @Value("${janus.cors-origins}") String origins)
+            throws Exception {
+        var entryPoint = McpBearerFilter.entryPoint(oauth, mapper);
+        var allowed = Arrays.stream(origins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isEmpty())
+                .toList();
+        return http.securityMatcher("/mcp")
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .securityContext(context -> context.securityContextRepository(new NullSecurityContextRepository()))
+                .requestCache(RequestCacheConfigurer::disable)
+                .authorizeHttpRequests(requests -> requests.anyRequest().authenticated())
+                .addFilterBefore(new McpBearerFilter(oauth, allowed), BasicAuthenticationFilter.class)
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint(entryPoint)
+                        .accessDeniedHandler(new ProblemAuthorizationHandler(mapper, entryPoint)))
                 .headers(headers -> headers.frameOptions(frame -> frame.deny())
                         .referrerPolicy(
                                 referrer -> referrer.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER)))
@@ -156,7 +198,7 @@ public class SecurityConfig {
      * with Basic credentials has nothing to forge.
      */
     @Bean
-    @Order(3)
+    @Order(4)
     SecurityFilterChain admin(
             HttpSecurity http, AuthenticationThrottle throttle, AuditService audit, ObjectMapper mapper)
             throws Exception {

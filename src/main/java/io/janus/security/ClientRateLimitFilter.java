@@ -87,7 +87,8 @@ public class ClientRateLimitFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String uri = GatewayPath.applicationPath(request);
         boolean gateway = uri.startsWith("/gateway/");
-        String surface = gateway ? "gateway" : uri.startsWith("/oauth/") ? "oauth" : "admin";
+        String surface =
+                gateway ? "gateway" : uri.startsWith("/oauth/") ? "oauth" : uri.equals("/mcp") ? "mcp" : "admin";
         int perMinute = gateway ? gatewayPerMinute : adminPerMinute;
         int burst = gateway ? gatewayBurst : adminBurst;
 
@@ -113,6 +114,8 @@ public class ClientRateLimitFilter extends OncePerRequestFilter {
         return !uri.startsWith("/gateway/")
                 && !uri.startsWith("/api/")
                 && !uri.startsWith("/oauth/")
+                && !uri.equals("/mcp")
+                && !uri.startsWith("/.well-known/")
                 && !uri.startsWith("/actuator/");
     }
 

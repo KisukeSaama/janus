@@ -7,6 +7,7 @@ import {
   KeyRound,
   LayoutDashboard,
   LogOut,
+  Plug,
   UsersRound,
   X,
   type LucideIcon,
@@ -60,6 +61,9 @@ const GROUPS: { label: MessageKey; items: Item[] }[] = [
       { id: 'documentation', label: 'nav.documentation', icon: BookOpen },
       // The same integration, for the reader who will not read it: a file for the coding agent.
       { id: 'agents', label: 'nav.agents', icon: Bot },
+      // The other way round: the assistant is handed the console itself, under the reader's name, and
+      // this page says what that lets it do and who it has been let in for.
+      { id: 'mcp', label: 'nav.mcp', icon: Plug },
     ],
   },
 ];

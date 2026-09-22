@@ -1,7 +1,7 @@
 import { Fragment, type ReactNode } from 'react';
 
 /**
- * The pieces the two reference pages are both built from: a numbered sequence, a bullet, a remark,
+ * The pieces the reference pages are built from: a numbered sequence, a bullet, a remark, a section,
  * and the rule that sets machine data apart from the sentence around it.
  *
  * Prose and machine data are two textures in this console, and the reference pages are where the two
@@ -51,4 +51,15 @@ export function Bullet({ children }: { children: string }) {
 
 export function Note({ children }: { children: string }) {
   return <p className="mt-3.5 max-w-[72ch] text-sm text-text-2">{prose(children)}</p>;
+}
+
+/** A titled stretch of a reference page: a rule, a heading, the one line that says what it is for. */
+export function Section({ title, lead, children }: { title: string; lead: string; children: ReactNode }) {
+  return (
+    <section>
+      <h2 className="border-t border-line pt-6 text-lg font-semibold tracking-title">{title}</h2>
+      <p className="mb-5 mt-2 max-w-[68ch] text-sm text-text-2">{prose(lead)}</p>
+      {children}
+    </section>
+  );
 }

@@ -27,6 +27,8 @@ public interface ProviderRepository extends JpaRepository<Provider, UUID> {
 
     boolean existsBySlug(String slug);
 
+    Optional<Provider> findBySlug(String slug);
+
     /** @deprecated APIs are global; retained while older integrations migrate. */
     @Deprecated
     default Optional<Provider> findOwnedBy(UUID id, UUID ignoredOwner) {

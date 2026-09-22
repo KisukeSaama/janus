@@ -298,6 +298,33 @@ or a query parameter — exactly one, which the console enforces. Coinbase signs
 the address. Both are preset in the console. The key half of `key:secret` identifies the signer in
 its own header; the secret half never leaves the process.
 
+## Configuring Janus from an AI assistant (MCP)
+
+Janus serves a [Model Context Protocol](https://modelcontextprotocol.io) endpoint at
+`$JANUS_PUBLIC_URL/mcp` (Streamable HTTP, stateless). An assistant connected to it can list, create,
+change and delete APIs, apps and grants, list credentials as metadata, ping an API, and fetch the
+`JANUS.md` for an app so it can write it into that app's repository (`get_janus_md`).
+
+```sh
+claude mcp add --transport http janus https://janus.example.com/mcp
+```
+
+The assistant authenticates with OAuth 2.1, as the MCP specification prescribes: it registers
+itself (RFC 7591), sends a browser to the console, and a signed-in person approves it on a consent
+screen that shows where the code will be sent. From then on it acts **as that person, with that
+person's role** — an ordinary account cannot change the API catalogue through MCP any more than it
+can in the console — and its changes are journalled under their name, marked `via MCP: <client>`.
+Tokens are opaque, stored hashed, bound to the `/mcp` resource, and stop working when the account
+is disabled or its password changes. **Documentation → AI assistants** lists and revokes them.
+
+Two things never pass through an assistant: secrets (a credential's value is stored in the console)
+and API keys (`create_app` returns the app without its key; issue it with *Rotate key*).
+
+Behind a reverse proxy, `/mcp` (exact) and `/.well-known/` must reach the backend, as the bundled
+nginx configurations do; `/mcp/authorize` is the console's consent screen. `JANUS_PUBLIC_URL` is the
+OAuth issuer, so it must be the address clients use. Token lifetimes: `JANUS_MCP_ACCESS_TOKEN_TTL`
+(1h) and `JANUS_MCP_REFRESH_TOKEN_TTL` (30d).
+
 ## Traffic handling
 
 A client application sends an ordinary HTTP request. Everything that usually surrounds calling a third-party API — caching, respecting the provider's rate limit, backing off, surviving a blip — is done by Janus and configured per provider, so no client has to implement it and no two clients implement it differently.

@@ -44,6 +44,14 @@ public class AccessScope {
         return authentication.getPrincipal() instanceof ConsoleUser user ? Optional.of(user) : Optional.empty();
     }
 
+    /** The AI assistant this request came through, or nothing when the person is acting directly. */
+    public Optional<ActingAssistant> assistant() {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null && authentication.getDetails() instanceof ActingAssistant assistant
+                ? Optional.of(assistant)
+                : Optional.empty();
+    }
+
     public ConsoleUser current() {
         return signedIn()
                 .orElseThrow(() -> new IllegalStateException(
