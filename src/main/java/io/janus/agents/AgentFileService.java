@@ -62,8 +62,7 @@ public class AgentFileService {
                 .map(AgentFileService::api)
                 .sorted(Comparator.comparing(AgentFile.Api::name, String.CASE_INSENSITIVE_ORDER))
                 .toList();
-        return rendered(
-                new AgentFile.Target(origin, application.getName(), applicationId.toString(), apis, today));
+        return rendered(new AgentFile.Target(origin, application.getName(), applicationId.toString(), apis, today));
     }
 
     private static Rendered rendered(AgentFile.Target target) {
