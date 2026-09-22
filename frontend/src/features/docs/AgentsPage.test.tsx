@@ -5,12 +5,15 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Identity } from '../../api';
+import { parsePath } from '../../app/routes';
 import { I18nProvider } from '../../i18n';
-import { McpPage } from './McpPage';
+import { AgentsPage } from './AgentsPage';
 
 /**
- * The assistants an account has let in, and the way to put one out. Revoking is the whole of what a
- * row offers, so it is what is exercised: it asks first, it writes, and the list follows.
+ * AI coding: the file for a repository and the assistant in the console, on one page. What is
+ * exercised is what the merge had to keep — that the reader is told which half is which, that the
+ * old address still lands here — and the one write the page makes: revoking an assistant, which
+ * asks first, writes, and the list follows.
  */
 
 const IDENTITY: Identity = { id: 'u1', username: 'ada', displayName: 'Ada Lovelace', role: 'USER' };
@@ -39,6 +42,8 @@ beforeEach(() => {
     if ((init?.method ?? 'GET') === 'GET') {
       if (url.endsWith('/mcp/server')) return Promise.resolve(answer(200, { url: 'https://janus.example.com/mcp' }));
       if (url.endsWith('/mcp/connections')) return Promise.resolve(answer(200, connections));
+      if (url.includes('/agent-file'))
+        return Promise.resolve(answer(200, { fileName: 'JANUS.md', content: '# Janus gateway\n', apiCount: 0 }));
       return Promise.resolve(answer(200, []));
     }
     // Revoking removes the row on the server, which is what the refetch that follows must show.
@@ -68,9 +73,25 @@ function Wrapper({ children }: { children: ReactNode }) {
 
 const writes = () => fetchMock.mock.calls.filter(([, init]) => (init?.method ?? 'GET') !== 'GET');
 
-describe('McpPage', () => {
+describe('AgentsPage', () => {
+  it('opens on the two halves, each a link to its own part of the page', async () => {
+    render(<AgentsPage identity={IDENTITY} />, { wrapper: Wrapper });
+
+    const file = screen.getByRole('link', { name: /in your repository|dans votre dépôt/i });
+    const assistant = screen.getByRole('link', { name: /in this console|dans cette console/i });
+    expect(file).toHaveAttribute('href', '#file');
+    expect(assistant).toHaveAttribute('href', '#assistant');
+    expect(document.getElementById('file')).not.toBeNull();
+    expect(document.getElementById('assistant')).not.toBeNull();
+  });
+
+  it('keeps the old assistants address, which now lands here', () => {
+    expect(parsePath('/documentation/mcp')).toEqual({ page: 'agents' });
+    expect(parsePath('/documentation/ai-coding')).toEqual({ page: 'agents' });
+  });
+
   it('prints the server address into the command that adds it', async () => {
-    render(<McpPage identity={IDENTITY} />, { wrapper: Wrapper });
+    render(<AgentsPage identity={IDENTITY} />, { wrapper: Wrapper });
 
     expect(
       await screen.findByText('claude mcp add --transport http janus https://janus.example.com/mcp'),
@@ -79,7 +100,7 @@ describe('McpPage', () => {
 
   it('revokes an assistant after asking, and the list follows', async () => {
     const user = userEvent.setup();
-    render(<McpPage identity={IDENTITY} />, { wrapper: Wrapper });
+    render(<AgentsPage identity={IDENTITY} />, { wrapper: Wrapper });
 
     await user.click(await screen.findByRole('button', { name: /revoke “claude code”|révoquer « claude code »/i }));
 

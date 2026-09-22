@@ -1,5 +1,6 @@
 package io.janus.agents;
 
+import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -15,6 +16,12 @@ import java.util.stream.Collectors;
  *
  * <p>It is read on every task, which makes its length a running cost: every line is a rule an agent
  * would otherwise get wrong, in the shortest form that stays unambiguous.
+ *
+ * <p>Two things follow from it being a file rather than a question asked at call time. It is dated, so
+ * an agent meeting a refusal the file did not predict knows the file is the stale half and not the
+ * gateway. And where the section on an unlisted API once only said "ask the operator", it now names
+ * the MCP tools as well: an agent holding them can register the API itself with the operator's
+ * agreement, and telling it to stop when it could have finished is advice it would be right to break.
  *
  * <p>Written here rather than in the console so there is one of it. The console offers it as a
  * download and an assistant connected over MCP fetches it with a tool, and the two must never
@@ -54,13 +61,14 @@ public final class AgentFile {
      * @param serviceName the calling service this file is written for
      * @param applicationId the id it presents
      * @param apis every API that service may already call
+     * @param asOf the day the grants below were read, which is what dates the file in the repository
      */
-    public record Target(String origin, String serviceName, String applicationId, List<Api> apis) {}
+    public record Target(String origin, String serviceName, String applicationId, List<Api> apis, LocalDate asOf) {}
 
     public static final String PLACEHOLDER_SERVICE = "your-service";
 
-    public static Target placeholder(String origin) {
-        return new Target(origin, PLACEHOLDER_SERVICE, "00000000-0000-0000-0000-000000000000", List.of());
+    public static Target placeholder(String origin, LocalDate asOf) {
+        return new Target(origin, PLACEHOLDER_SERVICE, "00000000-0000-0000-0000-000000000000", List.of(), asOf);
     }
 
     public static String render(Target target) {
@@ -72,6 +80,11 @@ public final class AgentFile {
 
                 This project calls third-party APIs through Janus, which holds each API's own secret and adds it on
                 the way out. Never hold, request, or hardcode an API secret here.
+
+                Written %8$s, and true that day. This file goes stale rather than wrong: an API listed below that is
+                refused with 403 `grant_missing` lost its grant since, and the fix is a fresh copy of this file — ask
+                the operator for one, or fetch it yourself with the `get_janus_md` MCP tool below. Do not work around
+                the refusal, and do not edit the list by hand.
 
                 ## Environment
 
@@ -159,8 +172,15 @@ public final class AgentFile {
 
                 ## If the API you need is not listed
 
-                Stop and ask the operator to register it. Do not call the API directly, and never ask anyone for its
-                key. In the Janus console at %1$s, two records are needed:
+                Stop. Do not call the API directly, and never ask anyone for its key.
+
+                If you hold Janus's own MCP tools — Janus serves one at `%1$s/mcp`, and a connected assistant has
+                `list_apis`, `create_api`, `create_grant`, `get_janus_md` and the rest — you may do it yourself once
+                the operator agrees, and no secret passes through you: they set the credential in the console. You act
+                as the account that authorised you, with its role, so an ordinary account cannot register an API.
+                Register the API, grant it to this service, then fetch this file again.
+
+                Without those tools, ask the operator. In the Janus console at %1$s, two records are needed:
 
                 1. **Connections → Register an API**: its name and base address, e.g. `https://api.spotify.com` —
                    the gateway slug is derived from the name — then how that API expects its secret (bearer, custom
@@ -174,7 +194,7 @@ public final class AgentFile {
                 that issues it: a lost key is rotated from the connection or from the service, and the previous one
                 stops working immediately, tokens included.
 
-                Then add the new slug to this file.
+                Then fetch this file again, with the new slug on it.
                 """.formatted(
                         origin,
                         target.applicationId(),
@@ -182,7 +202,8 @@ public final class AgentFile {
                         apiList(target.apis()),
                         conversionNote(target.apis()),
                         graphqlNote(target.apis()),
-                        service);
+                        service,
+                        target.asOf());
     }
 
     /**
