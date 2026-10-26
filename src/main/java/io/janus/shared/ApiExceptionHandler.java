@@ -20,6 +20,7 @@ import tools.jackson.databind.DatabindException;
 import tools.jackson.databind.exc.InvalidFormatException;
 
 import io.janus.gateway.GatewayRequestSizeFilter.PayloadTooLargeException;
+import io.janus.openbao.SecretStoreUnavailableException;
 
 /**
  * Translates failures into RFC 9457 problem responses. Client mistakes are answered precisely;
@@ -170,6 +171,20 @@ public class ApiExceptionHandler {
                 HttpStatus.CONFLICT,
                 ErrorCode.CONFLICT,
                 "The record is still referenced or conflicts with an existing record");
+    }
+
+    /**
+     * The vault was unreachable or refused Janus. Logged like an unexpected failure, because the
+     * reason is only in the message, and answered without it: the message names the store's status
+     * and nothing a caller can act on.
+     */
+    @ExceptionHandler(SecretStoreUnavailableException.class)
+    ResponseEntity<ProblemDetail> secretStoreUnavailable(SecretStoreUnavailableException ex) {
+        log.error("Secret store unavailable [correlationId={}]", CorrelationIdFilter.current(), ex);
+        return problem(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                ErrorCode.SECRET_STORE_UNAVAILABLE,
+                "The secret store is unavailable, so the request could not be completed");
     }
 
     @ExceptionHandler(Exception.class)

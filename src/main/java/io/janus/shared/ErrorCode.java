@@ -126,6 +126,12 @@ public enum ErrorCode {
     UPSTREAM_FAILED,
 
     // Janus itself.
+    /**
+     * The vault holding the secrets could not be used, so nothing that needs one was done. Its own
+     * code rather than the one below: this is an outage of a dependency, repaired by whoever runs
+     * the deployment, and retrying later is sensible.
+     */
+    SECRET_STORE_UNAVAILABLE,
     /** A failure inside Janus. Never the upstream's fault, and always logged with its stack. */
     INTERNAL_ERROR;
 

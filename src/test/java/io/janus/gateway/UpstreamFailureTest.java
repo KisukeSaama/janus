@@ -16,6 +16,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 
+import io.janus.openbao.SecretStoreUnavailableException;
 import io.janus.shared.ErrorCode;
 
 /**
@@ -59,6 +60,21 @@ class UpstreamFailureTest {
         assertThat(UpstreamFailure.of(new IllegalStateException("null somewhere in Janus")))
                 .returns(HttpStatus.INTERNAL_SERVER_ERROR, UpstreamFailure::status)
                 .returns(ErrorCode.INTERNAL_ERROR, UpstreamFailure::code);
+    }
+
+    /**
+     * The vault refusing Janus means nothing was sent upstream. Answering it as an internal error sent
+     * people looking for a defect; answering it as the provider's failure would be worse.
+     */
+    @Test
+    void reportsAnUnavailableSecretStoreAsItsOwnFailure() {
+        var failure = UpstreamFailure.of(
+                new SecretStoreUnavailableException("OpenBao rejected the credential read with status 403"));
+
+        assertThat(failure)
+                .returns(HttpStatus.SERVICE_UNAVAILABLE, UpstreamFailure::status)
+                .returns(ErrorCode.SECRET_STORE_UNAVAILABLE, UpstreamFailure::code);
+        assertThat(failure.detail()).doesNotContain("OpenBao", "403");
     }
 
     /** Nothing in the exception's own message travels back, whichever branch answers. */

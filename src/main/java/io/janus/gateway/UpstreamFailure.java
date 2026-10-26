@@ -12,6 +12,7 @@ import io.netty.handler.timeout.ReadTimeoutException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 
+import io.janus.openbao.SecretStoreUnavailableException;
 import io.janus.shared.ErrorCode;
 
 /**
@@ -43,6 +44,12 @@ record UpstreamFailure(HttpStatus status, ErrorCode code, String detail) {
         boolean transport = false;
         Throwable cause = failure;
         for (int depth = 0; cause != null && depth < MAX_DEPTH; cause = cause.getCause(), depth++) {
+            // Janus's own dependency, not the provider's: nothing was sent upstream.
+            if (cause instanceof SecretStoreUnavailableException)
+                return new UpstreamFailure(
+                        HttpStatus.SERVICE_UNAVAILABLE,
+                        ErrorCode.SECRET_STORE_UNAVAILABLE,
+                        "The secret store is unavailable, so nothing was sent to the provider");
             if (cause instanceof ReadTimeoutException
                     || cause instanceof ConnectTimeoutException
                     || cause instanceof TimeoutException)
