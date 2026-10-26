@@ -16,6 +16,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.*;
 
 import io.janus.gateway.GatewayRequestSizeFilter.PayloadTooLargeException;
+import io.janus.openbao.SecretStoreUnavailableException;
 
 /**
  * How failures leave the building.
@@ -67,6 +68,11 @@ class ApiExceptionHandlerTest {
         @GetMapping("/too-large")
         String tooLarge() {
             throw new PayloadTooLargeException("body too large");
+        }
+
+        @GetMapping("/vault-down")
+        String vaultDown() {
+            throw new SecretStoreUnavailableException("OpenBao refused to store the secret (status 403)");
         }
 
         @GetMapping("/broken")
@@ -183,6 +189,26 @@ class ApiExceptionHandlerTest {
                         .value("The record is still referenced or conflicts with an existing record"))
                 .andExpect(
                         content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("uq_thing"))));
+    }
+
+    // --- a dependency that is down --------------------------------------------
+
+    /**
+     * The vault being down is an outage, not a defect: its own code and a 503 so a client can tell it
+     * apart and retry, the correlation identifier so it can be found in the log, and nothing of the
+     * store's own message.
+     */
+    @Test
+    void reportsAnUnavailableSecretStoreByItsOwnCode() throws Exception {
+        mvc.perform(get("/things/vault-down"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string(ApiProblem.HEADER, "secret_store_unavailable"))
+                .andExpect(jsonPath("$.code").value("secret_store_unavailable"))
+                .andExpect(jsonPath("$.correlationId").isNotEmpty())
+                .andExpect(jsonPath("$.detail")
+                        .value("The secret store is unavailable, so the request could not be completed"))
+                .andExpect(
+                        content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("OpenBao"))));
     }
 
     // --- everything else ------------------------------------------------------

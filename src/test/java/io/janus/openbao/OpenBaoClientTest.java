@@ -208,7 +208,29 @@ class OpenBaoClientTest {
     void reportsAnUnreachableStoreAsSuch() {
         server.stop(0);
 
-        assertThatThrownBy(() -> client().read("janus/spotify/key")).hasMessage("OpenBao is unreachable");
+        assertThatThrownBy(() -> client().read("janus/spotify/key"))
+                .isInstanceOf(SecretStoreUnavailableException.class)
+                .hasMessage("OpenBao is unreachable");
+        assertThatThrownBy(() -> client().write("janus/spotify/key", "value"))
+                .isInstanceOf(SecretStoreUnavailableException.class)
+                .hasMessage("OpenBao is unreachable");
+    }
+
+    /**
+     * An expired or revoked token is answered 403 on every path. That is the vault being unusable, not
+     * Janus being broken, and it has to reach the caller as such rather than as an internal error.
+     */
+    @Test
+    void reportsARefusedTokenAsAnUnavailableStore() {
+        willAnswer(403, "{\"errors\":[\"permission denied\"]}");
+
+        assertThatThrownBy(() -> client().read("janus/spotify/key"))
+                .isInstanceOf(SecretStoreUnavailableException.class);
+        assertThatThrownBy(() -> client().write("janus/spotify/key", "value"))
+                .isInstanceOf(SecretStoreUnavailableException.class)
+                .hasMessage("OpenBao refused to store the secret (status 403)");
+        assertThatThrownBy(() -> client().delete("janus/spotify/key"))
+                .isInstanceOf(SecretStoreUnavailableException.class);
     }
 
     // --- writing and deleting -----------------------------------------------
@@ -251,6 +273,29 @@ class OpenBaoClientTest {
                 .hasMessageContaining("store")
                 .hasMessageContaining("status 500")
                 .hasMessageNotContaining("/var/lib/openbao");
+    }
+
+    // --- the token ----------------------------------------------------------
+
+    /** Renewal is the token renewing itself: no accessor, no path, nothing but its own header. */
+    @Test
+    void renewsItsOwnToken() {
+        willAnswer(200, "{\"auth\":{\"lease_duration\":2764800}}");
+
+        client().renewToken();
+
+        assertThat(onlyRequest().getRequestMethod()).isEqualTo("POST");
+        assertThat(onlyRequest().getRequestURI().getPath()).isEqualTo("/v1/auth/token/renew-self");
+        assertThat(onlyRequest().getRequestHeaders().getFirst("X-Vault-Token")).isEqualTo("root-token");
+    }
+
+    @Test
+    void reportsATokenThatCanNoLongerBeRenewed() {
+        willAnswer(403, "{\"errors\":[\"permission denied\"]}");
+
+        assertThatThrownBy(() -> client().renewToken())
+                .isInstanceOf(SecretStoreUnavailableException.class)
+                .hasMessage("OpenBao refused to renew its token (status 403)");
     }
 
     // --- what may be addressed ----------------------------------------------

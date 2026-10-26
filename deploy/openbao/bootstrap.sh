@@ -59,6 +59,12 @@ path "secret/metadata/janus/*" {
 }
 POLICY
 
+# A token's period is silently capped at its mount's max TTL, 768h unless told otherwise, so
+# without this the period below was 32 days rather than a year: a deployment left alone for a
+# month lost its token and answered 403 to every secret. Raised before the token is created,
+# since a period is fixed at creation and renewal never extends it.
+bao auth tune -max-lease-ttl=8760h token/ >/dev/null
+
 # The token id is pinned to the deployed secret instead of generated, so the vault follows
 # the CI variable rather than the other way round: rotating the variable and redeploying
 # is enough. Periodic tokens never expire on their own as long as something renews them,
@@ -67,7 +73,14 @@ if BAO_TOKEN="$janus_token" bao token lookup >/dev/null 2>&1; then
   BAO_TOKEN="$janus_token" bao token renew >/dev/null
 else
   echo "Creating the application token."
-  bao token create -id="$janus_token" -policy=janus -orphan -period=8760h >/dev/null
+  # Not silenced: a warning here, such as the period being capped, is the only sign the token
+  # will not live as long as asked. -field would hide warnings, so the table is printed with the
+  # token and its accessor removed, since this output ends up in the deploy job's log.
+  if ! created=$(bao token create -id="$janus_token" -policy=janus -orphan -period=8760h 2>&1); then
+    printf '%s\n' "$created" | grep -Ev '^token(_accessor)?[[:space:]]' >&2
+    exit 1
+  fi
+  printf '%s\n' "$created" | grep -Ev '^token(_accessor)?[[:space:]]'
 fi
 
 echo "OpenBao is ready."

@@ -71,7 +71,7 @@ public class OpenBaoClient {
                         .uri("/v1/{mount}/data/{path}", properties.kvMount(), safe(path))
                         .contentType(MediaType.APPLICATION_JSON)
                         .bodyValue(Map.of("data", Map.of("value", value))),
-                "store");
+                "store the secret");
     }
 
     @SuppressWarnings("unchecked")
@@ -85,10 +85,10 @@ public class OpenBaoClient {
                     .bodyToMono(Map.class)
                     .block();
         } catch (WebClientResponseException ex) {
-            throw new IllegalStateException("OpenBao rejected the credential read with status "
+            throw new SecretStoreUnavailableException("OpenBao rejected the credential read with status "
                     + ex.getStatusCode().value());
         } catch (WebClientException ex) {
-            throw new IllegalStateException("OpenBao is unreachable");
+            throw new SecretStoreUnavailableException("OpenBao is unreachable");
         }
         if (response == null) throw new IllegalStateException("OpenBao returned an empty response");
         var outer = (Map<String, Object>) response.get("data");
@@ -101,7 +101,22 @@ public class OpenBaoClient {
 
     public void delete(String path) {
         requireConfigured();
-        exchange(client.delete().uri("/v1/{mount}/metadata/{path}", properties.kvMount(), safe(path)), "delete");
+        exchange(
+                client.delete().uri("/v1/{mount}/metadata/{path}", properties.kvMount(), safe(path)),
+                "delete the secret");
+    }
+
+    /**
+     * Extends the application token by its own period.
+     *
+     * <p>The token is periodic: it lives as long as something renews it within each period. The
+     * deploy's bootstrap renews it, but a deployment left alone for longer than one period would
+     * otherwise lose its vault silently, every read and write answered 403 from then on. Renewing
+     * from here ties the token's life to the process that uses it.
+     */
+    public void renewToken() {
+        requireConfigured();
+        exchange(client.post().uri("/v1/auth/token/renew-self"), "renew its token");
     }
 
     private void exchange(WebClient.RequestHeadersSpec<?> spec, String operation) {
@@ -109,10 +124,10 @@ public class OpenBaoClient {
             spec.retrieve().toBodilessEntity().block();
         } catch (WebClientResponseException ex) {
             // The response body can echo request content, so only the status is surfaced.
-            throw new IllegalStateException("OpenBao refused to " + operation + " the secret (status "
+            throw new SecretStoreUnavailableException("OpenBao refused to " + operation + " (status "
                     + ex.getStatusCode().value() + ")");
         } catch (WebClientException ex) {
-            throw new IllegalStateException("OpenBao is unreachable");
+            throw new SecretStoreUnavailableException("OpenBao is unreachable");
         }
     }
 
@@ -124,6 +139,6 @@ public class OpenBaoClient {
 
     private void requireConfigured() {
         if (properties.token() == null || properties.token().isBlank())
-            throw new IllegalStateException("OpenBao token is not configured");
+            throw new SecretStoreUnavailableException("OpenBao token is not configured");
     }
 }
